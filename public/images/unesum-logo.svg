@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Círculo exterior -->
+  <circle cx="100" cy="100" r="95" fill="#00563F" stroke="#FFD700" stroke-width="3"/>
+  
+  <!-- Círculo interior -->
+  <circle cx="100" cy="100" r="85" fill="none" stroke="#FFD700" stroke-width="2"/>
+  
+  <!-- Libro abierto -->
+  <g id="libro">
+    <path d="M 60 90 L 60 130 L 100 135 L 140 130 L 140 90 L 100 85 Z" fill="#FFFFFF"/>
+    <path d="M 100 85 L 100 135" stroke="#00563F" stroke-width="2"/>
+    <path d="M 60 90 L 100 85 L 140 90" fill="none" stroke="#00563F" stroke-width="2"/>
+    <!-- Líneas del libro -->
+    <line x1="70" y1="100" x2="95" y2="98" stroke="#00563F" stroke-width="1"/>
+    <line x1="70" y1="110" x2="95" y2="108" stroke="#00563F" stroke-width="1"/>
+    <line x1="70" y1="120" x2="95" y2="118" stroke="#00563F" stroke-width="1"/>
+    <line x1="105" y1="98" x2="130" y2="100" stroke="#00563F" stroke-width="1"/>
+    <line x1="105" y1="108" x2="130" y2="110" stroke="#00563F" stroke-width="1"/>
+    <line x1="105" y1="118" x2="130" y2="120" stroke="#00563F" stroke-width="1"/>
+  </g>
+  
+  <!-- Estrella superior -->
+  <polygon points="100,40 105,55 120,55 108,65 113,80 100,70 87,80 92,65 80,55 95,55" fill="#FFD700"/>
+  
+  <!-- Texto UNESUM -->
+  <text x="100" y="165" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#FFFFFF" text-anchor="middle">UNESUM</text>
+  
+  <!-- Texto Universidad -->
+  <text x="100" y="180" font-family="Arial, sans-serif" font-size="10" fill="#FFD700" text-anchor="middle">UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ</text>
+</svg>
