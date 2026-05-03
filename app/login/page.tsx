@@ -1,200 +1,287 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import Image from "next/image"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/contexts/auth-context"
 import { MainHeader } from "@/components/layout/main-header"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Eye, EyeOff, Shield, GraduationCap, BookOpen, Users } from "lucide-react"
+import {
+  Eye, EyeOff, Shield, GraduationCap, BookOpen, Users, Building2,
+  User, ChevronRight, Loader2, ArrowLeft,
+} from "lucide-react"
 
 interface RoleOption {
-  rol: string;
-  nombre: string;
-  descripcion: string;
+  rol: string
+  nombre: string
+  descripcion: string
+  rolNombre?: string
+}
+
+// Configuración visual de cada rol
+const ROL_CONFIG: Record<string, {
+  icono: React.ElementType
+  color: string
+  bg: string
+  border: string
+  etiqueta: string
+  destino: string
+}> = {
+  administrador:    { icono: Shield,       color: "text-red-700",     bg: "bg-red-100",     border: "border-red-300",    etiqueta: "Administrador",      destino: "/dashboard/admin" },
+  comision_academica:{ icono: Users,       color: "text-blue-700",    bg: "bg-blue-100",    border: "border-blue-300",   etiqueta: "Comisión Académica",  destino: "/dashboard/comision" },
+  comision:         { icono: Users,        color: "text-blue-700",    bg: "bg-blue-100",    border: "border-blue-300",   etiqueta: "Comisión",           destino: "/dashboard/comision" },
+  direccion:        { icono: Building2,    color: "text-indigo-700",  bg: "bg-indigo-100",  border: "border-indigo-300", etiqueta: "Dirección",          destino: "/dashboard/direccion" },
+  decano:           { icono: Building2,    color: "text-purple-700",  bg: "bg-purple-100",  border: "border-purple-300", etiqueta: "Decano",             destino: "/dashboard/decano" },
+  subdecano:        { icono: Building2,    color: "text-violet-700",  bg: "bg-violet-100",  border: "border-violet-300", etiqueta: "Sub Decano",         destino: "/dashboard/subdecano" },
+  docente:          { icono: GraduationCap,color: "text-emerald-700", bg: "bg-emerald-100", border: "border-emerald-300",etiqueta: "Docente",            destino: "/dashboard/docente" },
+  profesor:         { icono: GraduationCap,color: "text-emerald-700", bg: "bg-emerald-100", border: "border-emerald-300",etiqueta: "Profesor/Docente",   destino: "/dashboard/docente" },
+  estudiante:       { icono: BookOpen,     color: "text-cyan-700",    bg: "bg-cyan-100",    border: "border-cyan-300",   etiqueta: "Estudiante",         destino: "/dashboard/estudiante" },
+}
+
+const defaultConfig = {
+  icono: User, color: "text-gray-700", bg: "bg-gray-100", border: "border-gray-300",
+  etiqueta: "Usuario", destino: "/dashboard",
 }
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
+  const [email, setEmail]               = useState("")
+  const [password, setPassword]         = useState("")
   const [showPassword, setShowPassword] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [isLoading, setIsLoading]       = useState(false)
+  const [loadingRol, setLoadingRol]     = useState<string | null>(null)
+  const [error, setError]               = useState("")
   const [showRoleSelector, setShowRoleSelector] = useState(false)
-  const [availableRoles, setAvailableRoles] = useState<RoleOption[]>([])
+  const [availableRoles, setAvailableRoles]     = useState<RoleOption[]>([])
+  const [userName, setUserName]         = useState("")
 
   const { login } = useAuth()
-  const router = useRouter()
+  const router    = useRouter()
 
-  const roleIcons: Record<string, any> = {
-    'administrador': Shield,
-    'comision_academica': Users,
-    'comision': Users,
-    'profesor': GraduationCap,
-    'docente': GraduationCap,
-  }
-
-  const roleColors: Record<string, string> = {
-    'administrador': 'bg-red-500',
-    'comision_academica': 'bg-blue-500',
-    'comision': 'bg-blue-500',
-    'profesor': 'bg-emerald-500',
-    'docente': 'bg-emerald-500',
-  }
-
-const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError("");
-  
+  // ── Enviar credenciales ──────────────────────────────────────────
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+    setError("")
     try {
-      const result = await login(email, password);
-      
-      if (result === 'multiple_roles') {
-        // El backend indicó múltiples roles — mostrar selector
-        const rolesData = JSON.parse(localStorage.getItem('pending_roles') || '[]');
-        setAvailableRoles(rolesData);
-        setShowRoleSelector(true);
-        setIsLoading(false);
-        return;
-      }
-      
-      if (result === true || result === 'success') {
-        redirectByRole();
-      } else {
-        setError("Credenciales inválidas. Verifica tu email y contraseña.");
-        setIsLoading(false);
-      }
-    } catch (error) {
-      console.error('Error en handleSubmit:', error);
-      setError("Error al iniciar sesión. Intente nuevamente.");
-      setIsLoading(false);
-    }
-  };
+      const result = await login(email, password)
 
+      if (result === "multiple_roles") {
+        const rolesData: RoleOption[] = JSON.parse(localStorage.getItem("pending_roles") || "[]")
+        setAvailableRoles(rolesData)
+        setUserName(rolesData[0]?.nombre || "")
+        setShowRoleSelector(true)
+        setIsLoading(false)
+        return
+      }
+
+      if (result === true || result === "success") {
+        redirectByRole()
+      } else {
+        setError("Credenciales inválidas. Verifica tu correo y contraseña.")
+        setIsLoading(false)
+      }
+    } catch {
+      setError("Error al iniciar sesión. Intenta nuevamente.")
+      setIsLoading(false)
+    }
+  }
+
+  // ── Seleccionar rol y entrar ────────────────────────────────────
   const handleRoleSelect = async (selectedRole: string) => {
-    setIsLoading(true);
-    setError("");
+    setLoadingRol(selectedRole)
+    setError("")
     try {
-      const result = await login(email, password, selectedRole);
-      if (result === true || result === 'success') {
-        redirectByRole();
+      const result = await login(email, password, selectedRole)
+      if (result === true || result === "success") {
+        // Redirigir directamente al destino del rol seleccionado
+        const destino = ROL_CONFIG[selectedRole]?.destino || "/dashboard"
+        router.push(destino)
       } else {
-        setError("Error al seleccionar rol. Intente nuevamente.");
-        setIsLoading(false);
+        setError("Error al ingresar con ese rol. Intenta nuevamente.")
+        setLoadingRol(null)
       }
-    } catch (error) {
-      console.error('Error al seleccionar rol:', error);
-      setError("Error al iniciar sesión con el rol seleccionado.");
-      setIsLoading(false);
+    } catch {
+      setError("Error de conexión. Intenta nuevamente.")
+      setLoadingRol(null)
     }
-  };
+  }
 
   const redirectByRole = () => {
-    const userData = JSON.parse(localStorage.getItem('user_data') || '{}');
-    
-    console.log('DEBUG - Usuario después del login:', userData);
-    console.log('DEBUG - Rol detectado:', userData.rol);
-
-    if (userData.rol === 'administrador') {
-      router.push('/dashboard/admin');
-    } else if (userData.rol === 'profesor' || userData.rol === 'docente') {
-      router.push('/dashboard/docente');
-    } else if (userData.rol === 'comision' || userData.rol === 'comision_academica') {
-      router.push('/dashboard/comision');
-    } else {
-      setError("Rol de usuario no reconocido. Contacte al soporte.");
-      setIsLoading(false);
-    }
-  };
-  const demoUsers = [
-    { email: "admin@unesum.edu.ec", password: "admin123", role: "Administrador" },
-    { email: "docente@unesum.edu.ec", password: "docente123", role: "Docente" },
-  { email: "decano@unesum.edu.ec", password: "decano123", role: "Decano" },
-  { email: "comision@unesum.edu.ec", password: "comision123", role: "Comisión Académica" },
-  ]
-
-  // --- SELECTOR DE ROL ---
-  if (showRoleSelector && availableRoles.length > 0) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-green-100">
-        <MainHeader />
-        <main className="flex items-center justify-center px-6 py-20">
-          <Card className="w-full max-w-lg">
-            <CardHeader className="text-center">
-              <CardTitle className="text-2xl font-bold text-emerald-700">Seleccionar Rol</CardTitle>
-              <CardDescription>
-                Tu cuenta tiene múltiples roles. Selecciona con cuál deseas ingresar.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {availableRoles.map((role, index) => {
-                const IconComponent = roleIcons[role.rol] || BookOpen;
-                const bgColor = roleColors[role.rol] || 'bg-gray-500';
-                return (
-                  <button
-                    key={index}
-                    onClick={() => handleRoleSelect(role.rol)}
-                    disabled={isLoading}
-                    className="w-full flex items-center gap-4 p-4 border-2 rounded-xl hover:border-emerald-500 hover:bg-emerald-50 transition-all duration-200 text-left disabled:opacity-50"
-                  >
-                    <div className={`p-3 rounded-lg ${bgColor} text-white`}>
-                      <IconComponent className="h-6 w-6" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900">{role.descripcion}</h3>
-                      <p className="text-sm text-gray-500">Rol: {role.rol}</p>
-                    </div>
-                    <div className="text-emerald-600 font-medium text-sm">
-                      Ingresar →
-                    </div>
-                  </button>
-                );
-              })}
-              
-              {error && (
-                <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-
-              <Button
-                variant="outline"
-                className="w-full mt-4"
-                onClick={() => {
-                  setShowRoleSelector(false);
-                  setAvailableRoles([]);
-                  setError("");
-                }}
-              >
-                ← Volver al login
-              </Button>
-            </CardContent>
-          </Card>
-        </main>
-      </div>
-    );
+    const userData = JSON.parse(localStorage.getItem("user_data") || "{}")
+    const destino = ROL_CONFIG[userData.rol]?.destino || "/dashboard"
+    router.push(destino)
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // PANTALLA DE SELECCIÓN DE ROL
+  // ══════════════════════════════════════════════════════════════════
+  if (showRoleSelector) {
+    return (
+      <div className="relative min-h-screen overflow-hidden">
+        <div className="fixed inset-0 z-0">
+          <Image
+            src="/images/campus-aerial-unesum.png"
+            alt="Campus UNESUM"
+            fill
+            priority
+            className="object-cover object-[center_30%]"
+            sizes="100vw"
+          />
+          <div
+            className="absolute inset-0 bg-gradient-to-br from-emerald-900/55 via-teal-900/40 to-emerald-950/60"
+            aria-hidden
+          />
+        </div>
+
+        <div className="relative z-20">
+          <MainHeader />
+        </div>
+        <main className="relative z-10 flex min-h-[calc(100dvh-4.25rem)] items-center justify-center px-4 py-10">
+          <div className="w-full max-w-md rounded-2xl border border-white/25 bg-white/95 p-8 shadow-2xl backdrop-blur-md">
+
+            {/* Bienvenida */}
+            <div className="text-center mb-6">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-300 mb-4">
+                <User className="h-8 w-8 text-emerald-700" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-900">
+                ¡Bienvenido{userName ? `, ${userName.split(" ")[0]}` : ""}!
+              </h2>
+              <p className="text-gray-500 mt-1 text-sm">
+                {availableRoles.length === 1
+                  ? "Confirma con qué rol deseas ingresar al sistema."
+                  : `Tu cuenta tiene ${availableRoles.length} roles. Selecciona con cuál deseas ingresar.`}
+              </p>
+            </div>
+
+            {/* Tarjetas de rol */}
+            <div className="space-y-3">
+              {availableRoles.map((role) => {
+                const cfg = ROL_CONFIG[role.rol] || defaultConfig
+                const IconComponent = cfg.icono
+                const isThisLoading = loadingRol === role.rol
+                const anyLoading    = loadingRol !== null
+
+                return (
+                  <button
+                    key={role.rol}
+                    onClick={() => handleRoleSelect(role.rol)}
+                    disabled={anyLoading}
+                    className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all duration-200 text-left
+                      ${anyLoading ? "opacity-60 cursor-not-allowed" : "hover:shadow-md hover:scale-[1.01] cursor-pointer"}
+                      ${isThisLoading ? `${cfg.bg} ${cfg.border}` : "bg-white border-gray-200 hover:border-emerald-400"}`}
+                  >
+                    <div className={`flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center ${cfg.bg}`}>
+                      {isThisLoading
+                        ? <Loader2 className={`h-6 w-6 animate-spin ${cfg.color}`} />
+                        : <IconComponent className={`h-6 w-6 ${cfg.color}`} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-gray-900 text-base">
+                        {role.rolNombre || cfg.etiqueta}
+                      </p>
+                      <p className="text-sm text-gray-500 truncate">
+                        {cfg.destino.replace("/dashboard/", "Panel de ").replace("/dashboard", "Panel principal")}
+                        {" — "}
+                        <span className="text-xs text-gray-400">{role.descripcion}</span>
+                      </p>
+                    </div>
+                    {!anyLoading && (
+                      <ChevronRight className="flex-shrink-0 h-5 w-5 text-gray-400" />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+
+            {error && (
+              <Alert variant="destructive" className="mt-4">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            <Button
+              variant="ghost"
+              className="w-full mt-5 text-gray-500 hover:text-gray-700"
+              onClick={() => {
+                setShowRoleSelector(false)
+                setAvailableRoles([])
+                setLoadingRol(null)
+                setError("")
+              }}
+              disabled={loadingRol !== null}
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Volver e ingresar con otra cuenta
+            </Button>
+          </div>
+        </main>
+      </div>
+    )
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // FORMULARIO DE LOGIN
+  // ══════════════════════════════════════════════════════════════════
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-green-100">
       <MainHeader />
+      <main className="flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-5xl grid md:grid-cols-2 gap-0 shadow-2xl rounded-2xl overflow-hidden">
 
-      <main className="flex items-center justify-center px-6 py-20">
-        <div className="w-full max-w-4xl grid md:grid-cols-2 gap-8">
-          {/* Login Form */}
-          <Card>
-            <CardHeader className="text-center">
-              <CardTitle className="text-2xl font-bold text-emerald-700">Iniciar Sesión</CardTitle>
-              <CardDescription>Accede al sistema de gestión académica</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
+          {/* ── Lado izquierdo: imagen campus con escudo ── */}
+          <div className="hidden md:flex relative overflow-hidden min-h-[520px]">
+            {/* Imagen campus+escudo de fondo */}
+            <Image
+              src="/images/campus-escudo-unesum.png"
+              alt="Campus UNESUM"
+              fill
+              className="object-cover object-center"
+              priority
+            />
+            {/* Overlay muy suave solo en la parte inferior para el texto */}
+            <div className="absolute inset-0 bg-gradient-to-t from-emerald-900/70 via-transparent to-transparent" />
+
+            {/* Texto en la parte inferior */}
+            <div className="absolute bottom-0 left-0 right-0 p-8 z-10">
+              
+              <p className="text-lg font-black text-white drop-shadow-lg mb-4 tracking-wide uppercase">
+                Sistema de{" "}
+                <span className="text-emerald-300 drop-shadow-lg">Gestión Académica</span>
+              </p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {[
+                  "Mallas Curriculares",
+                  "Syllabus Docente",
+                  "Gestión de Firmas",
+                  "Control de Roles",
+                  "Programas Analíticos",
+                ].map((tag) => (
+                  <span key={tag} className="text-[11px] bg-green-700/15 border border-white/25 text-white/90 px-2.5 py-1 rounded-full backdrop-blur-sm font-medium">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              <p className="text-xs text-emerald-300/80">© {new Date().getFullYear()} UNESUM — Todos los derechos reservados</p>
+            </div>
+          </div>
+
+          {/* ── Lado derecho: formulario ── */}
+          <div className="bg-white flex items-center justify-center p-10">
+            <div className="w-full max-w-sm">
+              <div className="text-center mb-8">
+                <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-emerald-100 mb-4">
+                  <Shield className="h-7 w-7 text-emerald-700" />
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900">Iniciar Sesión</h2>
+                <p className="text-sm text-gray-500 mt-1">Accede con tu cuenta institucional</p>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="space-y-2">
                   <Label htmlFor="email">Correo Electrónico</Label>
                   <Input
@@ -202,11 +289,12 @@ const handleSubmit = async (e: React.FormEvent) => {
                     type="email"
                     placeholder="usuario@unesum.edu.ec"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={e => setEmail(e.target.value)}
                     required
+                    autoComplete="email"
+                    className="h-11"
                   />
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="password">Contraseña</Label>
                   <div className="relative">
@@ -214,15 +302,17 @@ const handleSubmit = async (e: React.FormEvent) => {
                       id="password"
                       type={showPassword ? "text" : "password"}
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={e => setPassword(e.target.value)}
                       required
+                      autoComplete="current-password"
+                      className="h-11 pr-10"
                     />
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                      onClick={() => setShowPassword(p => !p)}
                     >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </Button>
@@ -235,47 +325,31 @@ const handleSubmit = async (e: React.FormEvent) => {
                   </Alert>
                 )}
 
-                <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={isLoading}>
-                  {isLoading ? "Iniciando sesión..." : "Iniciar Sesión"}
+                <Button
+                  type="submit"
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white h-11 text-base font-semibold"
+                  disabled={isLoading}
+                >
+                  {isLoading
+                    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Verificando...</>
+                    : "Ingresar →"}
                 </Button>
               </form>
-            </CardContent>
-          </Card>
 
-          {/* Demo Users */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Usuarios de Demostración</CardTitle>
-              <CardDescription>Utiliza estas credenciales para probar el sistema</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {demoUsers.map((user, index) => (
-                <div key={index} className="p-4 border rounded-lg bg-gray-50">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="font-semibold text-emerald-700">{user.role}</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setEmail(user.email)
-                        setPassword(user.password)
-                      }}
-                    >
-                      Usar
-                    </Button>
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    <p>
-                      <strong>Email:</strong> {user.email}
-                    </p>
-                    <p>
-                      <strong>Contraseña:</strong> {user.password}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+              {/* Indicador de pasos */}
+              <div className="mt-7 flex items-center justify-center gap-2 text-xs text-gray-400">
+                <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-semibold">1</span>
+                <span>Credenciales</span>
+                <ChevronRight className="h-3 w-3" />
+                <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center font-semibold">2</span>
+                <span>Seleccionar rol</span>
+                <ChevronRight className="h-3 w-3" />
+                <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center font-semibold">3</span>
+                <span>Panel</span>
+              </div>
+            </div>
+          </div>
+
         </div>
       </main>
     </div>

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react" // <--- AÑADIDO: useCallback
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import * as XLSX from "xlsx"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/contexts/auth-context"
 import MallaModal from "@/components/malla/malla-modal"
 
-type Section = "basica" | "asignatura" | "horas" | "unidades"
+type Section = "basica" | "asignatura" | "unidades"
 
 function useToast() {
   return {
@@ -26,7 +27,7 @@ function useToast() {
 // --- INTERFACES (SIN CAMBIOS) ---
 interface Facultad { id: number; nombre: string; }
 interface Carrera { id: number; nombre: string; facultad_id: number; }
-interface Nivel { id: number; nombre: string; codigo: string; }
+interface Nivel { id: number; nombre: string; codigo: string; ordinal?: string; }
 interface Organizacion { id: number; nombre: string; }
 interface UnidadData { unidad: string; descripcion: string; resultados: string; }
 interface HorasData { horasDocencia: number; horasPractica: number; horasAutonoma: number; horasVinculacion: number; horasPracticaPreprofesional: number; }
@@ -37,8 +38,8 @@ interface AsignaturaCompleta {
     carrera_id: number;
     nivel_id: number;
     organizacion_id: number;
-    prerrequisito_codigo: string | null;
-    correquisito_codigo: string | null;
+    prerrequisitos_codigos: string[];
+    correquisitos_codigos: string[];
     unidades: UnidadData[];
     horas: HorasData;
     carrera: { facultad_id: number; };
@@ -71,12 +72,25 @@ export default function RegistroAsignaturaPage() {
   const [asignaturasNivelActual, setAsignaturasNivelActual] = useState<AsignaturaCompleta[]>([]);
   const [codigoError, setCodigoError] = useState<string>("");
   const [descripcionError, setDescripcionError] = useState<string>("");
+  const [codigoBloqueado, setCodigoBloqueado] = useState(false);
+  const [asignaturaSeleccionadaId, setAsignaturaSeleccionadaId] = useState<string>("NUEVA");
 
   // --- ESTADOS DE MALLA ---
   const [showMallaModal, setShowMallaModal] = useState(true);
   const [codigoMallaActual, setCodigoMallaActual] = useState("");
   const [mallaSeleccionada, setMallaSeleccionada] = useState(false);
+
+  // --- ESTADO MODAL CARGA MASIVA ---
+  const [showCargaMasivaModal, setShowCargaMasivaModal] = useState(false);
+  const [cargaMasivaFile, setCargaMasivaFile] = useState<File | null>(null);
+  const [cargaMasivaPreview, setCargaMasivaPreview] = useState<any[]>([]);
+  const [cargaMasivaError, setCargaMasivaError] = useState("");
+  const [isCargando, setIsCargando] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [todasAsignaturasMalla, setTodasAsignaturasMalla] = useState<(AsignaturaCompleta & { nivelNombre?: string })[]>([]);
+  const [cargandoMalla, setCargandoMalla] = useState(false);
   const [registroCompletado, setRegistroCompletado] = useState(false);
+  const [isPersonalizada, setIsPersonalizada] = useState(false);
 
   // --- ESTADOS DEL FORMULARIO (SIN CAMBIOS) ---
   const [facultad, setFacultad] = useState("")
@@ -95,13 +109,8 @@ export default function RegistroAsignaturaPage() {
     if (descripcionError) setDescripcionError(""); // Limpiar el error cuando el usuario cambia la asignatura
   };
   const [descripcion, setDescripcion] = useState("")
-  const [adscrCedDE, setAdscrCedDE] = useState("")
-  const [adscrCedCODE, setAdscrCedCODE] = useState("")
-  const [horasDocencia, setHorasDocencia] = useState("")
-  const [horasPractica, setHorasPractica] = useState("")
-  const [horasAutonoma, setHorasAutonoma] = useState("")
-  const [horasVinculacion, setHorasVinculacion] = useState("")
-  const [horasPracticaPreprofesional, setHorasPracticaPreprofesional] = useState("")
+  const [prerequisitos, setPrerequisitos] = useState<string[]>([])
+  const [correquisitos, setCorrequisitos] = useState<string[]>([])
   const [unidades, setUnidades] = useState([{ unidad: "", descripcion: "", resultados: "" }])
   
 
@@ -177,23 +186,31 @@ export default function RegistroAsignaturaPage() {
         }
         setLoadingAsignaturas(true);
         try {
+            // Asignaturas del nivel actual (para correquisitos)
             const response = await apiRequest(`/asignaturas?nivel_id=${nivel}&carrera_id=${carrera}`);
             if (response && response.data) {
                 setAsignaturasDelNivel(response.data);
-                setAsignaturasNivelActual(response.data.slice(1)); // A partir de la segunda línea
+                setAsignaturasNivelActual(response.data); // todas las del nivel actual
             }
 
-            // Cargar asignaturas del nivel anterior
+            // Cargar asignaturas de TODOS los niveles anteriores (para prerrequisitos)
             const nivelActual = niveles.find(n => n.id.toString() === nivel);
             if (nivelActual) {
-                const nivelAnteriorNum = parseInt(nivelActual.codigo) - 1;
-                const nivelAnterior = niveles.find(n => parseInt(n.codigo) === nivelAnteriorNum);
+                const codigoActual = parseInt(nivelActual.codigo);
+                // Buscar todos los niveles con código menor al actual
+                const nivelesAnteriores = niveles.filter(n => parseInt(n.codigo) < codigoActual);
                 
-                if (nivelAnterior) {
-                    const respuestaNivelAnterior = await apiRequest(`/asignaturas?nivel_id=${nivelAnterior.id}&carrera_id=${carrera}`);
-                    if (respuestaNivelAnterior && respuestaNivelAnterior.data) {
-                        setAsignaturasNivelAnterior(respuestaNivelAnterior.data.slice(1)); // A partir de la segunda línea
-                    }
+                if (nivelesAnteriores.length > 0) {
+                    const promesas = nivelesAnteriores.map(n =>
+                        apiRequest(`/asignaturas?nivel_id=${n.id}&carrera_id=${carrera}`)
+                    );
+                    const resultados = await Promise.all(promesas);
+                    const todasAnteriores: AsignaturaCompleta[] = resultados
+                        .filter(r => r && r.data)
+                        .flatMap(r => r.data);
+                    setAsignaturasNivelAnterior(todasAnteriores);
+                } else {
+                    setAsignaturasNivelAnterior([]);
                 }
             }
         } catch (error) {
@@ -201,7 +218,6 @@ export default function RegistroAsignaturaPage() {
             setAsignaturasDelNivel([]);
             setAsignaturasNivelAnterior([]);
             setAsignaturasNivelActual([]);
-            // No mostrar toast aquí ya que es una carga en segundo plano
         } finally {
             setLoadingAsignaturas(false);
         }
@@ -253,20 +269,14 @@ export default function RegistroAsignaturaPage() {
   };
 
   const resetForm = () => {
-      // Restablecer TODOS los campos del formulario al estado inicial
       setFacultad("");
       setCarrera("");
       setNivel("");
       setOrganizacion("");
       setCodigo("");
       setDescripcion("");
-      setAdscrCedDE("");
-      setAdscrCedCODE("");
-      setHorasDocencia("");
-      setHorasPractica("");
-      setHorasAutonoma("");
-      setHorasVinculacion("");
-      setHorasPracticaPreprofesional("");
+      setPrerequisitos([]);
+      setCorrequisitos([]);
       setUnidades([{ unidad: "", descripcion: "", resultados: "" }]);
       setCompletedSections([]);
       setCurrentSection("basica");
@@ -277,8 +287,9 @@ export default function RegistroAsignaturaPage() {
       setAsignaturasNivelAnterior([]);
       setAsignaturasNivelActual([]);
       setRegistroCompletado(false);
-      
-      // Restablecer el modal de malla al estado inicial
+      setIsPersonalizada(false);
+      setCodigoBloqueado(false);
+      setAsignaturaSeleccionadaId("NUEVA");
       setCodigoMallaActual("");
       setMallaSeleccionada(false);
       setShowMallaModal(true);
@@ -295,20 +306,17 @@ export default function RegistroAsignaturaPage() {
     
     setCodigo("");
     setDescripcion("");
-    setAdscrCedDE("");
-    setAdscrCedCODE("");
+    setPrerequisitos([]);
+    setCorrequisitos([]);
     setOrganizacion("");
-    setHorasDocencia("");
-    setHorasPractica("");
-    setHorasAutonoma("");
-    setHorasVinculacion("");
-    setHorasPracticaPreprofesional("");
     setUnidades([{ unidad: "", descripcion: "", resultados: "" }]);
     setCompletedSections(["basica"]); // Mantener la sección básica completa
     setCurrentSection("asignatura");
     setEditingAsignaturaId(null);
     setNewAsignaturaId(null);  // IMPORTANTE: Limpiar el ID de la asignatura guardada
     setRegistroCompletado(false);
+    setCodigoBloqueado(false);
+    setAsignaturaSeleccionadaId("NUEVA");
     
     // Restaurar los valores que queremos mantener
     setFacultad(facultadActual);
@@ -333,10 +341,18 @@ export default function RegistroAsignaturaPage() {
 
   const isSectionCompleted = (section: Section) => completedSections.includes(section)
   const isSectionUnlocked = (section: Section) => {
-    const sections: Section[] = ["basica", "asignatura", "horas", "unidades"]
-    const currentIndex = sections.indexOf(section)
-    if (currentIndex === 0 || editingAsignaturaId) return true
-    return isSectionCompleted(sections[currentIndex - 1])
+    // Las secciones SOLO se desbloquean en modo personalizado o al editar una asignatura existente
+    // Seleccionar una malla NO desbloquea las secciones automáticamente
+    if (!isPersonalizada && !editingAsignaturaId) return false;
+    
+    const sections: Section[] = ["basica", "asignatura", "unidades"];
+    const currentIndex = sections.indexOf(section);
+    
+    // Si estamos en la primera pestaña ("basica") o editando, la habilitamos
+    if (currentIndex === 0 || editingAsignaturaId) return true;
+    
+    // Para las demás pestañas, verificamos que la anterior esté completada
+    return isSectionCompleted(sections[currentIndex - 1]);
   }
 
   // <--- AJUSTE CLAVE: Lógica de guardado adaptada al backend ---
@@ -411,9 +427,9 @@ export default function RegistroAsignaturaPage() {
                 nivel_id: parseInt(nivel),
                 organizacion_id: parseInt(organizacion),
                 nombre: descripcion,
-                codigo: codigo.trim(), // Eliminar espacios en blanco
-                prerrequisito_codigo: (adscrCedDE && adscrCedDE !== "NINGUNO") ? adscrCedDE : null,
-                correquisito_codigo: (adscrCedCODE && adscrCedCODE !== "NINGUNO") ? adscrCedCODE : null,
+                codigo: codigo.trim(),
+                prerrequisitos_codigos: prerequisitos,
+                correquisitos_codigos: correquisitos,
             };
             
             // Log para depuración - verificar qué código se está enviando
@@ -433,36 +449,21 @@ export default function RegistroAsignaturaPage() {
             }
         }
 
-        // Para horas y unidades, el backend usa POST para crear y actualizar (upsert/destroy-create)
-        if (section === "horas" && asignaturaId) {
-            const payload = {
-                horasDocencia: parseInt(horasDocencia) || 0,
-                horasPractica: parseInt(horasPractica) || 0,
-                horasAutonoma: parseInt(horasAutonoma) || 0,
-                horasVinculacion: parseInt(horasVinculacion) || 0,
-                horasPracticaPreprofesional: parseInt(horasPracticaPreprofesional) || 0,
-            };
-            // Siempre usamos POST porque el backend lo maneja con 'upsert'
-            response = await apiRequest(`/asignaturas/${asignaturaId}/horas`, { method: 'POST', body: JSON.stringify(payload) });
-            if(response) toast({ title: "Éxito", description: response.message });
-        }
-
+        // Para unidades, el backend usa POST para crear y actualizar (destroy-create)
         if (section === "unidades" && asignaturaId) {
             const payload = { unidades };
-             // Siempre usamos POST porque el backend lo maneja con 'destroy' y 'bulkCreate'
             response = await apiRequest(`/asignaturas/${asignaturaId}/unidades`, { method: 'POST', body: JSON.stringify(payload) });
             if(response) {
                 toast({ title: "Registro Completo", description: "La asignatura ha sido guardada." });
-                await cargarAsignaturas(); // Recargar la tabla con los datos actualizados
-                setRegistroCompletado(true); // Activar el estado de registro completado
-                // No resetear el formulario aquí, dejar que el usuario elija qué hacer
+                await cargarAsignaturas();
+                setRegistroCompletado(true);
             }
         }
 
         if (!completedSections.includes(section)) {
             setCompletedSections(prev => [...prev, section]);
         }
-        const sections: Section[] = ["basica", "asignatura", "horas", "unidades"];
+        const sections: Section[] = ["basica", "asignatura", "unidades"];
         const currentIndex = sections.indexOf(section);
         if (currentIndex < sections.length - 1) {
             setCurrentSection(sections[currentIndex + 1]);
@@ -540,15 +541,10 @@ export default function RegistroAsignaturaPage() {
         setOrganizacion(asignatura.organizacion_id.toString());
         setCodigo(asignatura.codigo);
         setDescripcion(asignatura.nombre);
-        setAdscrCedDE(asignatura.prerrequisito_codigo || "NINGUNO");
-        setAdscrCedCODE(asignatura.correquisito_codigo || "NINGUNO");
-        setHorasDocencia(asignatura.horas?.horasDocencia?.toString() || "0");
-        setHorasPractica(asignatura.horas?.horasPractica?.toString() || "0");
-        setHorasAutonoma(asignatura.horas?.horasAutonoma?.toString() || "0");
-        setHorasVinculacion(asignatura.horas?.horasVinculacion?.toString() || "0");
-        setHorasPracticaPreprofesional(asignatura.horas?.horasPracticaPreprofesional?.toString() || "0");
+        setPrerequisitos(Array.isArray(asignatura.prerrequisitos_codigos) ? asignatura.prerrequisitos_codigos : []);
+        setCorrequisitos(Array.isArray(asignatura.correquisitos_codigos) ? asignatura.correquisitos_codigos : []);
         setUnidades(asignatura.unidades.length > 0 ? asignatura.unidades : [{ unidad: "", descripcion: "", resultados: "" }]);
-        setCompletedSections(["basica", "asignatura", "horas"]);
+        setCompletedSections(["basica", "asignatura"]);
         setCurrentSection("basica");
         toast({ title: "Modo Edición", description: `Cargada la asignatura: ${asignatura.nombre}. Puede modificar los datos.` });
     };
@@ -578,17 +574,378 @@ export default function RegistroAsignaturaPage() {
     nuevasUnidades[index] = { ...nuevasUnidades[index], [campo]: valor }
     setUnidades(nuevasUnidades)
   }
+    const handlePersonalizadaSelected = () => {
+    // 1. Activamos el modo personalizado - esto desbloquea "Información Básica"
+    setIsPersonalizada(true);
+    
+    // 2. Mantenemos mallaSeleccionada para que Facultad y Carrera queden bloqueadas
+    // con los valores ya elegidos en el modal de malla
+    // (NO se limpia mallaSeleccionada ni codigoMallaActual)
+    
+    // 3. Cerramos el modal
+    setShowMallaModal(false);
+    
+    // 4. Navegamos a la primera sección
+    setCurrentSection("basica");
+    
+    // 5. Limpiamos secciones completadas para empezar desde cero
+    setCompletedSections([]);
+  };
+
   const eliminarUnidad = (index: number) => setUnidades(unidades.filter((_, i) => i !== index))
 
-  const totalHoras = useMemo(() => {
-    const docencia = Number.parseInt(horasDocencia) || 0
-    const practica = Number.parseInt(horasPractica) || 0
-    const autonoma = Number.parseInt(horasAutonoma) || 0
-    const vinculacion = Number.parseInt(horasVinculacion) || 0
-    const practicaPrepro = Number.parseInt(horasPracticaPreprofesional) || 0
-    //return docencia + practica + autonoma + vinculacion + practicaPrepro
-    return docencia + practica + autonoma+ vinculacion + practicaPrepro 
-  }, [horasDocencia, horasPractica, horasAutonoma, horasVinculacion, horasPracticaPreprofesional])
+  // --- ORGANIZACIONES FILTRADAS POR NIVEL ---
+  // Muestra solo las organizaciones que se usan en el nivel actual;
+  // si no hay asignaturas aún, muestra todas
+  const organizacionesFiltradas = useMemo(() => {
+    if (asignaturasDelNivel.length === 0) return organizaciones;
+    const orgIdsUsados = new Set(
+      asignaturasDelNivel.map((a: any) => a.organizacion_id?.toString()).filter(Boolean)
+    );
+    if (orgIdsUsados.size === 0) return organizaciones;
+    return organizaciones.filter((org) => orgIdsUsados.has(org.id.toString()));
+  }, [asignaturasDelNivel, organizaciones]);
+
+  // --- HELPER: determina si una asignatura está completamente llena ---
+  // Se considera completa si tiene al menos 1 unidad temática con nombre
+  // y al menos 1 resultado de aprendizaje con texto.
+  // Los prerrequisitos/correquisitos son opcionales (pueden ser "No aplica").
+  const esCompleta = (asig: AsignaturaCompleta): boolean => {
+    const tieneUnidad =
+      Array.isArray(asig.unidades) &&
+      asig.unidades.length > 0 &&
+      asig.unidades.some((u) => u.unidad && u.unidad.trim() !== "");
+    const tieneResultados =
+      Array.isArray(asig.unidades) &&
+      asig.unidades.some((u) => u.resultados && u.resultados.trim() !== "");
+    return tieneUnidad && tieneResultados;
+  };
+
+  // Asignaturas incompletas → se muestran en el combo (aún necesitan ser completadas)
+  const asignaturasIncompletas = useMemo(
+    () => asignaturasDelNivel.filter((a) => !esCompleta(a)),
+    [asignaturasDelNivel]
+  );
+
+  // Asignaturas completas → se muestran en la tabla inferior
+  const asignaturasCompletas = useMemo(
+    () => asignaturasDelNivel.filter((a) => esCompleta(a)),
+    [asignaturasDelNivel]
+  );
+
+  // --- HANDLER: SELECCIONAR ASIGNATURA EXISTENTE DEL NIVEL ---
+  const handleAsignaturaSeleccionada = (value: string) => {
+    setAsignaturaSeleccionadaId(value);
+    if (value === "NUEVA") {
+      // Modo nueva: limpiar y desbloquear
+      setDescripcion("");
+      setCodigo("");
+      setOrganizacion("");
+      setPrerequisitos([]);
+      setCorrequisitos([]);
+      setUnidades([{ unidad: "", descripcion: "", resultados: "" }]);
+      setCodigoBloqueado(false);
+      setCodigoError("");
+      setDescripcionError("");
+      setEditingAsignaturaId(null);
+      return;
+    }
+    // Modo existente: rellenar TODOS los campos con los datos guardados y bloquear código
+    const asig = asignaturasDelNivel.find((a) => a.id.toString() === value);
+    if (asig) {
+      setDescripcion(asig.nombre);
+      setCodigo(asig.codigo);
+      setOrganizacion(asig.organizacion_id.toString());
+      // Prerrequisitos y correquisitos
+      setPrerequisitos(Array.isArray(asig.prerrequisitos_codigos) ? asig.prerrequisitos_codigos : []);
+      setCorrequisitos(Array.isArray(asig.correquisitos_codigos) ? asig.correquisitos_codigos : []);
+      // Unidades temáticas
+      setUnidades(asig.unidades && asig.unidades.length > 0 ? asig.unidades : [{ unidad: "", descripcion: "", resultados: "" }]);
+      setCodigoBloqueado(true);
+      setCodigoError("");
+      setDescripcionError("");
+      // Tratar como edición de asignatura existente
+      setEditingAsignaturaId(asig.id);
+      // Marcar secciones completadas para desbloquear las siguientes
+      const tieneUnidades = asig.unidades && asig.unidades.length > 0 && !!asig.unidades[0].unidad;
+      const sectionsCompleted: Section[] = ["basica", "asignatura"];
+      if (tieneUnidades) sectionsCompleted.push("unidades");
+      setCompletedSections(sectionsCompleted);
+    }
+  };
+
+  // Resetear selección de asignatura cuando cambia el nivel
+  useEffect(() => {
+    setAsignaturaSeleccionadaId("NUEVA");
+    setCodigoBloqueado(false);
+    setOrganizacion("");
+    setCodigo("");
+    setDescripcion("");
+  }, [nivel]);
+
+  // --- CARGA MASIVA: obtener TODAS las asignaturas de la malla (todos los niveles) ---
+  const cargarTodasAsignaturasMalla = async (): Promise<(AsignaturaCompleta & { nivelNombre: string })[]> => {
+    if (!carrera) return [];
+    setCargandoMalla(true);
+    try {
+      // Pedir todas las asignaturas de la carrera en una sola llamada (sin nivel_id)
+      const res = await apiRequest(`/asignaturas?carrera_id=${carrera}`);
+      const items: AsignaturaCompleta[] = Array.isArray(res) ? res : (res?.data ?? []);
+      
+      const resultado = items.map((a: any) => ({
+        ...a,
+        nivelNombre: a.nivel?.ordinal || a.nivel?.nombre || a.nivel?.codigo || ""
+      }));
+      
+      setTodasAsignaturasMalla(resultado);
+      setCargandoMalla(false);
+      return resultado;
+    } catch (error) {
+      console.error("Error al cargar la malla completa para carga masiva:", error);
+      setCargandoMalla(false);
+      return [];
+    }
+  };
+
+  // Cargar automáticamente cuando se abre el modal
+  useEffect(() => {
+    if (showCargaMasivaModal) {
+      setTodasAsignaturasMalla([]);
+      cargarTodasAsignaturasMalla();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCargaMasivaModal, carrera]);
+
+  // --- CARGA MASIVA: generar plantilla Excel ---
+  const descargarPlantilla = async () => {
+    const headers = [
+      "Codigo",
+      "Asignatura",
+      "Nivel",
+      "Prerequisito",
+      "Correquisito",
+    ];
+
+    for (let i = 1; i <= 40; i++) {
+      headers.push(`Unidad_${i}_Nombre`);
+      headers.push(`Unidad_${i}_Temas`);
+      headers.push(`Unidad_${i}_Resultados`);
+    }
+
+    // Usar datos del estado; si aún no están, solicitarlos ahora y esperar
+    let fuente: (AsignaturaCompleta & { nivelNombre?: string })[] = todasAsignaturasMalla;
+    if (fuente.length === 0 && carrera) {
+      fuente = await cargarTodasAsignaturasMalla();
+    }
+    // Último fallback: asignaturas del nivel actual
+    if (fuente.length === 0) {
+      fuente = asignaturasDelNivel;
+    }
+
+    // Ordenar fuente por nivel numérico para que el Excel quede en orden
+    const getValorNivel = (a: any) => {
+      const val = a.nivel?.codigo || a.nivel?.nombre || a.nivel?.ordinal || a.nivelNombre || "0";
+      const match = val.toString().match(/\d+/);
+      if (match) return parseInt(match[0], 10);
+      const ordinalMap: Record<string, number> = {
+        "primero": 1, "segundo": 2, "tercero": 3, "cuarto": 4, "quinto": 5,
+        "sexto": 6, "septimo": 7, "séptimo": 7, "octavo": 8, "noveno": 9, "decimo": 10, "décimo": 10
+      };
+      return ordinalMap[val.toString().toLowerCase().trim()] || 99;
+    };
+    const fuenteOrdenada = [...fuente].sort((a, b) => {
+      const nivelDiff = getValorNivel(a) - getValorNivel(b);
+      if (nivelDiff !== 0) return nivelDiff;
+      // Ordenar por código alfanumérico (TI01, TI02...) para que aparezcan en secuencia
+      return (a.codigo || "").localeCompare(b.codigo || "", undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    const NUMERO_A_ORDINAL: Record<string, string> = {
+      "1": "Primero", "2": "Segundo", "3": "Tercero", "4": "Cuarto", "5": "Quinto",
+      "6": "Sexto", "7": "Séptimo", "8": "Octavo", "9": "Noveno", "10": "Décimo",
+    };
+
+    const rows = fuenteOrdenada.map((a) => {
+      let nivelRaw = (a as any).nivelNombre || (a as any).nivel?.ordinal || (a as any).nivel?.nombre || (a as any).nivel?.codigo || "";
+      let nivelFormateado = NUMERO_A_ORDINAL[nivelRaw.toString().trim()] || nivelRaw;
+      
+      if (typeof nivelFormateado === 'string' && nivelFormateado.length > 0 && !NUMERO_A_ORDINAL[nivelRaw.toString().trim()]) {
+         nivelFormateado = nivelFormateado.charAt(0).toUpperCase() + nivelFormateado.slice(1).toLowerCase();
+      }
+
+      const baseRow: any = {
+        Codigo: a.codigo,
+        Asignatura: a.nombre,
+        Nivel: nivelFormateado,
+        Prerequisito: a.prerrequisitos_codigos?.join(", ") || "No aplica",
+        Correquisito: a.correquisitos_codigos?.join(", ") || "No aplica",
+      };
+
+      for (let i = 1; i <= 40; i++) {
+        baseRow[`Unidad_${i}_Nombre`] = a.unidades?.[i - 1]?.unidad || "";
+        baseRow[`Unidad_${i}_Temas`] = a.unidades?.[i - 1]?.descripcion || "";
+        baseRow[`Unidad_${i}_Resultados`] = a.unidades?.[i - 1]?.resultados || "";
+      }
+
+      return baseRow;
+    });
+
+    // Si no hay datos reales, mostrar fila de ejemplo para guiar al usuario
+    if (rows.length === 0) {
+      const demoRow: any = {
+        Codigo: "EJ001",
+        Asignatura: "Ejemplo Asignatura",
+        Nivel: "Primero",
+        Prerequisito: "No aplica",
+        Correquisito: "No aplica",
+      };
+      for (let i = 1; i <= 40; i++) {
+        demoRow[`Unidad_${i}_Nombre`] = i === 1 ? "Unidad 1" : "";
+        demoRow[`Unidad_${i}_Temas`] = i === 1 ? "Temas de la unidad 1" : "";
+        demoRow[`Unidad_${i}_Resultados`] = i === 1 ? "El estudiante puede..." : "";
+      }
+      rows.push(demoRow);
+    }
+
+    const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
+    ws["!cols"] = headers.map((h) => ({ wch: Math.max(h.length + 4, 22) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Unidades y Resultados");
+    XLSX.writeFile(wb, `plantilla_${codigoMallaActual || "malla"}_unidades_resultados.xlsx`);
+  };
+
+  // --- CARGA MASIVA: leer archivo cargado ---
+  const handleCargaMasivaFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCargaMasivaError("");
+    setCargaMasivaPreview([]);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCargaMasivaFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = new Uint8Array(ev.target!.result as ArrayBuffer);
+        const wb = XLSX.read(data, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows: any[] = XLSX.utils.sheet_to_json(ws);
+        if (rows.length === 0) {
+          setCargaMasivaError("El archivo está vacío o no tiene el formato correcto.");
+          return;
+        }
+        setCargaMasivaPreview(rows);
+      } catch {
+        setCargaMasivaError("No se pudo leer el archivo. Asegúrese de usar .xlsx o .xls.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // --- CARGA MASIVA: importar filas al backend ---
+  const handleImportarCargaMasiva = async () => {
+    if (cargaMasivaPreview.length === 0) return;
+    setIsCargando(true);
+    let exitosos = 0;
+    let errores = 0;
+    
+    const fuenteAsignaturas = todasAsignaturasMalla.length > 0 ? todasAsignaturasMalla : asignaturasDelNivel;
+
+    for (const row of cargaMasivaPreview) {
+      try {
+        const asig = fuenteAsignaturas.find(
+          (a) => a.codigo?.toString().trim().toLowerCase() === row["Codigo"]?.toString().trim().toLowerCase()
+        );
+        if (!asig) { 
+          console.warn(`Asignatura no encontrada para el código: ${row["Codigo"]}`);
+          errores++; 
+          continue; 
+        }
+
+        // Construir unidades desde las columnas (hasta 40)
+        const unidades: UnidadData[] = [];
+        for (let i = 1; i <= 40; i++) {
+          const nombre = row[`Unidad_${i}_Nombre`]?.toString().trim() || "";
+          if (nombre) {
+            unidades.push({
+              unidad: nombre,
+              descripcion: row[`Unidad_${i}_Temas`]?.toString().trim() || "",
+              resultados: row[`Unidad_${i}_Resultados`]?.toString().trim() || "",
+            });
+          }
+        }
+
+        // Función para resolver prerrequisitos/correquisitos (convirtiendo nombres a códigos si el usuario escribió el nombre)
+        const resolverCodigos = (inputVal: string | undefined) => {
+          if (!inputVal || inputVal.trim().toLowerCase() === "no aplica") return [];
+          const items = inputVal.split(",").map(s => s.trim()).filter(Boolean);
+          const codigosFinales: string[] = [];
+          for (const item of items) {
+            // 1. Buscar si coincide directamente con algún código
+            let coincidencia = fuenteAsignaturas.find(a => a.codigo?.toLowerCase() === item.toLowerCase());
+            // 2. Si no es un código, buscar si coincide con el nombre de la asignatura
+            if (!coincidencia) {
+              coincidencia = fuenteAsignaturas.find(a => a.nombre?.toLowerCase() === item.toLowerCase());
+            }
+            // 3. Añadir el código si se encontró, o mantener el texto original para que el backend lance el error exacto
+            codigosFinales.push(coincidencia?.codigo ? coincidencia.codigo : item);
+          }
+          return codigosFinales;
+        };
+
+        const prereqCodigos = resolverCodigos(row["Prerequisito"]?.toString());
+        const correqCodigos = resolverCodigos(row["Correquisito"]?.toString());
+
+        // Guardar asignatura (PUT)
+        await apiRequest(`/asignaturas/${asig.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            nombre: asig.nombre,
+            codigo: asig.codigo,
+            carrera_id: asig.carrera_id,
+            nivel_id: asig.nivel_id,
+            organizacion_id: asig.organizacion_id,
+            prerrequisitos_codigos: prereqCodigos,
+            correquisitos_codigos: correqCodigos,
+          }),
+        });
+
+        // Guardar horas (PUT)
+        await apiRequest(`/asignaturas/${asig.id}/horas`, {
+          method: "PUT",
+          body: JSON.stringify({
+            horasDocencia: parseInt(row["Docencia"]?.toString() || "0"),
+            horasPractica: parseInt(row["Practica"]?.toString() || "0"),
+            horasAutonoma: parseInt(row["Autonoma"]?.toString() || "0"),
+            horasVinculacion: parseInt(row["Vinculacion"]?.toString() || "0"),
+            horasPracticaPreprofesional: parseInt(row["Preprofesionales"]?.toString() || "0"),
+          }),
+        });
+
+        // Guardar unidades (POST) solo si se definieron en el Excel
+        if (unidades.length > 0) {
+          await apiRequest(`/asignaturas/${asig.id}/unidades`, {
+            method: "POST",
+            body: JSON.stringify({ unidades }),
+          });
+        }
+
+        exitosos++;
+      } catch (err) {
+        console.error(`Error al procesar la fila de la asignatura ${row["Codigo"] || "desconocida"}:`, err);
+        errores++;
+      }
+    }
+    setIsCargando(false);
+    await cargarAsignaturas();
+    setShowCargaMasivaModal(false);
+    setCargaMasivaFile(null);
+    setCargaMasivaPreview([]);
+    toast({
+      title: "Importación completada",
+      description: `${exitosos} asignatura(s) importadas correctamente. ${errores > 0 ? `${errores} con error.` : ""}`,
+    });
+  };
+
+
 
   // --- RENDERIZADO JSX ---
   return (
@@ -597,11 +954,139 @@ export default function RegistroAsignaturaPage() {
         open={showMallaModal}
         onClose={() => setShowMallaModal(false)}
         onMallaSelected={handleMallaSelected}
+        onPersonalizada={undefined}
       />
 
+      {/* ========== MODAL CARGA MASIVA ========== */}
+      {showCargaMasivaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-4 flex flex-col max-h-[95vh] overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">📋</span>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Unidades y Resultados — Carga Masiva</h2>
+                  <p className="text-sm text-gray-500">Descargue la plantilla, complétela y cárguela para importar datos.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowCargaMasivaModal(false); setCargaMasivaFile(null); setCargaMasivaPreview([]); setCargaMasivaError(""); }}
+                className="text-gray-400 hover:text-gray-700 text-xl font-bold leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
+              {/* Paso 1: Descargar plantilla */}
+              <div className="border rounded-lg p-4 bg-gray-50">
+                <p className="text-sm font-semibold text-gray-700 mb-2">Paso 1 — Descargue la plantilla Excel</p>
+                <p className="text-xs text-gray-500 mb-3">
+                  La plantilla incluye: <strong>Nivel, Código, Asignatura, Prerrequisito, Correquisito, Unidad 1-3 (Nombre, Temas y Resultados)</strong> con la información ya almacenada.
+                  {cargandoMalla ? (
+                    <span className="ml-1 text-amber-600 font-medium">⏳ Cargando datos de la malla...</span>
+                  ) : todasAsignaturasMalla.length > 0 ? (
+                    <span className="ml-1 text-[#00563F] font-medium">
+                      ✅ {todasAsignaturasMalla.length} asignatura(s) encontradas en todos los niveles de la malla.
+                    </span>
+                  ) : asignaturasDelNivel.length > 0 ? (
+                    <span className="ml-1 text-[#00563F] font-medium">
+                      Se exportarán las {asignaturasDelNivel.length} asignatura(s) del nivel seleccionado.
+                    </span>
+                  ) : null}
+                </p>
+                <button
+                  onClick={descargarPlantilla}
+                  disabled={cargandoMalla}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-[#00563F] text-white text-sm font-medium hover:bg-[#00563F]/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {cargandoMalla
+                    ? <><span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> Cargando...</>
+                    : "⬇️ Descargar plantilla (.xlsx)"}
+                </button>
+              </div>
+
+              {/* Paso 2: Cargar archivo */}
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                <p className="text-sm font-semibold text-gray-700 mb-1">Paso 2 — Cargue el archivo completado</p>
+                <p className="text-xs text-gray-400 mb-4">Formatos aceptados: .xlsx, .xls</p>
+                <div className="flex flex-col items-center gap-3">
+                  <svg className="h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 12V4m0 0L8 8m4-4l4 4" />
+                  </svg>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={handleCargaMasivaFile}
+                    className="hidden"
+                    id="cm-file-input"
+                  />
+                  <label
+                    htmlFor="cm-file-input"
+                    className="cursor-pointer px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-600 hover:bg-gray-100 transition"
+                  >
+                    {cargaMasivaFile ? cargaMasivaFile.name : "Seleccionar archivo"}
+                  </label>
+                  {cargaMasivaError && (
+                    <p className="text-sm text-red-600">{cargaMasivaError}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Previsualización */}
+              {cargaMasivaPreview.length > 0 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">Vista previa ({cargaMasivaPreview.length} fila(s))</p>
+                  <div className="overflow-x-auto overflow-y-auto border rounded-lg max-h-64">
+                    <table className="text-xs w-full">
+                      <thead className="bg-gray-100 sticky top-0">
+                        <tr>
+                          {Object.keys(cargaMasivaPreview[0]).map((k) => (
+                            <th key={k} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">{k}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cargaMasivaPreview.map((row, i) => (
+                          <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                            {Object.values(row).map((v: any, j) => (
+                              <td key={j} className="px-3 py-1.5 text-gray-700 whitespace-nowrap">{v?.toString() || "—"}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t bg-gray-50">
+              <button
+                onClick={() => { setShowCargaMasivaModal(false); setCargaMasivaFile(null); setCargaMasivaPreview([]); setCargaMasivaError(""); }}
+                className="px-4 py-2 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-100 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleImportarCargaMasiva}
+                disabled={cargaMasivaPreview.length === 0 || isCargando}
+                className="px-5 py-2 rounded-md bg-[#00563F] text-white text-sm font-semibold hover:bg-[#00563F]/90 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
+              >
+                {isCargando && <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                Importar Unidades y Resultados
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="container mx-auto py-8 px-4 max-w-5xl">
-        {/* Código de Malla Banner */}
-        {mallaSeleccionada && (
+        {/* Código de Malla Banner — se oculta cuando se activa modo personalizado */}
+        {mallaSeleccionada && !isPersonalizada && (
           <Card className="mb-6 border-2 border-emerald-500 bg-emerald-50">
             <CardContent className="py-4">
               <div className="flex items-center justify-between">
@@ -616,14 +1101,32 @@ export default function RegistroAsignaturaPage() {
                     </p>
                   </div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowMallaModal(true)}
-                  className="border-emerald-300"
-                >
-                  Cambiar Malla
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowMallaModal(true)}
+                    className="border-emerald-300"
+                  >
+                    Cambiar Malla
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handlePersonalizadaSelected}
+                    className="bg-[#00563F] hover:bg-[#00563F]/90 text-white"
+                  >
+                    Personalizada
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="bg-[#00563F] hover:bg-[#00563F]/90 text-white"
+                    onClick={() => { setShowCargaMasivaModal(true); cargarTodasAsignaturasMalla(); }}
+                  >
+                    Carga Masiva
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -653,7 +1156,7 @@ export default function RegistroAsignaturaPage() {
       {/* ... (El resto de tu código JSX permanece igual) ... */}
       
        <div className="mb-8 flex gap-2">
-        {(["basica", "asignatura", "horas", "unidades"] as Section[]).map((section) => (
+        {(["basica", "asignatura", "unidades"] as Section[]).map((section) => (
           <div key={section} className="flex-1">
             <div
               className={`h-2 rounded-full ${isSectionCompleted(section) ? "bg-[#00563F]" : isSectionUnlocked(section) ? "bg-[#FDB71A]" : "bg-gray-200"}`}
@@ -689,7 +1192,12 @@ export default function RegistroAsignaturaPage() {
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="facultad">Facultad {mallaSeleccionada && <span className="text-xs text-gray-500">(bloqueado por malla)</span>}</Label>
+                      <Label htmlFor="facultad">
+                        Facultad{" "}
+                        {mallaSeleccionada && (
+                          <span className="text-xs text-gray-500">(bloqueado por malla)</span>
+                        )}
+                      </Label>
                       <Select value={facultad} onValueChange={setFacultad} disabled={mallaSeleccionada}>
                         <SelectTrigger className="w-full"><SelectValue placeholder="Seleccione facultad" /></SelectTrigger >
                         <SelectContent>
@@ -702,7 +1210,12 @@ export default function RegistroAsignaturaPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="carrera">Carrera {mallaSeleccionada && <span className="text-xs text-gray-500">(bloqueado por malla)</span>}</Label>
+                      <Label htmlFor="carrera">
+                        Carrera{" "}
+                        {mallaSeleccionada && (
+                          <span className="text-xs text-gray-500">(bloqueado por malla)</span>
+                        )}
+                      </Label>
                       <Select value={carrera} onValueChange={setCarrera} disabled={mallaSeleccionada || !facultad || carrerasFiltradas.length === 0}>
                         <SelectTrigger className="w-full">
                           <SelectValue placeholder={!facultad ? "Seleccione una facultad" : "Seleccione carrera"} />
@@ -721,11 +1234,23 @@ export default function RegistroAsignaturaPage() {
                       <Select value={nivel} onValueChange={setNivel}>
                         <SelectTrigger className="w-full"><SelectValue placeholder="Seleccione nivel" /></SelectTrigger>
                         <SelectContent>
-                          {niveles.map((n) => (
-                            <SelectItem key={n.id} value={n.id.toString()}>
-                              {n.nombre}
-                            </SelectItem>
-                          ))}
+                          {niveles.map((n) => {
+                            const ordinalMap: Record<string, string> = {
+                              "1": "Primero", "2": "Segundo", "3": "Tercero", "4": "Cuarto", "5": "Quinto",
+                              "6": "Sexto", "7": "Séptimo", "8": "Octavo", "9": "Noveno", "10": "Décimo",
+                            };
+                            let label = n.ordinal || n.nombre;
+                            if (ordinalMap[label?.toString().trim()]) {
+                              label = ordinalMap[label.toString().trim()];
+                            } else if (typeof label === 'string' && label.length > 0) {
+                              label = label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
+                            }
+                            return (
+                              <SelectItem key={n.id} value={n.id.toString()}>
+                                {label}
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     </div>
@@ -773,13 +1298,58 @@ export default function RegistroAsignaturaPage() {
           <CardContent>
             {isSectionUnlocked("asignatura") ? (
               <div className="space-y-4">
+                {/* Selector de asignatura existente + input para nueva */}
+                <div className="space-y-2">
+                  <Label>Asignatura</Label>
+                  <Select value={asignaturaSeleccionadaId} onValueChange={handleAsignaturaSeleccionada}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccione una asignatura o registre nueva" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NUEVA">✏️ Nueva asignatura (ingresar manualmente)</SelectItem>
+                      {asignaturasIncompletas.length === 0 && asignaturasDelNivel.length > 0 && (
+                        <SelectItem value="__NONE__" disabled>
+                          — Todas las asignaturas ya están completas —
+                        </SelectItem>
+                      )}
+                      {asignaturasIncompletas.map((asig) => (
+                        <SelectItem key={asig.id} value={asig.id.toString()}>
+                          {asig.nombre} — {asig.codigo}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {asignaturaSeleccionadaId === "NUEVA" && (
+                    <>
+                      <Input
+                        id="descripcion"
+                        value={descripcion}
+                        onChange={(e) => handleDescripcionChange(e.target.value)}
+                        placeholder="Nombre de la Asignatura"
+                        className={descripcionError ? "border-red-500 focus:border-red-500" : ""}
+                      />
+                      {descripcionError && (
+                        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-300 rounded-md">
+                          <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                          <p className="text-sm text-red-800">{descripcionError}</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2 md:col-span-1">
-                        <Label htmlFor="organizacion">Unidad de Organización Curricular</Label>
+                        <Label htmlFor="organizacion">
+                          Unidad de Organización Curricular
+                          {asignaturasDelNivel.length > 0 && (
+                            <span className="text-xs text-gray-500 ml-1">(filtrado por nivel)</span>
+                          )}
+                        </Label>
                         <Select value={organizacion} onValueChange={setOrganizacion}>
                             <SelectTrigger><SelectValue placeholder="Seleccione unidad" /></SelectTrigger>
                             <SelectContent>
-                                {organizaciones.map((org) => (
+                                {organizacionesFiltradas.map((org) => (
                                     <SelectItem key={org.id} value={org.id.toString()}>
                                         {org.nombre}
                                     </SelectItem>
@@ -788,13 +1358,19 @@ export default function RegistroAsignaturaPage() {
                         </Select>
                     </div>
                     <div className="space-y-2">
-                        <Label htmlFor="codigo">Código</Label>
-                        <Input 
-                            id="codigo" 
-                            value={codigo} 
-                            onChange={(e) => handleCodigoChange(e.target.value)} 
+                        <Label htmlFor="codigo">
+                          Código
+                          {codigoBloqueado && (
+                            <span className="text-xs text-gray-500 ml-1">(bloqueado)</span>
+                          )}
+                        </Label>
+                        <Input
+                            id="codigo"
+                            value={codigo}
+                            onChange={(e) => handleCodigoChange(e.target.value)}
                             placeholder="Código de Asignatura"
-                            className={codigoError ? "border-red-500 focus:border-red-500" : ""}
+                            disabled={codigoBloqueado}
+                            className={`${codigoError ? "border-red-500 focus:border-red-500" : ""} ${codigoBloqueado ? "bg-gray-100 cursor-not-allowed opacity-70" : ""}`}
                         />
                         {codigoError && (
                             <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-300 rounded-md">
@@ -804,55 +1380,99 @@ export default function RegistroAsignaturaPage() {
                         )}
                     </div>
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="descripcion">Asignatura</Label>
-                  <Input 
-                    id="descripcion" 
-                    value={descripcion} 
-                    onChange={(e) => handleDescripcionChange(e.target.value)} 
-                    placeholder="Nombre de la Asignatura"
-                    className={descripcionError ? "border-red-500 focus:border-red-500" : ""}
-                  />
-                  {descripcionError && (
-                    <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-300 rounded-md">
-                      <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-                      <p className="text-sm text-red-800">{descripcionError}</p>
-                    </div>
-                  )}
-                </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* PRERREQUISITOS */}
                   <div className="space-y-2">
-                    <Label htmlFor="prerrequisito">Prerrequisito</Label>
-                    <Select value={adscrCedDE || "NINGUNO"} onValueChange={setAdscrCedDE}>
-                      <SelectTrigger><SelectValue placeholder="Seleccione prerrequisito" /></SelectTrigger>
+                    <Label>Prerrequisito</Label>
+                    <Select
+                      value=""
+                      onValueChange={(val) => {
+                        if (val && val !== "NINGUNO" && !prerequisitos.includes(val)) {
+                          setPrerequisitos([...prerequisitos, val]);
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={prerequisitos.length === 0 ? "No aplica" : "Agregar otro..."} />
+                      </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="NINGUNO">Sin prerrequisito</SelectItem>
-                        {asignaturasNivelAnterior.map((asig) => (
-                          <SelectItem key={asig.id} value={asig.codigo}>
-                            {asig.nombre} ({asig.codigo})
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="NINGUNO">— No aplica —</SelectItem>
+                        {asignaturasNivelAnterior
+                          .filter((asig) => !prerequisitos.includes(asig.codigo))
+                          .map((asig) => (
+                            <SelectItem key={asig.id} value={asig.codigo}>
+                              {asig.nombre} ({asig.codigo})
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
+                    {prerequisitos.length > 0 && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {prerequisitos.map((cod) => {
+                          const asig = asignaturasNivelAnterior.find((a) => a.codigo === cod);
+                          return (
+                            <div key={cod} className="flex items-center gap-1 bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs px-2 py-1 rounded-full">
+                              <span>{asig ? `${asig.nombre} (${cod})` : cod}</span>
+                              <button
+                                type="button"
+                                onClick={() => setPrerequisitos(prerequisitos.filter((c) => c !== cod))}
+                                className="ml-1 text-emerald-500 hover:text-red-600 font-bold leading-none"
+                                title="Eliminar"
+                              >×</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                  
+
+                  {/* CORREQUISITOS */}
                   <div className="space-y-2">
-                    <Label htmlFor="correquisito">Correquisito</Label>
-                    <Select value={adscrCedCODE || "NINGUNO"} onValueChange={setAdscrCedCODE}>
-                      <SelectTrigger><SelectValue placeholder="Seleccione correquisito" /></SelectTrigger>
+                    <Label>Correquisito</Label>
+                    <Select
+                      value=""
+                      onValueChange={(val) => {
+                        if (val && val !== "NINGUNO" && !correquisitos.includes(val)) {
+                          setCorrequisitos([...correquisitos, val]);
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={correquisitos.length === 0 ? "No aplica" : "Agregar otro..."} />
+                      </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="NINGUNO">Sin correquisito</SelectItem>
-                        {asignaturasNivelActual.map((asig) => (
-                          <SelectItem key={asig.id} value={asig.codigo}>
-                            {asig.nombre} ({asig.codigo})
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="NINGUNO">— No aplica —</SelectItem>
+                        {asignaturasNivelActual
+                          .filter((asig) => asig.codigo !== codigo && !correquisitos.includes(asig.codigo))
+                          .map((asig) => (
+                            <SelectItem key={asig.id} value={asig.codigo}>
+                              {asig.nombre} ({asig.codigo})
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
+                    {correquisitos.length > 0 && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {correquisitos.map((cod) => {
+                          const asig = asignaturasNivelActual.find((a) => a.codigo === cod);
+                          return (
+                            <div key={cod} className="flex items-center gap-1 bg-blue-50 border border-blue-300 text-blue-800 text-xs px-2 py-1 rounded-full">
+                              <span>{asig ? `${asig.nombre} (${cod})` : cod}</span>
+                              <button
+                                type="button"
+                                onClick={() => setCorrequisitos(correquisitos.filter((c) => c !== cod))}
+                                className="ml-1 text-blue-500 hover:text-red-600 font-bold leading-none"
+                                title="Eliminar"
+                              >×</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
+
               
                 <div className="flex gap-3">
                   <Button onClick={() => handleSaveSection("asignatura")} className="bg-[#00563F] hover:bg-[#00563F]/90" disabled={!organizacion || !codigo || !descripcion || isSaving}>
@@ -871,62 +1491,7 @@ export default function RegistroAsignaturaPage() {
             ) : ( <p className="text-muted-foreground">Complete la sección anterior para desbloquear</p> )}
           </CardContent>
         </Card>
-        
-        <Card
-          id="horas"
-          className={`transition-all duration-300 ${!isSectionUnlocked("horas") ? "opacity-50" : ""} ${currentSection === 'horas' && !isSectionCompleted('horas') ? 'border-2 border-[#FDB71A]' : ''}`}
-        >
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {isSectionCompleted("horas") ? ( <CheckCircle2 className="h-6 w-6 text-[#00563F]" /> ) : !isSectionUnlocked("horas") ? ( <Lock className="h-6 w-6 text-gray-400" /> ) : ( <div className="h-6 w-6 rounded-full border-2 border-[#FDB71A]" /> )}
-                <div>
-                  <CardTitle>3. Distribución de Horas</CardTitle>
-                  <CardDescription>Horas de docencia, prácticas formativas de aplicación y experimentación y autónomas</CardDescription>
-                </div>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {isSectionUnlocked("horas") ? (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="docencia">Horas de Docencia</Label>
-                    <Input id="docencia" type="number" value={horasDocencia} onChange={(e) => setHorasDocencia(e.target.value)} placeholder="0" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="practica">Horas para Prácticas Formativas de aplicación y Experimentación</Label>
-                    <Input id="practica" type="number" value={horasPractica} onChange={(e) => setHorasPractica(e.target.value)} placeholder="0" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="autonoma">Horas de Trabajo Autónomo</Label>
-                    <Input id="autonoma" type="number" value={horasAutonoma} onChange={(e) => setHorasAutonoma(e.target.value)} placeholder="0" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="vinculacion">Horas de Vinculación</Label>
-                    <Input id="vinculacion" type="number" value={horasVinculacion} onChange={(e) => setHorasVinculacion(e.target.value)} placeholder="0" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="practicaPrepro">Horas de Práctica Preprofesional</Label>
-                    <Input id="practicaPrepro" type="number" value={horasPracticaPreprofesional} onChange={(e) => setHorasPracticaPreprofesional(e.target.value)} placeholder="0" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Total Horas</Label>
-                    <div className="h-10 flex items-center px-3 border rounded-md bg-muted font-semibold">
-                      {totalHoras}
-                    </div>
-                  </div>
-                </div>
-                <Button onClick={() => handleSaveSection("horas")} className="bg-[#00563F] hover:bg-[#00563F]/90" disabled={totalHoras === 0 || isSaving}>
-                  {isSaving && currentSection === 'horas' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Continuar con Unidades Temáticas, Contenidos y Resultados de Aprendizaje
-                </Button>
-              </div>
-            ) : ( <p className="text-muted-foreground">Complete la sección anterior para desbloquear</p> )}
-          </CardContent>
-        </Card>
-        
+
         <Card
           id="unidades"
           className={`transition-all duration-300 ${!isSectionUnlocked("unidades") ? "opacity-50" : ""} ${currentSection === 'unidades' && !isSectionCompleted('unidades') ? 'border-2 border-[#FDB71A]' : ''}`}
@@ -936,7 +1501,7 @@ export default function RegistroAsignaturaPage() {
               <div className="flex items-center gap-3">
                 {isSectionCompleted("unidades") ? ( <CheckCircle2 className="h-6 w-6 text-[#00563F]" /> ) : !isSectionUnlocked("unidades") ? ( <Lock className="h-6 w-6 text-gray-400" /> ) : ( <div className="h-6 w-6 rounded-full border-2 border-[#FDB71A]" /> )}
                 <div>
-                  <CardTitle>4. Unidades Temáticas y Resultados</CardTitle>
+                  <CardTitle>3. Unidades Temáticas y Resultados</CardTitle>
                   <CardDescription>Contenidos y resultados de aprendizaje</CardDescription>
                 </div>
               </div>
@@ -1023,9 +1588,9 @@ export default function RegistroAsignaturaPage() {
       </div>
 
       <div id="tabla-asignaturas" className="mt-12">
-        <h2 className="text-2xl font-bold text-[#00563F]">Asignaturas registradas en el Nivel</h2>
+        <h2 className="text-2xl font-bold text-[#00563F]">Asignaturas con información completa</h2>
         <p className="text-muted-foreground mb-4">
-            Visualice, edite o elimine las asignaturas del nivel seleccionado para la carrera actual.
+            Asignaturas que ya tienen prerrequisito/correquisito, unidades temáticas y resultados de aprendizaje registrados.
         </p>
 
         {!nivel || !carrera ? (
@@ -1037,10 +1602,14 @@ export default function RegistroAsignaturaPage() {
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                 <p className="text-muted-foreground">Cargando asignaturas...</p>
             </Card>
-        ) : asignaturasDelNivel.length === 0 ? (
+        ) : asignaturasCompletas.length === 0 ? (
             <Card className="flex items-center justify-center p-8">
-                 <AlertTriangle className="mr-2 h-5 w-5 text-yellow-500" />
-                <p className="text-muted-foreground">No hay asignaturas registradas para este nivel.</p>
+                <AlertTriangle className="mr-2 h-5 w-5 text-yellow-500" />
+                <p className="text-muted-foreground">
+                  {asignaturasDelNivel.length === 0
+                    ? "No hay asignaturas registradas para este nivel."
+                    : "Ninguna asignatura tiene aún todos los datos completos (prerrequisito/correquisito, unidades y resultados)."}
+                </p>
             </Card>
         ) : (
             <Card>
@@ -1051,45 +1620,79 @@ export default function RegistroAsignaturaPage() {
                                 <TableRow>
                                     <TableHead>Código</TableHead>
                                     <TableHead>Asignatura</TableHead>
+                                    <TableHead className="text-center">Prerrequisitos</TableHead>
+                                    <TableHead className="text-center">Correquisitos</TableHead>
                                     <TableHead>Unidades Temáticas</TableHead>
                                     <TableHead>Resultados de Aprendizaje</TableHead>
-                                    <TableHead className="text-center">H. Docencia</TableHead>
-                                    <TableHead className="text-center">H. Práctica</TableHead>
-                                    <TableHead className="text-center">H. Autónoma</TableHead>
-                                    <TableHead className="text-center">H. Vinculación</TableHead>
-                                    <TableHead className="text-center">H. Práctica Pre.</TableHead>
-                                    <TableHead className="text-center">Total Horas</TableHead>
-                                    <TableHead>Acciones</TableHead>
+                                    <TableHead>Opciones</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {asignaturasDelNivel.map((asig) => {
-                                    const total = (asig.horas?.horasDocencia || 0) +
-                                                  (asig.horas?.horasPractica || 0) +
-                                                  (asig.horas?.horasAutonoma || 0) +
-                                                  (asig.horas?.horasVinculacion || 0) +
-                                                  (asig.horas?.horasPracticaPreprofesional || 0);
+                                {asignaturasCompletas.map((asig) => {
+                                    const unidadesFiltradas = asig.unidades.filter(u => u.unidad);
                                     return (
                                         <TableRow key={asig.id}>
-                                            <TableCell className="font-semibold text-[#00563F]">{asig.codigo}</TableCell>
-                                            <TableCell className="font-medium">{asig.nombre}</TableCell>
-                                            <TableCell className="max-w-xs">{asig.unidades.map(u => u.unidad).join(", ")}</TableCell>
-                                            <TableCell className="max-w-xs">{asig.unidades.map(u => u.resultados).join(", ")}</TableCell>
-                                            <TableCell className="text-center">{asig.horas?.horasDocencia || 0}</TableCell>
-                                            <TableCell className="text-center">{asig.horas?.horasPractica || 0}</TableCell>
-                                            <TableCell className="text-center">{asig.horas?.horasAutonoma || 0}</TableCell>
-                                            <TableCell className="text-center">{asig.horas?.horasVinculacion || 0}</TableCell>
-                                            <TableCell className="text-center">{asig.horas?.horasPracticaPreprofesional || 0}</TableCell>
-                                            <TableCell className="text-center font-bold">{total}</TableCell>
-                                            <TableCell>
-                                                <div className="flex items-center gap-2">
-                                                    <Button variant="ghost" size="icon" onClick={() => handleEdit(asig)}>
-                                                        <Edit className="h-4 w-4" />
-                                                    </Button>
-                                                    <Button variant="ghost" size="icon" className="text-red-600 hover:text-red-700" onClick={() => handleDelete(asig.id)}>
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
+                                            <TableCell className="font-semibold text-[#00563F] align-middle">{asig.codigo}</TableCell>
+                                            <TableCell className="font-medium align-middle">{asig.nombre}</TableCell>
+
+                                            {/* Prerrequisitos: "No aplica" si vacío */}
+                                            <TableCell className="text-sm align-middle text-center">
+                                              {asig.prerrequisitos_codigos && asig.prerrequisitos_codigos.length > 0
+                                                ? asig.prerrequisitos_codigos.map((cod, i) => (
+                                                    <div key={i}>{cod}</div>
+                                                  ))
+                                                : <span className="text-gray-400 italic">No aplica</span>}
+                                            </TableCell>
+
+                                            {/* Correquisitos: "No aplica" si vacío */}
+                                            <TableCell className="text-sm align-middle text-center">
+                                              {asig.correquisitos_codigos && asig.correquisitos_codigos.length > 0
+                                                ? asig.correquisitos_codigos.map((cod, i) => (
+                                                    <div key={i}>{cod}</div>
+                                                  ))
+                                                : <span className="text-gray-400 italic">No aplica</span>}
+                                            </TableCell>
+
+                                            {/* Unidades: nombre + temas (descripción) */}
+                                            <TableCell className="align-top w-64 min-w-[16rem] pr-6">
+                                              <div className="space-y-3">
+                                                {unidadesFiltradas.map((u, i) => (
+                                                  <div key={i}>
+                                                    <div className="text-sm font-semibold text-[#00563F]">
+                                                      {i + 1}. {u.unidad}
+                                                    </div>
+                                                    {u.descripcion && (
+                                                      <div className="text-xs text-gray-600 mt-0.5 ml-3 leading-snug">
+                                                        {u.descripcion}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </TableCell>
+
+                                            {/* Resultados: uno por unidad */}
+                                            <TableCell className="align-top w-64 min-w-[16rem] pr-6">
+                                              <div className="space-y-3">
+                                                {unidadesFiltradas.map((u, i) => (
+                                                  <div key={i} className="text-sm text-gray-700">
+                                                    <span className="font-semibold text-[#00563F]">{i + 1}.</span>{" "}
+                                                    {u.resultados || <span className="italic text-gray-400">—</span>}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </TableCell>
+
+                                            {/* Columna Opciones: centrada horizontal y verticalmente */}
+                                            <TableCell className="align-middle text-center">
+                                              <div className="flex items-center justify-center gap-1">
+                                                <Button variant="ghost" size="icon" onClick={() => handleEdit(asig)} title="Editar">
+                                                  <Edit className="h-4 w-4" />
+                                                </Button>
+                                                <Button variant="ghost" size="icon" className="text-red-600 hover:text-red-700" onClick={() => handleDelete(asig.id)} title="Eliminar">
+                                                  <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                              </div>
                                             </TableCell>
                                         </TableRow>
                                     );

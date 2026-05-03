@@ -55,7 +55,7 @@ exports.getRegistrosPorFacultad = async (req, res) => {
 
 // --- CREAR UN NUEVO REGISTRO ---
 exports.create = async (req, res) => {
-  const { carrera_id, campo_amplio, campo_especifico, campo_detallado } = req.body;
+  const { carrera_id, campo_amplio, campo_especifico, campo_detallado, force_replace } = req.body;
 
   if (!carrera_id || !campo_amplio || !campo_especifico || !campo_detallado) {
     return res.status(400).json({ success: false, message: 'Todos los campos son obligatorios.' });
@@ -64,7 +64,18 @@ exports.create = async (req, res) => {
   try {
     const existente = await ClasificacionAcademica.findOne({ where: { carrera_id } });
     if (existente) {
-      return res.status(409).json({ success: false, message: 'Ya existe una clasificación para la carrera seleccionada.' });
+      if (force_replace) {
+        await ClasificacionAcademica.destroy({ where: { carrera_id } });
+      } else {
+      return res.status(409).json({
+        success: false,
+        message: 'Ya existe una clasificación para la carrera seleccionada.',
+        existingRecord: {
+          id: existente.id,
+          carrera_id: existente.carrera_id
+        }
+      });
+      }
     }
 
     const nuevoRegistro = await ClasificacionAcademica.create({
@@ -89,7 +100,7 @@ exports.create = async (req, res) => {
 // --- ACTUALIZAR UN REGISTRO EXISTENTE ---
 exports.update = async (req, res) => {
   const { id } = req.params;
-  const { carrera_id, campo_amplio, campo_especifico, campo_detallado } = req.body;
+  const { carrera_id, campo_amplio, campo_especifico, campo_detallado, force_replace } = req.body;
 
   try {
     const registro = await ClasificacionAcademica.findByPk(id);
@@ -100,7 +111,18 @@ exports.update = async (req, res) => {
     if (carrera_id && carrera_id !== registro.carrera_id) {
        const existente = await ClasificacionAcademica.findOne({ where: { carrera_id, id: { [Op.ne]: id } } });
        if (existente) {
-         return res.status(409).json({ success: false, message: 'La nueva carrera seleccionada ya tiene una clasificación.' });
+         if (force_replace) {
+           await ClasificacionAcademica.destroy({ where: { carrera_id, id: { [Op.ne]: id } } });
+         } else {
+         return res.status(409).json({
+           success: false,
+           message: 'La nueva carrera seleccionada ya tiene una clasificación.',
+           existingRecord: {
+             id: existente.id,
+             carrera_id: existente.carrera_id
+           }
+         });
+         }
        }
     }
 

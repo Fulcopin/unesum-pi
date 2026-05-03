@@ -39,6 +39,9 @@ interface TabData { id: string; title: string; rows: TableRow[]; }
 interface ProgramaAnaliticoData { id: string | number; name: string; description: string; tabs: TabData[]; metadata: { subject?: string; period?: string; level?: string; createdAt: string; updatedAt: string; }; }
 interface SavedProgramaAnaliticoRecord { id: number; nombre: string; periodo: string; materias: string; datos_tabla: ProgramaAnaliticoData; created_at: string; updated_at: string; }
 
+/** Comisión: estructura de tabla definida por administración; solo edición de contenido. */
+const HERRAMIENTAS_TABLA_BLOQUEADAS = true
+
 export default function EditorProgramaAnaliticoComisionPage() {
   const { token, getToken } = useAuth()
   const searchParams = useSearchParams()
@@ -111,6 +114,10 @@ export default function EditorProgramaAnaliticoComisionPage() {
     };
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (HERRAMIENTAS_TABLA_BLOQUEADAS) setConfigModeDocente(false)
+  }, [])
 
   // Si vinimos con params ?asignatura=..&periodo=.., intentar cargar el programa correspondiente
   useEffect(() => {
@@ -899,31 +906,38 @@ export default function EditorProgramaAnaliticoComisionPage() {
               {activeTab && (
                 <Card className="border-blue-100 shadow-md">
                   <CardContent className="p-4">
-                    <div className="flex flex-wrap gap-2 mb-4 p-2 border rounded-md bg-blue-50/50">
-                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertRow('above')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Fila ↑</Button>
-                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertRow('below')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Fila ↓</Button>
-                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertColumn('left')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Col ←</Button>
-                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertColumn('right')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Col →</Button>
+                    <div className={`flex flex-wrap gap-2 mb-2 p-2 border rounded-md bg-blue-50/50 ${HERRAMIENTAS_TABLA_BLOQUEADAS ? "opacity-60 pointer-events-none" : ""}`}>
+                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertRow('above')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Fila ↑</Button>
+                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertRow('below')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Fila ↓</Button>
+                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertColumn('left')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Col ←</Button>
+                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertColumn('right')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Col →</Button>
                        <div className="w-px h-6 bg-blue-200 mx-1"></div>
-                       <Button size="sm" onClick={removeSelectedRow} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente}><Minus className="h-3 w-3 mr-1"/>Fila</Button>
-                       <Button size="sm" onClick={removeSelectedColumn} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente}><Minus className="h-3 w-3 mr-1"/>Col</Button>
+                       <Button size="sm" onClick={removeSelectedRow} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Minus className="h-3 w-3 mr-1"/>Fila</Button>
+                       <Button size="sm" onClick={removeSelectedColumn} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Minus className="h-3 w-3 mr-1"/>Col</Button>
                        <div className="w-px h-6 bg-blue-200 mx-1"></div>
-                       <Button size="sm" onClick={toggleVerticalText} className="bg-white text-blue-700 border-blue-200" disabled={!selectedCells.length || configModeDocente} title="Rotar Texto Verticalmente"><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
-                       <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2 || configModeDocente} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
-                       <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length || configModeDocente} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
+                       <Button size="sm" onClick={toggleVerticalText} className="bg-white text-blue-700 border-blue-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} title="Rotar Texto Verticalmente"><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
+                       <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2 || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
+                       <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
                        <div className="w-px h-6 bg-blue-200 mx-1"></div>
                        <Button 
                          size="sm" 
                          onClick={() => setConfigModeDocente(!configModeDocente)} 
                          className={configModeDocente ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}
                          variant={configModeDocente ? "default" : "outline"}
+                         disabled={HERRAMIENTAS_TABLA_BLOQUEADAS}
                        >
                          <Settings className="h-4 w-4 mr-1" />
                          {configModeDocente ? 'Salir Config. Docente' : 'Config. Celdas Docente'}
                        </Button>
                     </div>
+                    {HERRAMIENTAS_TABLA_BLOQUEADAS && (
+                      <p className="text-xs text-slate-600 mb-4 flex items-center gap-2">
+                        <Lock className="h-3.5 w-3.5 shrink-0" />
+                        Caja de herramientas bloqueada: la estructura la define el administrador. Solo puede editar el contenido de las celdas permitidas.
+                      </p>
+                    )}
 
-                    {configModeDocente && (
+                    {configModeDocente && !HERRAMIENTAS_TABLA_BLOQUEADAS && (
                       <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="text-purple-800 font-bold text-sm flex items-center gap-2">

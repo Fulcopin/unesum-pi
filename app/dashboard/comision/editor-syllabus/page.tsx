@@ -16,7 +16,8 @@ import * as mammoth from "mammoth"
 import JSZip from "jszip" 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
-import { useSearchParams } from "next/navigation" 
+import { useSearchParams } from "next/navigation"
+import { periodoAlIdSelect, periodoIdCoincideEnLista } from "@/lib/periodo-select"
 
 // --- INTERFACES DE DATOS ---
 interface TableCell { 
@@ -182,6 +183,9 @@ const extraerTablasNativasWord = async (file: File): Promise<ExtractedCell[][][]
   }
 };
 
+/** Comisión: estructura de tabla definida por administración; solo edición de contenido. */
+const HERRAMIENTAS_TABLA_BLOQUEADAS = true
+
 export default function EditorSyllabusComisionPage() {
   const { token, getToken, user } = useAuth()
   
@@ -215,6 +219,8 @@ export default function EditorSyllabusComisionPage() {
   const [selectedWordTable, setSelectedWordTable] = useState<number | null>(null)
   const [columnMapping, setColumnMapping] = useState<Record<number, number>>({}) 
   const [configModeDocente, setConfigModeDocente] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [autoMapResult, setAutoMapResult] = useState<{ tabsImportados: number; totalTablas: number } | null>(null)
   
   const asignaturaIdParam = searchParams.get("asignatura")
   const periodoParam = searchParams.get("periodo")
@@ -253,6 +259,10 @@ export default function EditorSyllabusComisionPage() {
     }
     cargarMateria()
   }, [asignaturaIdParam])
+
+  useEffect(() => {
+    if (HERRAMIENTAS_TABLA_BLOQUEADAS) setConfigModeDocente(false)
+  }, [])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -465,7 +475,6 @@ export default function EditorSyllabusComisionPage() {
         setSyllabi([editorData]);
         setActiveSyllabusId(editorData.id);
         setActiveTabId(editorData.tabs?.[0]?.id || null);
-        if (syllabusData.periodo) setSelectedPeriod(syllabusData.periodo);
         
         // También agregar a savedSyllabi para que el guardar pueda detectarlo
         setSavedSyllabi(prev => {
@@ -479,6 +488,15 @@ export default function EditorSyllabusComisionPage() {
     cargarSyllabusDirecto();
   }, [syllabusIdParam]);
 
+  // El período guardado puede ser nombre; el Select usa id — cubre URL ?id= y carga desde la lista
+  useEffect(() => {
+    if (activeSyllabusId == null || periodos.length === 0) return;
+    const s = savedSyllabi.find((x: any) => String(x.id) === String(activeSyllabusId));
+    if (!s?.periodo) return;
+    const id = periodoAlIdSelect(s.periodo, periodos);
+    if (periodoIdCoincideEnLista(id, periodos)) setSelectedPeriod(id);
+  }, [activeSyllabusId, periodos, savedSyllabi]);
+
   // 🆕 Crear syllabus vacío cuando se viene con ?nueva=true
   useEffect(() => {
     if (nuevaParam !== 'true') return;
@@ -487,87 +505,89 @@ export default function EditorSyllabusComisionPage() {
 
     // Esperar a que carguen los datos necesarios
     if (isListLoading) return;
-    if (!asignaturaIdParam) return;
 
     const buscarOCrearSyllabus = async () => {
-      // Primero intentar buscar uno existente en el backend para esta asignatura+periodo
       const periodo = selectedPeriod || periodoParam || '';
-      if (periodo) {
-        try {
-          // Buscar en tabla comisión
-          const res = await apiRequest(`/api/comision-academica/syllabus/buscar?asignatura_id=${asignaturaIdParam}&periodo=${periodo}`);
-          if (res?.data) {
-            let editorData = res.data.datos_syllabus || res.data.datos_tabla;
-            if (typeof editorData === 'string') try { editorData = JSON.parse(editorData); } catch(e) { editorData = null; }
-            if (editorData) {
-              editorData.id = res.data.id;
-              if (!editorData.name) editorData.name = res.data.nombre;
-              if (editorData.tabs) {
-                editorData.tabs = editorData.tabs.map((t: any) => ({
-                  ...t, rows: (t.rows || []).map((r: any) => ({
-                    ...r, cells: (r.cells || []).map((c: any) => ({
-                      ...c, backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
-                      textColor: c.styles?.textColor || c.textColor,
-                      textAlign: c.styles?.textAlign || c.textAlign,
-                      textOrientation: c.styles?.textOrientation || c.textOrientation,
-                      isEditable: true
-                    }))
-                  }))
-                }));
-              } else if (editorData.rows) {
-                editorData.tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: editorData.rows }];
-              }
-              setSyllabi([editorData]);
-              setActiveSyllabusId(editorData.id);
-              setActiveTabId(editorData.tabs?.[0]?.id || null);
-              return; // Encontrado, no crear template vacío
-            }
-          }
-        } catch(e) { /* no existe en comisión, seguir buscando */ }
 
-        // Buscar en tabla general (admin)
-        try {
-          const verRes = await apiRequest(`/api/syllabi/verificar-existencia?asignatura_id=${asignaturaIdParam}&periodo=${periodo}`);
-          if (verRes?.existe && verRes?.syllabus?.id) {
-            const fullRes = await apiRequest(`/api/syllabi/${verRes.syllabus.id}`);
-            if (fullRes?.data) {
-              let editorData = fullRes.data.datos_syllabus || fullRes.data.datos_tabla;
-              if (typeof editorData === 'string') try { editorData = JSON.parse(editorData); } catch(e) { editorData = null; }
-              if (editorData) {
-                editorData.id = fullRes.data.id;
-                if (!editorData.name) editorData.name = fullRes.data.nombre;
-                if (editorData.tabs) {
-                  editorData.tabs = editorData.tabs.map((t: any) => ({
-                    ...t, rows: (t.rows || []).map((r: any) => ({
-                      ...r, cells: (r.cells || []).map((c: any) => ({
-                        ...c, backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
-                        textColor: c.styles?.textColor || c.textColor,
-                        textAlign: c.styles?.textAlign || c.textAlign,
-                        textOrientation: c.styles?.textOrientation || c.textOrientation,
-                        isEditable: true
-                      }))
-                    }))
-                  }));
-                } else if (editorData.rows) {
-                  editorData.tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: editorData.rows }];
+      // Resolver nombre del periodo para búsquedas flexibles
+      // (el admin guarda con nombre, la comisión trabaja con ID)
+      const periodoObj = periodos.find((p: any) => p.id.toString() === periodo);
+      const periodoNombre = periodoObj?.nombre || '';
+
+      const normalizeEditorData = (editorData: any) => {
+        if (editorData.tabs) {
+          editorData.tabs = editorData.tabs.map((t: any) => ({
+            ...t, rows: (t.rows || []).map((r: any) => ({
+              ...r, cells: (r.cells || []).map((c: any) => ({
+                ...c, backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
+                textColor: c.styles?.textColor || c.textColor,
+                textAlign: c.styles?.textAlign || c.textAlign,
+                textOrientation: c.styles?.textOrientation || c.textOrientation,
+                isEditable: true
+              }))
+            }))
+          }));
+        } else if (editorData.rows) {
+          editorData.tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: editorData.rows }];
+        }
+        return editorData;
+      };
+
+      const cargarEditorData = (editorData: any, id: any, nombre?: string) => {
+        editorData.id = id;
+        if (!editorData.name && nombre) editorData.name = nombre;
+        normalizeEditorData(editorData);
+        setSyllabi([editorData]);
+        setActiveSyllabusId(editorData.id);
+        setActiveTabId(editorData.tabs?.[0]?.id || null);
+      };
+
+      if (periodo) {
+        // 1. Buscar en tabla comisión por asignatura+periodo
+        if (asignaturaIdParam) {
+          for (const p of [periodo, periodoNombre].filter(Boolean)) {
+            try {
+              const res = await apiRequest(`/api/comision-academica/syllabus/buscar?asignatura_id=${asignaturaIdParam}&periodo=${encodeURIComponent(p)}`);
+              if (res?.data) {
+                let editorData = res.data.datos_syllabus || res.data.datos_tabla;
+                if (typeof editorData === 'string') try { editorData = JSON.parse(editorData); } catch(e) { editorData = null; }
+                if (editorData) {
+                  cargarEditorData(editorData, res.data.id, res.data.nombre);
+                  return;
                 }
-                setSyllabi([editorData]);
-                setActiveSyllabusId(editorData.id);
-                setActiveTabId(editorData.tabs?.[0]?.id || null);
-                return; // Encontrado, no crear template vacío
+              }
+            } catch(e) { /* no existe en comisión, seguir buscando */ }
+          }
+        }
+
+        // 2. Buscar en tabla general (admin) por asignatura+periodo — el backend ya resuelve ID↔nombre
+        const asigQuery = asignaturaIdParam ? `&asignatura_id=${asignaturaIdParam}` : '';
+        for (const p of [periodo, periodoNombre].filter(Boolean)) {
+          try {
+            const verRes = await apiRequest(`/api/syllabi/verificar-existencia?periodo=${encodeURIComponent(p)}${asigQuery}&materia=${encodeURIComponent(asignaturaInfo?.nombre || '')}`);
+            if (verRes?.existe && verRes?.syllabus?.id) {
+              const fullRes = await apiRequest(`/api/syllabi/${verRes.syllabus.id}`);
+              if (fullRes?.data) {
+                let editorData = fullRes.data.datos_syllabus || fullRes.data.datos_tabla;
+                if (typeof editorData === 'string') try { editorData = JSON.parse(editorData); } catch(e) { editorData = null; }
+                if (editorData) {
+                  console.log(`✅ Cargando syllabus del admin (periodo: ${p}) como plantilla`);
+                  cargarEditorData(editorData, fullRes.data.id, fullRes.data.nombre);
+                  return;
+                }
               }
             }
-          }
-        } catch(e) { /* no existe en general */ }
+          } catch(e) { /* no existe */ }
+        }
       }
 
-      // No se encontró ninguno existente → no crear template, dejar la pantalla inicial
+      // No se encontró ninguno existente → dejar la pantalla inicial
       // para que el usuario seleccione de la lista o suba un Word
       console.log('ℹ️ No se encontró syllabus existente para esta asignatura/periodo');
     };
 
     buscarOCrearSyllabus();
-  }, [nuevaParam, syllabusIdParam, activeSyllabusId, isListLoading, asignaturaInfo, selectedPeriod]);
+  }, [nuevaParam, syllabusIdParam, activeSyllabusId, isListLoading, asignaturaInfo, selectedPeriod, periodos]);
 
   const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
     const fullUrl = `http://localhost:4000${endpoint}`
@@ -587,23 +607,12 @@ export default function EditorSyllabusComisionPage() {
 
     if (fileInputRefSync.current) fileInputRefSync.current.value = "";
     setIsLoading(true);
+    setAutoMapResult(null);
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const mammothLib = (await import('mammoth')).default;
-
-      const resultadoTexto = await mammothLib.extractRawText({ arrayBuffer: arrayBuffer.slice(0) });
-      const textoCompleto = resultadoTexto.value;
-      let wordData: Record<string, string> = {};
-
-      const regexEtiquetas = /\[([^\]]+)\]\s*([\s\S]*?)(?=\[[^\]]+\]|$)/g;
-      let matchResult;
-      while ((matchResult = regexEtiquetas.exec(textoCompleto)) !== null) {
-        wordData[matchResult[1].trim().toUpperCase()] = matchResult[2].trim();
-      }
-
       // EXTRACCIÓN MAESTRA CON JSZIP
       const tablasPerfectas = await extraerTablasNativasWord(file);
+
       if (tablasPerfectas.length > 0) {
         setWordRawTables(tablasPerfectas);
         setShowWordPreview(true);
@@ -612,10 +621,12 @@ export default function EditorSyllabusComisionPage() {
         );
         setSelectedWordTable(idxMejorTabla);
         setColumnMapping({});
+
+        // 🤖 AUTO-MAPEO: aplicar automáticamente todas las tablas a sus pestañas
+        autoMapearTodas(tablasPerfectas);
+      } else {
+        alert('⚠️ No se encontraron tablas en el documento Word.');
       }
-
-      alert("Tablas extraídas. Por favor usa el botón azul de Importar Directo para mantener el orden exacto.");
-
     } catch (error: any) {
       console.error("Error en sincronizacion:", error);
       alert("Error: " + error.message);
@@ -699,6 +710,89 @@ export default function EditorSyllabusComisionPage() {
     
     setSyllabi(prev => prev.map(s => s.id === activeSyllabus.id ? { ...s, tabs: updatedTabs } : s));
     alert(`✅ ¡Tabla importada con éxito!\n\nSe ajustaron automáticamente las filas, columnas y celdas combinadas para mantener el diseño exacto.`);
+  };
+
+  // 🤖 AUTO-MAPEO: Importa todas las tablas del Word a sus pestañas correspondientes
+  const autoMapearTodas = (tablas: ExtractedCell[][][]) => {
+    if (!activeSyllabus) return;
+
+    // Las tablas del syllabus son T1-T4 (índice 1 a 4), T0 suele ser logo/encabezado
+    const tablasSyllabus = tablas.slice(1, 5);
+    const editorTabs = activeSyllabus.tabs;
+    if (tablasSyllabus.length === 0 || editorTabs.length === 0) return;
+
+    let tabsImportados = 0;
+
+    const updatedTabs = editorTabs.map((tab, tabIdx) => {
+      const wordTable = tablasSyllabus[tabIdx];
+      if (!wordTable || wordTable.length === 0) return tab;
+
+      const maxCols = Math.max(
+        wordTable[0]?.length || 0,
+        tab.rows[0]?.cells.length || 0
+      );
+      const processedRows = [...tab.rows];
+
+      for (let wRIdx = 0; wRIdx < wordTable.length; wRIdx++) {
+        const wordRow = wordTable[wRIdx];
+        if (!processedRows[wRIdx]) {
+          processedRows[wRIdx] = {
+            id: `row-auto-${Date.now()}-${wRIdx}`,
+            cells: []
+          };
+        }
+        while (processedRows[wRIdx].cells.length < maxCols) {
+          processedRows[wRIdx].cells.push({
+            id: `cell-auto-${Date.now()}-${wRIdx}-${processedRows[wRIdx].cells.length}`,
+            content: '', isHeader: wRIdx === 0,
+            rowSpan: 1, colSpan: 1, isEditable: true, textOrientation: 'horizontal'
+          });
+        }
+        processedRows[wRIdx].cells = processedRows[wRIdx].cells.map((cell, cIdx) => {
+          const wordCell = wordRow[cIdx];
+          if (!wordCell) return cell;
+          const upperText = wordCell.text.toUpperCase().trim();
+          const isShortHeader = upperText.length <= 14 && !upperText.includes('-');
+          const matchesVert = ['AUTÓNOMO', 'PRACTICO', 'SINCRÓNICA', 'PFAE'].some(k => upperText.includes(k)) || upperText === 'TA';
+          const isVertical = isShortHeader && matchesVert;
+          return {
+            ...cell,
+            content: wordCell.isHidden ? '' : wordCell.text.trim(),
+            rowSpan: wordCell.isHidden ? 0 : wordCell.rowSpan,
+            colSpan: wordCell.isHidden ? 0 : wordCell.colSpan,
+            isEditable: !wordCell.isHidden,
+            textOrientation: isVertical ? 'vertical' : 'horizontal'
+          };
+        });
+      }
+      tabsImportados++;
+      return { ...tab, rows: processedRows };
+    });
+
+    setSyllabi(prev => prev.map(s =>
+      s.id === activeSyllabus.id ? { ...s, tabs: updatedTabs } : s
+    ));
+    setAutoMapResult({ tabsImportados, totalTablas: tablasSyllabus.length });
+  };
+
+  // 🗑️ ELIMINAR syllabus activo de la base de datos
+  const handleEliminarSyllabusActivo = async () => {
+    if (!activeSyllabus || typeof activeSyllabus.id !== 'number') return;
+    setShowDeleteConfirm(false);
+    setIsLoading(true);
+    try {
+      const endpoint = sourceParam === 'general'
+        ? `/api/syllabi/${activeSyllabus.id}`
+        : `/api/comision-academica/syllabus/${activeSyllabus.id}`;
+      await apiRequest(endpoint, { method: 'DELETE' });
+      setActiveSyllabusId(null);
+      setSyllabi([]);
+      setSavedSyllabi(prev => prev.filter(s => s.id !== activeSyllabus.id));
+    } catch (err: any) {
+      alert('❌ Error al eliminar: ' + err.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSaveToDB = async () => {
@@ -845,12 +939,9 @@ export default function EditorSyllabusComisionPage() {
     setSyllabi([editorData]);
     setActiveSyllabusId(editorData.id);
     setActiveTabId(editorData.tabs?.[0]?.id || null);
-    // Solo cambiar periodo si el del syllabus es un ID válido de periodos
-    if (syllabusToLoad.periodo) {
-      const esIdValido = periodos.some((p: any) => p.id.toString() === String(syllabusToLoad.periodo));
-      if (esIdValido) {
-        setSelectedPeriod(String(syllabusToLoad.periodo));
-      }
+    if (syllabusToLoad.periodo && periodos.length > 0) {
+      const id = periodoAlIdSelect(syllabusToLoad.periodo, periodos);
+      if (periodoIdCoincideEnLista(id, periodos)) setSelectedPeriod(id);
     }
   };
 
@@ -1724,22 +1815,67 @@ export default function EditorSyllabusComisionPage() {
                 <CardHeader>
                   <CardTitle className="flex flex-wrap items-center justify-between gap-4 text-emerald-800">
                     <span className="truncate">{activeSyllabus.name}</span>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                        <Button onClick={() => { setActiveSyllabusId(null); setSyllabi([]); }} variant="outline" size="sm"><Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
                        <Button onClick={handleSaveToDB} className="bg-blue-600 hover:bg-blue-700" size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2"/> Guardar</>}</Button>
                        <Button onClick={handlePrintToPdf} variant="outline" size="sm" disabled={!activeTab}><FileDown className="h-4 w-4 mr-2" /> Exportar PDF</Button>
+                       {typeof activeSyllabus.id === 'number' && (
+                         <Button
+                           onClick={() => setShowDeleteConfirm(true)}
+                           variant="outline"
+                           size="sm"
+                           className="border-red-300 text-red-600 hover:bg-red-50"
+                         >
+                           <Trash2 className="h-4 w-4 mr-2" /> Eliminar
+                         </Button>
+                       )}
                     </div>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between">
-                    <div>
-                      <h4 className="text-amber-800 font-bold flex items-center gap-2"><FileText className="h-5 w-5" /> Sincronización Inteligente</h4>
-                      <p className="text-amber-700 text-sm">Sube el Word lleno y las celdas se auto-completarán.</p>
+                  <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                      <div>
+                        <h4 className="text-amber-800 font-bold flex items-center gap-2">
+                          <FileText className="h-5 w-5" /> Sincronización Inteligente
+                        </h4>
+                        <p className="text-amber-700 text-sm">
+                          Sube el Word lleno — todas las pestañas se auto-completarán automáticamente.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={() => fileInputRefSync.current?.click()}
+                          className="bg-amber-600 hover:bg-amber-700 text-white"
+                          disabled={isLoading}
+                        >
+                          <Upload className="h-4 w-4 mr-2" />
+                          {isLoading ? 'Procesando...' : 'Subir Word y Auto-Mapear'}
+                        </Button>
+                        {wordRawTables.length > 0 && (
+                          <Button
+                            onClick={() => setShowWordPreview(!showWordPreview)}
+                            variant="outline"
+                            className="text-blue-700"
+                          >
+                            <FileText className="h-4 w-4 mr-1" /> Ver Tablas
+                          </Button>
+                        )}
+                      </div>
+                      <input type="file" ref={fileInputRefSync} className="hidden" accept=".docx" onChange={handleSmartSync} />
                     </div>
-                    <Button onClick={() => fileInputRefSync.current?.click()} className="bg-amber-600 text-white" disabled={isLoading}><Upload className="h-4 w-4 mr-2" /> Subir Word</Button>
-                    {wordRawTables.length > 0 && <Button onClick={() => setShowWordPreview(!showWordPreview)} variant="outline" className="text-blue-700 ml-2"><FileText className="h-4 w-4 mr-1" /> Ver Tablas</Button>}
-                    <input type="file" ref={fileInputRefSync} className="hidden" accept=".docx" onChange={handleSmartSync} />
+                    {autoMapResult && (
+                      <div className="mt-3 bg-green-50 border border-green-200 rounded-lg px-4 py-2 flex items-center gap-2 text-green-800 text-sm">
+                        <Check className="h-4 w-4 text-green-600 shrink-0" />
+                        <span>
+                          ✅ Auto-mapeo completado: <strong>{autoMapResult.tabsImportados}</strong> de <strong>{autoMapResult.totalTablas}</strong> secciones llenadas automáticamente.
+                          Revisa cada pestaña y guarda cuando estés conforme.
+                        </span>
+                        <button onClick={() => setAutoMapResult(null)} className="ml-auto text-green-600 hover:text-green-800">
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -1769,31 +1905,38 @@ export default function EditorSyllabusComisionPage() {
               {activeTab && (
                 <Card className="border-emerald-100 shadow-md">
                   <CardContent className="p-4">
-                    <div className="flex flex-wrap gap-2 mb-4 p-2 border rounded-md bg-emerald-50/50">
-                       <Button size="sm" onClick={() => handleInsertRow('above')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Fila ↑</Button>
-                       <Button size="sm" onClick={() => handleInsertRow('below')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Fila ↓</Button>
-                       <Button size="sm" onClick={() => handleInsertColumn('left')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Col ←</Button>
-                       <Button size="sm" onClick={() => handleInsertColumn('right')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Col →</Button>
+                    <div className={`flex flex-wrap gap-2 mb-2 p-2 border rounded-md bg-emerald-50/50 ${HERRAMIENTAS_TABLA_BLOQUEADAS ? "opacity-60 pointer-events-none" : ""}`}>
+                       <Button size="sm" onClick={() => handleInsertRow('above')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Fila ↑</Button>
+                       <Button size="sm" onClick={() => handleInsertRow('below')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Fila ↓</Button>
+                       <Button size="sm" onClick={() => handleInsertColumn('left')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Col ←</Button>
+                       <Button size="sm" onClick={() => handleInsertColumn('right')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Col →</Button>
                        <div className="w-px h-6 bg-emerald-200 mx-1"></div>
-                       <Button size="sm" onClick={removeSelectedRow} className="bg-red-50 text-red-600" disabled={!selectedCells.length || configModeDocente}><Minus className="h-3 w-3 mr-1"/>Fila</Button>
-                       <Button size="sm" onClick={removeSelectedColumn} className="bg-red-50 text-red-600" disabled={!selectedCells.length || configModeDocente}><Minus className="h-3 w-3 mr-1"/>Col</Button>
+                       <Button size="sm" onClick={removeSelectedRow} className="bg-red-50 text-red-600" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Minus className="h-3 w-3 mr-1"/>Fila</Button>
+                       <Button size="sm" onClick={removeSelectedColumn} className="bg-red-50 text-red-600" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Minus className="h-3 w-3 mr-1"/>Col</Button>
                        <div className="w-px h-6 bg-emerald-200 mx-1"></div>
-                       <Button size="sm" onClick={toggleVerticalText} disabled={!selectedCells.length || configModeDocente}><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
-                       <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2 || configModeDocente} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
-                       <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length || configModeDocente} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
+                       <Button size="sm" onClick={toggleVerticalText} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
+                       <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2 || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
+                       <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
                        <div className="w-px h-6 bg-emerald-200 mx-1"></div>
                        <Button 
                          size="sm" 
                          onClick={() => setConfigModeDocente(!configModeDocente)} 
                          className={configModeDocente ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}
                          variant={configModeDocente ? "default" : "outline"}
+                         disabled={HERRAMIENTAS_TABLA_BLOQUEADAS}
                        >
                          <Settings className="h-4 w-4 mr-1" />
                          {configModeDocente ? 'Salir Config. Docente' : 'Config. Celdas Docente'}
                        </Button>
                     </div>
+                    {HERRAMIENTAS_TABLA_BLOQUEADAS && (
+                      <p className="text-xs text-slate-600 mb-4 flex items-center gap-2">
+                        <Lock className="h-3.5 w-3.5 shrink-0" />
+                        Caja de herramientas bloqueada: la estructura la define el administrador. Solo puede editar el contenido de las celdas permitidas.
+                      </p>
+                    )}
 
-                    {configModeDocente && (
+                    {configModeDocente && !HERRAMIENTAS_TABLA_BLOQUEADAS && (
                       <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="text-purple-800 font-bold text-sm flex items-center gap-2">
@@ -2118,6 +2261,33 @@ export default function EditorSyllabusComisionPage() {
               {modalCell.isEditable ? <Textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} className="w-full min-h-[300px] p-3 text-sm border-gray-300 rounded-lg" autoFocus /> : <div className="whitespace-pre-wrap text-sm text-gray-700 p-3 bg-gray-50 rounded-lg min-h-[200px]">{modalCell.content}</div>}
             </div>
             <div className="flex justify-end gap-3 p-4 border-t bg-gray-50"><Button variant="outline" onClick={() => setModalCell(null)}>Cerrar</Button>{modalCell.isEditable && <Button className="bg-emerald-600 text-white" onClick={saveModalEdit}><Save className="h-4 w-4 mr-2" /> Guardar</Button>}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmación de eliminación del syllabus activo */}
+      {showDeleteConfirm && activeSyllabus && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-red-100 p-2 rounded-full">
+                <Trash2 className="h-6 w-6 text-red-600" />
+              </div>
+              <h2 className="text-lg font-semibold text-gray-900">Eliminar Syllabus</h2>
+            </div>
+            <p className="text-gray-600 mb-2">¿Está seguro de eliminar este syllabus?</p>
+            <p className="font-semibold text-gray-900 mb-4">"{activeSyllabus.name}"</p>
+            <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-6">
+              Esta acción no se puede deshacer.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
+                Cancelar
+              </Button>
+              <Button variant="destructive" onClick={handleEliminarSyllabusActivo}>
+                Sí, eliminar
+              </Button>
+            </div>
           </div>
         </div>
       )}

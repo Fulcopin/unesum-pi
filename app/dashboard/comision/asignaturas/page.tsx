@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 import { useAuth } from "@/contexts/auth-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,7 +20,10 @@ import {
   List,
   AlertCircle,
   Plus,
-  Calendar
+  Calendar,
+  Trash2,
+  Pencil,
+  ArrowLeft
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -61,6 +66,8 @@ export default function AsignaturasComisionPage() {
   const [error, setError] = useState<string | null>(null);
   const [periodos, setPeriodos] = useState<any[]>([]);
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState<string>('');
+  const [confirmEliminar, setConfirmEliminar] = useState<{ id: number; nombre: string; asignaturaId: number; source: string } | null>(null);
+  const [eliminando, setEliminando] = useState(false);
 
   useEffect(() => {
     cargarPeriodos();
@@ -74,7 +81,7 @@ export default function AsignaturasComisionPage() {
   const cargarPeriodos = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/datos-academicos/periodos`, {
+      const response = await fetch(`${API_URL}/datos-academicos/periodos`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -113,7 +120,7 @@ export default function AsignaturasComisionPage() {
       let syllabusComision: any = null;
       try {
         const resComision = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/comision-academica/syllabus/buscar?asignatura_id=${asignaturaId}&periodo=${periodoSeleccionado}`,
+          `${API_URL}/comision-academica/syllabus/buscar?asignatura_id=${asignaturaId}&periodo=${periodoSeleccionado}`,
           {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -145,49 +152,24 @@ export default function AsignaturasComisionPage() {
         return;
       }
 
-      // 2) Verificar en tabla general (admin)
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/syllabi/verificar-existencia?periodo=${periodoSeleccionado}&asignatura_id=${asignaturaId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      const data = await response.json();
-
-      if (data.existe) {
-        const confirmar = confirm(
-          `⚠️ Ya existe un syllabus para "${asignaturaNombre}" en este periodo.\n\n` +
-          `Syllabus existente: ${data.syllabus.nombre}\n` +
-          `Fecha de creación: ${new Date(data.syllabus.fecha_creacion).toLocaleDateString()}\n\n` +
-          `¿Desea eliminarlo para subir uno nuevo?`
-        );
-
-        if (confirmar) {
-          await eliminarSyllabus(data.syllabus.id);
-          // Después de eliminar, redirigir a crear
-          router.push(`/dashboard/comision/editor-syllabus?asignatura=${asignaturaId}&periodo=${periodoSeleccionado}&nueva=true`);
-        } else {
-          // Ver el existente
-          router.push(`/dashboard/comision/editor-syllabus?id=${data.syllabus.id}&asignatura=${asignaturaId}&periodo=${periodoSeleccionado}&source=general`);
-        }
-      } else {
-        // No existe en ninguna tabla, crear nuevo
-        router.push(`/dashboard/comision/editor-syllabus?asignatura=${asignaturaId}&periodo=${periodoSeleccionado}&nueva=true`);
-      }
+      // 2) Si no existe en comisión, ir directo al editor (cargará la plantilla del admin automáticamente si existe)
+      router.push(`/dashboard/comision/editor-syllabus?asignatura=${asignaturaId}&periodo=${periodoSeleccionado}&nueva=true`);
     } catch (err: any) {
       console.error('Error al verificar:', err);
       alert('❌ Error al verificar syllabus: ' + err.message);
     }
   };
 
-  const eliminarSyllabus = async (syllabusId: number) => {
+  const eliminarSyllabus = async (syllabusId: number, asignaturaId: number, source: string) => {
+    setEliminando(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/syllabi/${syllabusId}`, {
+      // Usar el endpoint correcto según el origen del syllabus
+      const endpoint = source === 'comision'
+        ? `${API_URL}/comision-academica/syllabus/${syllabusId}`
+        : `${API_URL}/syllabi/${syllabusId}`;
+
+      const response = await fetch(endpoint, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -195,15 +177,19 @@ export default function AsignaturasComisionPage() {
         }
       });
 
+      const data = await response.json().catch(() => ({}));
+
       if (response.ok) {
-        alert('✅ Syllabus eliminado correctamente');
-        await cargarEstructura(); // Recargar datos
+        setConfirmEliminar(null);
+        await cargarEstructura();
       } else {
-        throw new Error('Error al eliminar syllabus');
+        throw new Error(data.message || 'Error al eliminar syllabus');
       }
     } catch (err: any) {
       console.error('Error:', err);
       alert('❌ Error al eliminar: ' + err.message);
+    } finally {
+      setEliminando(false);
     }
   };
 
@@ -213,7 +199,7 @@ export default function AsignaturasComisionPage() {
       const token = localStorage.getItem('token');
       
       const urlParams = periodoSeleccionado ? `?periodo=${periodoSeleccionado}` : '';
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/comision-academica/estructura-facultad${urlParams}`, {
+      const response = await fetch(`${API_URL}/comision-academica/estructura-facultad${urlParams}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -343,6 +329,14 @@ export default function AsignaturasComisionPage() {
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
+      <div className="mb-2">
+        <Link href="/dashboard/comision">
+          <Button variant="ghost" size="sm" className="-ml-2 text-gray-700">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Volver al menú principal
+          </Button>
+        </Link>
+      </div>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
@@ -528,14 +522,25 @@ export default function AsignaturasComisionPage() {
                           </div>
                         </div>
                         
-                        <div className="flex gap-2">
-                          {asignatura.tiene_syllabus ? (
-                            <Link href={`/dashboard/comision/editor-syllabus?id=${asignatura.syllabus_id}&asignatura=${asignatura.id}&periodo=${periodoSeleccionado}&source=${asignatura.syllabus_source || 'comision'}`}>
-                              <Button size="sm" variant="outline" className="border-green-300 text-green-700 bg-green-50">
-                                <CheckCircle2 className="h-4 w-4 mr-1" />
-                                Ver Syllabus
+                        <div className="flex gap-2 flex-wrap">
+                          {asignatura.tiene_syllabus && asignatura.syllabus_source === 'comision' ? (
+                            <>
+                              <Link href={`/dashboard/comision/editor-syllabus?id=${asignatura.syllabus_id}&asignatura=${asignatura.id}&periodo=${periodoSeleccionado}&source=comision`}>
+                                <Button size="sm" variant="outline" className="border-green-300 text-green-700 bg-green-50">
+                                  <Pencil className="h-4 w-4 mr-1" />
+                                  Ver / Editar
+                                </Button>
+                              </Link>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-red-300 text-red-600 hover:bg-red-50"
+                                onClick={() => setConfirmEliminar({ id: asignatura.syllabus_id!, nombre: asignatura.nombre, asignaturaId: asignatura.id, source: 'comision' })}
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Eliminar
                               </Button>
-                            </Link>
+                            </>
                           ) : (
                             <Button 
                               size="sm" 
@@ -544,7 +549,7 @@ export default function AsignaturasComisionPage() {
                               disabled={!periodoSeleccionado}
                             >
                               <Plus className="h-4 w-4 mr-1" />
-                              Crear Syllabus
+                              {asignatura.tiene_syllabus ? 'Editar Syllabus' : 'Crear Syllabus'}
                             </Button>
                           )}
                           
@@ -587,6 +592,43 @@ export default function AsignaturasComisionPage() {
               </CardContent>
             </Card>
           )}
+        </div>
+      )}
+
+      {/* Modal de confirmación de eliminación */}
+      {confirmEliminar && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-red-100 p-2 rounded-full">
+                <Trash2 className="h-6 w-6 text-red-600" />
+              </div>
+              <h2 className="text-lg font-semibold text-gray-900">Eliminar Syllabus</h2>
+            </div>
+            <p className="text-gray-600 mb-2">
+              ¿Está seguro de que desea eliminar el syllabus de:
+            </p>
+            <p className="font-semibold text-gray-900 mb-4">"{confirmEliminar.nombre}"</p>
+            <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-6">
+              Esta acción no se puede deshacer. Podrá crear uno nuevo después.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmEliminar(null)}
+                disabled={eliminando}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => eliminarSyllabus(confirmEliminar.id, confirmEliminar.asignaturaId, confirmEliminar.source)}
+                disabled={eliminando}
+              >
+                {eliminando ? 'Eliminando...' : 'Sí, eliminar'}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

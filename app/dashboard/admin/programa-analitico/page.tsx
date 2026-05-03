@@ -1,7 +1,8 @@
-﻿"use client"
+"use client"
 
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText } from "lucide-react"
+import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Home, Loader2 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import * as mammoth from "mammoth"
 import jsPDF from "jspdf"
@@ -39,7 +40,7 @@ interface SavedProgramaAnaliticoRecord { id: number; nombre: string; periodo: st
 
 export default function EditorProgramaAnaliticoPage() {
   const { token, getToken, user } = useAuth()
-  
+  const router = useRouter()
   // --- ESTADOS ---
   const [programas, setprogramas] = useState<ProgramaAnaliticoData[]>([])
   const [activeProgramaAnaliticoId, setActiveProgramaAnaliticoId] = useState<string | number | null>(null)
@@ -889,58 +890,33 @@ export default function EditorProgramaAnaliticoPage() {
               <Card className="mb-6 border-t-4 border-t-emerald-600">
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between text-emerald-800">
-                    <span>Editor de Programa AnalÃ­tico</span>
+                    <span>Editor de Programa Analítico</span>
                     <div className="flex gap-2">
-                      <Button onClick={handleNewProgramaAnalitico} className="bg-emerald-600 hover:bg-emerald-700">
+                      <Button onClick={() => setShowProgramaAnaliticoSelector(true)} className="bg-emerald-600 hover:bg-emerald-700">
                         <Plus className="h-4 w-4 mr-2" /> Nuevo
                       </Button>
-                      <Button onClick={handleSaveToDB} disabled={!activeProgramaAnalitico} className="bg-blue-600 hover:bg-blue-700">
-                        <Save className="h-4 w-4 mr-2" /> Guardar
+                      <Button onClick={handleSaveToDB} disabled={!activeProgramaAnalitico || isSaving} className="bg-blue-600 hover:bg-blue-700">
+                        {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                        Guardar
                       </Button>
                       <Button onClick={handlePrintToPdf} disabled={!activeProgramaAnalitico} variant="outline">
                         <Printer className="h-4 w-4 mr-2" /> Imprimir
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => router.push('/dashboard')}
+                        variant="outline"
+                        className="border-gray-400 text-gray-700 hover:bg-gray-50 px-6"
+                        disabled={isSaving}
+                      >
+                        <Home className="h-4 w-4 mr-2" />
+                        MENÚ PRINCIPAL
                       </Button>
                     </div>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="space-y-2">
-                      <Label>Carrera</Label>
-                      <Select value={selectedCarrera} onValueChange={setSelectedCarrera}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Seleccione la carrera" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {carreras.map((carrera) => (
-                            <SelectItem key={carrera.id} value={carrera.id.toString()}>
-                              {carrera.nombre}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Asignatura</Label>
-                      <Select 
-                        value={selectedAsignatura} 
-                        onValueChange={setSelectedAsignatura}
-                        disabled={!selectedCarrera}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={selectedCarrera ? "Seleccione la asignatura" : "Primero seleccione carrera"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {asignaturas.map((asignatura) => (
-                            <SelectItem key={asignatura.id} value={asignatura.id.toString()}>
-                              {asignatura.nombre}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                   
+                  <div className="grid grid-cols-1 gap-6">
                     <div className="space-y-2">
                       <Label>Periodo</Label>
                       <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
@@ -973,11 +949,20 @@ export default function EditorProgramaAnaliticoPage() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <Button onClick={() => fileInputRef.current?.click()} className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={isLoading}>
-                        {isLoading ? "Procesando..." : <><Upload className="h-4 w-4 mr-2" /> Subir Nuevo Word (.docx)</>}
-                      </Button>
-                      <input ref={fileInputRef} type="file" accept=".docx" onChange={(e) => { handleProgramaAnaliticoUpload(e); setShowProgramaAnaliticoSelector(false); }} className="hidden" />
-                      
+                      {user?.rol === 'comision_academica' ? (
+                        <div className="p-3 bg-emerald-50 border border-emerald-100 rounded">
+                          <p className="text-sm text-emerald-800 mb-2">Seleccione una plantilla subida por el administrador para el periodo seleccionado.</p>
+                          <p className="text-xs text-gray-500">Si no aparece ninguna plantilla, verifique que el administrador haya subido programas para ese periodo.</p>
+                        </div>
+                      ) : (
+                        <>
+                          <Button onClick={() => fileInputRef.current?.click()} className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={isLoading}>
+                            {isLoading ? "Procesando..." : <><Upload className="h-4 w-4 mr-2" /> Subir Nuevo Word (.docx)</>}
+                          </Button>
+                          <input ref={fileInputRef} type="file" accept=".docx" onChange={(e) => { handleProgramaAnaliticoUpload(e); setShowProgramaAnaliticoSelector(false); }} className="hidden" />
+                        </>
+                      )}
+
                       <div className="border-t pt-4">
                         <h3 className="font-semibold mb-3">O seleccione uno existente:</h3>
                         {isListLoading ? (
@@ -1008,7 +993,7 @@ export default function EditorProgramaAnaliticoPage() {
               {/* Tabla de ProgramaAnalitico Creados */}
               <Card>
                 <CardHeader>
-                  <CardTitle>ProgramaAnalitico Creados</CardTitle>
+                  <CardTitle>Programa Analitico Creados</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {isListLoading ? (

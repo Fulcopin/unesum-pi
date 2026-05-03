@@ -4,11 +4,33 @@ import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { BarChart3, Users, FileText, Calendar, TrendingUp, Settings } from "lucide-react"
+import { BarChart3, Users, FileText, Calendar, TrendingUp, Settings, ScrollText, ClipboardSignature, Pen } from "lucide-react"
 import Link from "next/link"
 
 export default function DireccionDashboard() {
   const direccionModules = [
+    {
+      title: "Mis Documentos para Firmar",
+      description: "Ve todos los documentos pendientes de tu firma (syllabus y programas analíticos) y fírmalos de inmediato",
+      icon: Pen,
+      href: "/dashboard/direccion/mis-firmas",
+      color: "bg-indigo-700",
+      destacado: true,
+    },
+    {
+      title: "Firmar Syllabus",
+      description: "Revisar y firmar con QR los syllabus por nivel de la carrera",
+      icon: ClipboardSignature,
+      href: "/dashboard/direccion/syllabus",
+      color: "bg-blue-600",
+    },
+    {
+      title: "Firmar Programas Analíticos",
+      description: "Revisar y firmar con QR los programas analíticos por nivel",
+      icon: ScrollText,
+      href: "/dashboard/direccion/programa-analitico",
+      color: "bg-indigo-600",
+    },
     {
       title: "Dashboard Ejecutivo",
       description: "Resumen general de indicadores institucionales",
@@ -67,22 +89,25 @@ export default function DireccionDashboard() {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {direccionModules.map((module) => {
               const IconComponent = module.icon
+              const esDestacado = (module as any).destacado
               return (
-                <Card key={module.href} className="hover:shadow-lg transition-shadow cursor-pointer">
+                <Card key={module.href} className={`hover:shadow-lg transition-shadow cursor-pointer ${esDestacado ? 'border-indigo-300 bg-indigo-50 md:col-span-2 lg:col-span-3' : ''}`}>
                   <CardHeader className="pb-3">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${module.color} text-white`}>
-                        <IconComponent className="h-6 w-6" />
+                        <IconComponent className={esDestacado ? "h-8 w-8" : "h-6 w-6"} />
                       </div>
                       <div>
-                        <CardTitle className="text-lg">{module.title}</CardTitle>
+                        <CardTitle className={esDestacado ? "text-xl" : "text-lg"}>{module.title}</CardTitle>
                       </div>
                     </div>
                   </CardHeader>
                   <CardContent>
                     <CardDescription className="mb-4">{module.description}</CardDescription>
                     <Link href={module.href}>
-                      <Button className="w-full bg-emerald-600 hover:bg-emerald-700">Acceder</Button>
+                      <Button className={`w-full ${esDestacado ? 'bg-indigo-700 hover:bg-indigo-800 text-base py-5' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                        {esDestacado ? 'Ver mis documentos pendientes →' : 'Acceder'}
+                      </Button>
                     </Link>
                   </CardContent>
                 </Card>

@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,7 +13,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Pencil, Trash2, Plus, Save, Upload, Trash, Loader2 } from "lucide-react"
+import { Pencil, Trash2, Plus, Save, Upload, Trash, Loader2, Home } from "lucide-react"
 import type { ActividadExtracurricular, FuncionSustantiva } from "@/types"
 import { useAuth } from "@/contexts/auth-context"
 
@@ -32,6 +33,7 @@ function useToast() {
 
 export default function ActividadesPage() {
   const { token, getToken } = useAuth()
+  const router = useRouter()
   const { toast } = useToast()
   const [actividades, setActividades] = useState<ActividadExtracurricular[]>([])
   const [funciones, setFunciones] = useState<FuncionSustantiva[]>([])
@@ -406,6 +408,17 @@ export default function ActividadesPage() {
                       <Upload className="h-4 w-4 mr-2" />
                       IMPORTAR XLSX
                     </Button>
+                    <Button
+                      type="button"
+                      onClick={() => router.push('/dashboard/admin')}
+                      variant="outline"
+                      className="border-gray-400 text-gray-700 hover:bg-gray-50 px-6"
+                      disabled={submitting}
+                      >
+                      <Home className="h-4 w-4 mr-2" />
+                      MENÚ PRINCIPAL
+                      </Button>
+
                   </div>
                 </form>
               </CardContent>

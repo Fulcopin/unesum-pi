@@ -6,6 +6,10 @@ const Carrera = db.Carrera;
 const Facultad = db.Facultad;
 const ProfesorCarrera = db.ProfesorCarrera;
 const ProfesorAsignatura = db.ProfesorAsignatura;
+const ProfesorNivel = db.ProfesorNivel;
+const ProfesorParalelo = db.ProfesorParalelo;
+const ProfesorRol = db.ProfesorRol;
+const Rol = db.Rol;
 const { Op } = require('sequelize'); // Importar Op para consultas complejas
 const fs = require('fs');
 const xlsx = require('xlsx');
@@ -300,6 +304,27 @@ exports.getAll = async (req, res) => {
           model: db.Paralelo,
           as: 'paralelo',
           attributes: ['id', 'nombre', 'codigo']
+        },
+        // M2M: múltiples niveles
+        {
+          model: db.Nivel,
+          as: 'niveles',
+          attributes: ['id', 'nombre', 'codigo'],
+          through: { attributes: [] }
+        },
+        // M2M: múltiples paralelos
+        {
+          model: db.Paralelo,
+          as: 'paralelos',
+          attributes: ['id', 'nombre', 'codigo'],
+          through: { attributes: [] }
+        },
+        // M2M: roles del profesor
+        {
+          model: db.Rol,
+          as: 'roles',
+          attributes: ['id', 'nombre', 'codigo'],
+          through: { attributes: [] }
         },
         {
           model: db.SyllabusDocente,
@@ -611,6 +636,34 @@ exports.create = async (req, res) => {
       await nuevoProfesor.setAsignaturas([...allAsignaturaIds]);
     }
 
+    // Guardar roles M2M — si no se envían, asignar el rol "docente" por defecto
+    const { roles_ids, niveles_ids, paralelos_ids } = req.body;
+    if (Array.isArray(roles_ids) && roles_ids.length > 0) {
+      await nuevoProfesor.setRoles(roles_ids.map(id => parseInt(id, 10)));
+    } else {
+      // Buscar el rol "docente" o "profesor" y asignarlo por defecto
+      const rolDocente = await Rol.findOne({
+        where: { [db.Sequelize.Op.or]: [{ codigo: 'docente' }, { codigo: 'profesor' }, { nombre: { [db.Sequelize.Op.iLike]: '%docente%' } }] }
+      });
+      if (rolDocente) await nuevoProfesor.setRoles([rolDocente.id]);
+    }
+
+    // Guardar niveles M2M
+    const allNivelIds = new Set();
+    if (req.body.nivel_id) allNivelIds.add(parseInt(req.body.nivel_id, 10));
+    if (Array.isArray(niveles_ids)) niveles_ids.forEach(id => allNivelIds.add(parseInt(id, 10)));
+    if (allNivelIds.size > 0) {
+      await nuevoProfesor.setNiveles([...allNivelIds]);
+    }
+
+    // Guardar paralelos M2M
+    const allParaleloIds = new Set();
+    if (req.body.paralelo_id) allParaleloIds.add(parseInt(req.body.paralelo_id, 10));
+    if (Array.isArray(paralelos_ids)) paralelos_ids.forEach(id => allParaleloIds.add(parseInt(id, 10)));
+    if (allParaleloIds.size > 0) {
+      await nuevoProfesor.setParalelos([...allParaleloIds]);
+    }
+
     // --- NUEVO: Enviar el correo de bienvenida ---
     await sendPasswordSetupEmail(nuevoProfesor, resetToken);
     
@@ -664,12 +717,36 @@ exports.update = async (req, res) => {
     // Actualizar asignaturas si se envían
     if (Array.isArray(asignaturas_ids)) {
       const allAsignaturaIds = new Set(asignaturas_ids.map(aid => parseInt(aid, 10)));
-      // Incluir la asignatura principal si existe
       const mainAsigId = asignatura_id !== undefined ? asignatura_id : profesor.asignatura_id;
-      if (mainAsigId) {
-        allAsignaturaIds.add(parseInt(mainAsigId, 10));
-      }
+      if (mainAsigId) allAsignaturaIds.add(parseInt(mainAsigId, 10));
       await profesor.setAsignaturas([...allAsignaturaIds]);
+    }
+
+    // Actualizar roles M2M si se envían
+    const { roles_ids, niveles_ids, paralelos_ids } = req.body;
+    if (Array.isArray(roles_ids) && roles_ids.length > 0) {
+      await profesor.setRoles(roles_ids.map(id => parseInt(id, 10)));
+    }
+
+    // Actualizar niveles M2M si se envían
+    if (Array.isArray(niveles_ids)) {
+      const allNivelIds = new Set(niveles_ids.map(id => parseInt(id, 10)));
+      const mainNivelId = nivel_id !== undefined ? nivel_id : profesor.nivel_id;
+      if (mainNivelId) allNivelIds.add(parseInt(mainNivelId, 10));
+      await profesor.setNiveles([...allNivelIds]);
+    } else if (nivel_id !== undefined) {
+      // Si solo se actualiza nivel_id directamente (compatibilidad)
+      await profesor.setNiveles(nivel_id ? [parseInt(nivel_id, 10)] : []);
+    }
+
+    // Actualizar paralelos M2M si se envían
+    if (Array.isArray(paralelos_ids)) {
+      const allParaleloIds = new Set(paralelos_ids.map(id => parseInt(id, 10)));
+      const mainParaleloId = paralelo_id !== undefined ? paralelo_id : profesor.paralelo_id;
+      if (mainParaleloId) allParaleloIds.add(parseInt(mainParaleloId, 10));
+      await profesor.setParalelos([...allParaleloIds]);
+    } else if (paralelo_id !== undefined) {
+      await profesor.setParalelos(paralelo_id ? [parseInt(paralelo_id, 10)] : []);
     }
 
     return res.status(200).json({ success: true, message: 'Profesor actualizado exitosamente', data: profesor });

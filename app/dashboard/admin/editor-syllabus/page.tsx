@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText } from "lucide-react"
+import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Home } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import * as mammoth from "mammoth"
 import jsPDF from "jspdf"
@@ -39,7 +40,7 @@ interface SavedSyllabusRecord { id: number; nombre: string; periodo: string; mat
 
 export default function EditorSyllabusPage() {
   const { token, getToken, user } = useAuth()
-  
+  const router = useRouter()
   // --- ESTADOS ---
   const [syllabi, setSyllabi] = useState<SyllabusData[]>([])
   const [activeSyllabusId, setActiveSyllabusId] = useState<string | number | null>(null)
@@ -110,6 +111,29 @@ export default function EditorSyllabusPage() {
       setActiveTabId(null);
     }
   }, [activeSyllabus, activeTabId]);
+
+  // Auto-cargar syllabus cuando se selecciona un periodo (solo si no hay uno activo)
+  useEffect(() => {
+    if (!selectedPeriod || activeSyllabusId || isListLoading || savedSyllabi.length === 0) return;
+    const syllabiDelPeriodo = savedSyllabi.filter(s => s.periodo === selectedPeriod);
+    if (syllabiDelPeriodo.length === 0) return;
+
+    const syllabusToLoad = syllabiDelPeriodo[0];
+    let editorData = syllabusToLoad.datos_syllabus;
+    if (!editorData) return;
+
+    editorData.id = syllabusToLoad.id;
+    if (!editorData.tabs || editorData.tabs.length === 0) {
+      editorData.tabs = (editorData as any).rows
+        ? [{ id: `tab-${Date.now()}`, title: 'General', rows: (editorData as any).rows }]
+        : [{ id: `tab-${Date.now()}`, title: 'General', rows: [] }];
+    }
+    if (!editorData.name) editorData.name = syllabusToLoad.nombre;
+
+    setSyllabi([editorData]);
+    setActiveSyllabusId(editorData.id);
+    setActiveTabId(editorData.tabs[0]?.id || null);
+  }, [selectedPeriod, isListLoading, savedSyllabi.length, activeSyllabusId]);
 
   // --- API ---
   const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
@@ -843,6 +867,16 @@ export default function EditorSyllabusPage() {
                       <Button onClick={handlePrintToPdf} disabled={!activeSyllabus} variant="outline">
                         <Printer className="h-4 w-4 mr-2" /> Imprimir
                       </Button>
+                      <Button
+                      type="button"
+                      onClick={() => router.push('/dashboard/admin')}
+                      variant="outline"
+                      className="border-gray-400 text-gray-700 hover:bg-gray-50 px-6"
+                      disabled={isSaving}
+                    >
+                      <Home className="h-4 w-4 mr-2" />
+                      MENÚ PRINCIPAL
+                    </Button>
                     </div>
                   </CardTitle>
                 </CardHeader>

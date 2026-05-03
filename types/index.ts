@@ -53,6 +53,8 @@ export interface Nivel {
   id: string
   codigo: string
   nombre: string
+  ordinal?: string | null
+  romano?: string | null
   estado: "activo" | "inactivo"
   createdAt: Date
   updatedAt: Date

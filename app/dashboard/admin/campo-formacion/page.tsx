@@ -1,11 +1,12 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Trash2, Edit, Save, Plus } from "lucide-react"
+import { Loader2, Trash2, Edit, Save, Plus, Home } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useAuth } from "@/contexts/auth-context"
 
@@ -37,6 +38,7 @@ interface RegistroCine {
 const API_BASE_URL = 'http://localhost:4000/api';
 
 export default function RegistroClasificacionPage() {
+    const router = useRouter()
     const { token, getToken } = useAuth()
     const { toast } = useToast()
 
@@ -65,8 +67,11 @@ export default function RegistroClasificacionPage() {
         try {
             const response = await fetch(fullUrl, { ...options, headers });
             const data = await response.json();
+            if (response.status === 409) {
+                return { ...data, __status: response.status };
+            }
             if (!response.ok || !data.success) throw new Error(data.message || `Error: ${response.statusText}`);
-            return data;
+            return { ...data, __status: response.status };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Error desconocido";
             console.error("Error API:", error);
@@ -152,19 +157,24 @@ export default function RegistroClasificacionPage() {
                 campo_especifico: campoEspecifico,
                 campo_detallado: campoDetallado,
             };
+
             const response = await apiRequest(endpoint, { method, body: JSON.stringify(payload) });
             if (response && response.success) {
                 toast({ title: "Éxito", description: `Registro ${editingId ? 'actualizado' : 'guardado'} correctamente.` });
+                await cargarRegistrosPorFacultad();
+            } else if (response && response.__status === 409) {
+                setFacultad("");
+                setCarrera("");
+                setCampoAmplio("");
+                setCampoEspecifico("");
+                setCampoDetallado("");
+                setEditingId(null);
+                toast({ title: "Información duplicada", description: "Se limpiaron los campos por información duplicada." });
+                return;
             }
-            // Limpiar todo después de guardar (exitoso o con error)
-            setFacultad("");
-            resetForm();
-            setRegistros([]);
         } catch (error) {
-            // En caso de excepción, también limpiar todo
-            setFacultad("");
-            resetForm();
-            setRegistros([]);
+            
+            console.error("Error al guardar registro:", error);
         } finally {
             setIsSaving(false);
         }
@@ -189,10 +199,8 @@ export default function RegistroClasificacionPage() {
             const res = await apiRequest(`/clasifica/${id}`, { method: 'DELETE' });
             if (res) {
                 toast({ title: "Eliminado", description: res.message });
-                // Resetear todo el formulario incluyendo la facultad
-                setFacultad("");
                 resetForm();
-                setRegistros([]);
+                await cargarRegistrosPorFacultad();
             }
         }
     };
@@ -263,6 +271,16 @@ export default function RegistroClasificacionPage() {
                         <Button onClick={handleNuevo} variant="outline" className="flex-1 text-lg h-12 border-[#00563F] text-[#00563F] hover:bg-[#00563F]/10">
                             <Plus className="mr-2" />
                             Nuevo
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={() => router.push('/dashboard/admin')}
+                            variant="outline"
+                            className="flex-1 text-lg h-12 border-gray-400 text-gray-700 hover:bg-gray-50"
+                            disabled={isSaving}
+                        >
+                        <Home className="h-4 w-4 mr-2" />
+                         MENÚ PRINCIPAL
                         </Button>
                     </div>
                 </CardContent>

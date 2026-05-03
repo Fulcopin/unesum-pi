@@ -1,5 +1,6 @@
 const { Sequelize } = require('sequelize');
 const env = require('./env');
+const { preflightRoles } = require('../utils/preflightRoles');
 
 const sequelize = new Sequelize(env.databaseUrl, {
   dialect: 'postgres',
@@ -23,7 +24,7 @@ const sequelize = new Sequelize(env.databaseUrl, {
 const connectDB = async () => {
   try {
     await sequelize.authenticate();
-    // Sincronizar modelos con la base de datos
+    await preflightRoles(sequelize);
     await sequelize.sync({ alter: true });
     console.log('Database connected and models synchronized successfully');
   } catch (error) {

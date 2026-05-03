@@ -4,11 +4,26 @@ import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { BookOpen, Activity, User, Calendar, FileText, FileSpreadsheet, ListChecks, FileCheck, Bot } from "lucide-react"
+import { BookOpen, Activity, User, Calendar, FileText, FileSpreadsheet, ListChecks, FileCheck, Bot, Pen, QrCode } from "lucide-react"
 import Link from "next/link"
 
 export default function DocenteDashboard() {
   const docenteModules = [
+    {
+      title: "Mis Documentos para Firmar",
+      description: "Ve todos los syllabus y programas analíticos pendientes de tu firma y fírmalos de inmediato con tu QR personal",
+      icon: Pen,
+      href: "/dashboard/docente/mis-firmas",
+      color: "bg-indigo-700",
+      destacado: true,
+    },
+    {
+      title: "Mi QR Personal",
+      description: "Ver y descargar tu sello digital personal de identidad para firmar documentos",
+      icon: QrCode,
+      href: "/dashboard/docente/mi-qr",
+      color: "bg-emerald-600",
+    },
     {
       title: "Editor de Syllabus",
       description: "Ver y completar el syllabus de mi asignatura",
@@ -30,27 +45,8 @@ export default function DocenteDashboard() {
       href: "/dashboard/docente/Horas_Extracurriculares",
       color: "bg-teal-500",
     },
-    {
-      title: "Formularios Dinámicos",
-      description: "Completar formularios basados en plantillas del administrador",
-      icon: FileSpreadsheet,
-      href: "/dashboard/docente/formularios",
-      color: "bg-indigo-500",
-    },
-    {
-      title: "Formularios Extraídos",
-      description: "Completar formularios generados desde archivos Excel/Word",
-      icon: ListChecks,
-      href: "/dashboard/docente/formularios-dinamicos",
-      color: "bg-violet-500",
-    },
-    {
-      title: "Syllabus Extraídos",
-      description: "Ver y completar formularios de Syllabus extraídos",
-      icon: FileCheck,
-      href: "/dashboard/docente/syllabus-formularios",
-      color: "bg-cyan-500",
-    },
+    
+    
     {
       title: "Mi Perfil",
       description: "Actualizar información personal y académica",
@@ -95,22 +91,36 @@ export default function DocenteDashboard() {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {docenteModules.map((module) => {
               const IconComponent = module.icon
+              const esDestacado = (module as any).destacado
               return (
-                <Card key={module.href} className="hover:shadow-lg transition-shadow cursor-pointer">
+                <Card
+                  key={module.href}
+                  className={`hover:shadow-lg transition-shadow cursor-pointer ${
+                    esDestacado ? 'border-indigo-300 bg-indigo-50 md:col-span-2 lg:col-span-3' : ''
+                  }`}
+                >
                   <CardHeader className="pb-3">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${module.color} text-white`}>
-                        <IconComponent className="h-6 w-6" />
+                        <IconComponent className={esDestacado ? "h-8 w-8" : "h-6 w-6"} />
                       </div>
                       <div>
-                        <CardTitle className="text-lg">{module.title}</CardTitle>
+                        <CardTitle className={esDestacado ? "text-xl" : "text-lg"}>{module.title}</CardTitle>
                       </div>
                     </div>
                   </CardHeader>
                   <CardContent>
                     <CardDescription className="mb-4">{module.description}</CardDescription>
                     <Link href={module.href}>
-                      <Button className="w-full bg-emerald-600 hover:bg-emerald-700">Acceder</Button>
+                      <Button
+                        className={`w-full ${
+                          esDestacado
+                            ? 'bg-indigo-700 hover:bg-indigo-800 text-base py-5'
+                            : 'bg-emerald-600 hover:bg-emerald-700'
+                        }`}
+                      >
+                        {esDestacado ? 'Ver mis documentos pendientes →' : 'Acceder'}
+                      </Button>
                     </Link>
                   </CardContent>
                 </Card>

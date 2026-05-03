@@ -607,11 +607,20 @@ exports.eliminarSyllabusComision = async (req, res) => {
     if (!syllabus) {
       return res.status(404).json({ success: false, message: 'Syllabus no encontrado' });
     }
+
+    // Desvincular registros de docentes que referencien este syllabus (FK constraint)
+    if (db.SyllabusDocente) {
+      await db.SyllabusDocente.update(
+        { syllabus_comision_id: null },
+        { where: { syllabus_comision_id: id } }
+      );
+    }
+
     await syllabus.destroy();
     return res.status(200).json({ success: true, message: 'Syllabus eliminado correctamente' });
   } catch (error) {
     console.error('❌ Error al eliminar syllabus comisión:', error);
-    return res.status(500).json({ success: false, message: 'Error al eliminar syllabus', error: error.message });
+    return res.status(500).json({ success: false, message: 'Error al eliminar syllabus: ' + error.message, error: error.message });
   }
 };
 

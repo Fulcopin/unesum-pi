@@ -16,6 +16,14 @@ module.exports = function(sequelize, DataTypes) {
       type: DataTypes.STRING(100),
       allowNull: true
     },
+    ordinal: {
+      type: DataTypes.STRING(30),
+      allowNull: true
+    },
+    romano: {
+      type: DataTypes.STRING(20),
+      allowNull: true
+    },
     estado: {
       type: DataTypes.STRING(15),
       allowNull: true

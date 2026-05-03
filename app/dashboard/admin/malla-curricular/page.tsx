@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +26,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Loader2, CheckCircle, XCircle, BookOpen, Grid3x3, Eye } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, BookOpen, Grid3x3, Eye, Home, Building2, GraduationCap, Network, FilterX, Search } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 
 // --- Interfaces ---
@@ -44,6 +45,7 @@ interface Nivel {
   id: number;
   nombre: string;
   codigo: string;
+  ordinal?: string;
 }
 
 interface Asignatura {
@@ -53,8 +55,8 @@ interface Asignatura {
   nivel_id: number;
   carrera_id: number;
   organizacion_id: number;
-  prerrequisito_codigo?: string | null;
-  correquisito_codigo?: string | null;
+  prerrequisitos_codigos?: string[];
+  correquisitos_codigos?: string[];
   horas?: {
     horasDocencia: number;
     horasPractica: number;
@@ -62,7 +64,7 @@ interface Asignatura {
     horasVinculacion: number;
     horasPracticaPreprofesional: number;
   };
-  nivel?: { nombre: string; codigo: string };
+  nivel?: { nombre: string; codigo: string; ordinal?: string };
 }
 
 interface Malla {
@@ -78,6 +80,7 @@ interface Malla {
 const API_BASE_URL = 'http://localhost:4000/api';
 
 export default function MallaCurricularPage() {
+  const router = useRouter();
   const { token, getToken } = useAuth();
 
   // Estados
@@ -226,35 +229,62 @@ export default function MallaCurricularPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50">
       <div className="container mx-auto p-6">
-        <div className="mb-6">
-          <h1 className="text-4xl font-bold text-[#00563F] mb-2">Gestión de Malla Curricular</h1>
-          <p className="text-gray-600">Visualización de mallas curriculares registradas y sus asignaturas</p>
+        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h1 className="text-4xl font-bold text-[#00563F] mb-2">Gestión de Malla Curricular</h1>
+            <p className="text-gray-600">Visualización de mallas curriculares registradas y sus asignaturas</p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => router.push('/dashboard/admin')}
+            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 self-start"
+          >
+            <Home className="mr-2 h-4 w-4" />
+            MENÚ PRINCIPAL
+          </Button>
         </div>
 
         {/* Filtros */}
-        <Card className="mb-8 border-2 border-emerald-200 shadow-lg bg-white">
-          <CardHeader>
-            <CardTitle className="text-xl text-[#00563F]">Buscar Mallas Curriculares</CardTitle>
-            <CardDescription>Seleccione facultad, carrera y malla para visualizar el detalle completo</CardDescription>
+        <Card className="mb-8 border-none shadow-[0_8px_30px_rgb(0,0,0,0.08)] bg-white/90 backdrop-blur-xl rounded-2xl overflow-hidden relative">
+          {/* Decoración de fondo */}
+          <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-100 rounded-full mix-blend-multiply filter blur-3xl opacity-50 translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
+          
+          <CardHeader className="pb-4 border-b border-gray-100 bg-white/50">
+            <div className="flex items-center gap-3">
+              <div className="bg-emerald-100 p-2.5 rounded-xl text-emerald-600 shadow-sm">
+                <Search className="w-5 h-5" />
+              </div>
+              <div>
+                <CardTitle className="text-2xl text-gray-800 font-extrabold tracking-tight">Buscar Mallas Curriculares</CardTitle>
+                <CardDescription className="text-gray-500 font-medium mt-1">
+                  Seleccione facultad, carrera y malla para visualizar el detalle completo
+                </CardDescription>
+              </div>
+            </div>
           </CardHeader>
+          
           {loading ? (
-            <CardContent className="flex h-40 items-center justify-center text-emerald-700">
-              <Loader2 className="h-8 w-8 animate-spin mr-2" />
-              <span>Cargando datos...</span>
+            <CardContent className="flex flex-col h-48 items-center justify-center text-emerald-600">
+              <Loader2 className="h-10 w-10 animate-spin mb-3 text-emerald-500" />
+              <span className="font-semibold text-gray-600">Cargando repositorios...</span>
             </CardContent>
           ) : (
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <CardContent className="pt-6 relative z-10">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 {/* Combo 1: Facultad */}
-                <div className="space-y-2">
-                  <Label htmlFor="filtro-facultad">Facultad *</Label>
+                <div className="space-y-3">
+                  <Label htmlFor="filtro-facultad" className="flex items-center gap-2 text-sm font-bold text-gray-700 uppercase tracking-wider">
+                    <Building2 className="w-4 h-4 text-emerald-500" />
+                    Facultad
+                  </Label>
                   <Select value={selectedFacultad} onValueChange={setSelectedFacultad}>
-                    <SelectTrigger className="w-full" id="filtro-facultad">
+                    <SelectTrigger className="w-full h-12 bg-gray-50 border-gray-200 focus:border-emerald-500 focus:ring-emerald-500 rounded-xl shadow-sm transition-all text-gray-700" id="filtro-facultad">
                       <SelectValue placeholder="Seleccione facultad..." />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="rounded-xl shadow-xl border-gray-100">
                       {facultades.map((f) => (
-                        <SelectItem key={f.id} value={f.id.toString()}>
+                        <SelectItem key={f.id} value={f.id.toString()} className="focus:bg-emerald-50 focus:text-emerald-900 cursor-pointer">
                           {f.nombre}
                         </SelectItem>
                       ))}
@@ -263,79 +293,95 @@ export default function MallaCurricularPage() {
                 </div>
 
                 {/* Combo 2: Carrera */}
-                <div className="space-y-2">
-                  <Label htmlFor="filtro-carrera">Carrera *</Label>
+                <div className="space-y-3">
+                  <Label htmlFor="filtro-carrera" className="flex items-center gap-2 text-sm font-bold text-gray-700 uppercase tracking-wider">
+                    <GraduationCap className="w-4 h-4 text-emerald-500" />
+                    Carrera
+                  </Label>
                   <Select 
                     value={selectedCarrera} 
                     onValueChange={setSelectedCarrera}
                     disabled={!selectedFacultad || carrerasFiltradas.length === 0}
                   >
-                    <SelectTrigger className="w-full" id="filtro-carrera">
+                    <SelectTrigger className="w-full h-12 bg-gray-50 border-gray-200 focus:border-emerald-500 focus:ring-emerald-500 rounded-xl shadow-sm transition-all disabled:opacity-60 text-gray-700" id="filtro-carrera">
                       <SelectValue placeholder={!selectedFacultad ? "Primero seleccione facultad" : "Seleccione carrera..."} />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="rounded-xl shadow-xl border-gray-100">
                       {carrerasFiltradas.map((c) => (
-                        <SelectItem key={c.id} value={c.id.toString()}>
+                        <SelectItem key={c.id} value={c.id.toString()} className="focus:bg-emerald-50 focus:text-emerald-900 cursor-pointer">
                           {c.nombre}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                   {selectedFacultad && carrerasFiltradas.length === 0 && (
-                    <p className="text-xs text-amber-600">⚠️ No hay carreras</p>
+                    <p className="text-xs text-amber-600 font-medium flex items-center gap-1 mt-2">
+                      <XCircle className="w-3 h-3" /> No hay carreras
+                    </p>
                   )}
                 </div>
 
                 {/* Combo 3: Malla */}
-                <div className="space-y-2">
-                  <Label htmlFor="filtro-malla">Códigos de Malla Curriculares *</Label>
+                <div className="space-y-3">
+                  <Label htmlFor="filtro-malla" className="flex items-center gap-2 text-sm font-bold text-gray-700 uppercase tracking-wider">
+                    <Network className="w-4 h-4 text-emerald-500" />
+                    Malla Curricular
+                  </Label>
                   <Select 
                     value={selectedMalla} 
                     onValueChange={setSelectedMalla}
                     disabled={!selectedCarrera || mallasFiltradas.length === 0}
                   >
-                    <SelectTrigger className="w-full" id="filtro-malla">
+                    <SelectTrigger className="w-full h-12 bg-gray-50 border-gray-200 focus:border-emerald-500 focus:ring-emerald-500 rounded-xl shadow-sm transition-all disabled:opacity-60 text-gray-700" id="filtro-malla">
                       <SelectValue placeholder={!selectedCarrera ? "Primero seleccione carrera" : "Seleccione malla..."} />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="rounded-xl shadow-xl border-gray-100">
                       {mallasFiltradas.map((m) => (
-                        <SelectItem key={m.id} value={m.id.toString()}>
+                        <SelectItem key={m.id} value={m.id.toString()} className="focus:bg-emerald-50 focus:text-emerald-900 cursor-pointer">
                           {m.codigo_malla}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                   {selectedCarrera && mallasFiltradas.length === 0 && (
-                    <p className="text-xs text-amber-600">⚠️ No hay mallas</p>
+                    <p className="text-xs text-amber-600 font-medium flex items-center gap-1 mt-2">
+                      <XCircle className="w-3 h-3" /> No hay mallas registradas
+                    </p>
                   )}
                   {selectedCarrera && mallasFiltradas.length > 0 && (
-                    <p className="text-xs text-emerald-600">✓ {mallasFiltradas.length} {mallasFiltradas.length === 1 ? 'malla disponible' : 'mallas disponibles'}</p>
+                    <p className="text-xs text-emerald-600 font-medium flex items-center gap-1 mt-2">
+                      <CheckCircle className="w-3 h-3" /> {mallasFiltradas.length} {mallasFiltradas.length === 1 ? 'malla disponible' : 'mallas disponibles'}
+                    </p>
                   )}
                 </div>
               </div>
 
+              {/* Botón de limpiar y estado */}
               {selectedFacultad && (
-                <div className="mt-6 flex justify-between items-center">
-                  <div className="text-sm text-gray-600">
-                    {selectedMalla && mallaActual && (
-                      <div className="flex items-center gap-2 bg-emerald-50 px-4 py-2 rounded-lg border border-emerald-200">
+                <div className="mt-8 pt-6 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="text-sm">
+                    {selectedMalla && mallaActual ? (
+                      <div className="inline-flex items-center gap-2.5 bg-gradient-to-r from-emerald-50 to-emerald-100/50 px-4 py-2.5 rounded-xl border border-emerald-200/50 text-emerald-800 shadow-sm transition-all">
                         <CheckCircle className="h-5 w-5 text-emerald-600" />
-                        <span className="font-semibold text-emerald-800">
-                          Malla seleccionada: {mallaActual.codigo_malla}
+                        <span className="font-bold">
+                          Malla activa: {mallaActual.codigo_malla}
                         </span>
                       </div>
+                    ) : (
+                      <div className="text-gray-400 italic">Esperando selección completa...</div>
                     )}
                   </div>
                   <Button 
-                    variant="outline" 
+                    variant="ghost" 
                     onClick={() => {
                       setSelectedFacultad("");
                       setSelectedCarrera("");
                       setSelectedMalla("");
                       setAsignaturasDeMalla([]);
                     }}
-                    className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                    className="text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-xl px-5 h-11 transition-colors font-semibold"
                   >
+                    <FilterX className="w-4 h-4 mr-2" />
                     Limpiar Filtros
                   </Button>
                 </div>
@@ -373,116 +419,137 @@ export default function MallaCurricularPage() {
                   <p>No hay asignaturas registradas en esta malla</p>
                 </div>
               ) : (
-                <Accordion type="multiple" defaultValue={nivelesOrdenados.slice(0, 2)} className="space-y-3">
+                <Accordion type="multiple" defaultValue={nivelesOrdenados.slice(0, 2)} className="space-y-6">
                   {nivelesOrdenados.map((nivelNombre, index) => {
                     const totalHorasNivel = asignaturasPorNivel[nivelNombre].reduce((sum, asig) => sum + calcularTotalHoras(asig), 0);
-                    const nivelCodigo = niveles.find(n => n.nombre === nivelNombre)?.codigo || index + 1;
+                    const nivelObj = niveles.find(n => n.nombre === nivelNombre);
+                    const nivelCodigo = nivelObj?.codigo || index + 1;
                     
+                    let displayNivelNombre = nivelNombre;
+                    if (nivelObj?.ordinal) {
+                      displayNivelNombre = nivelObj.ordinal.charAt(0).toUpperCase() + nivelObj.ordinal.slice(1).toLowerCase();
+                    } else if (!isNaN(Number(nivelNombre))) {
+                      displayNivelNombre = `Nivel ${nivelNombre}`;
+                    }
+
                     return (
-                      <AccordionItem key={nivelNombre} value={nivelNombre} className="border-2 border-emerald-300 rounded-lg overflow-hidden shadow-sm">
-                        <AccordionTrigger className="bg-gradient-to-r from-emerald-50 to-green-50 px-6 py-4 hover:no-underline hover:bg-emerald-100 transition-all">
+                      <AccordionItem key={nivelNombre} value={nivelNombre} className="bg-white border border-emerald-100 rounded-xl shadow-sm [&[data-state=open]]:shadow-md transition-all">
+                        {/* Header del Nivel */}
+                        <AccordionTrigger className="bg-gradient-to-r from-emerald-700 to-emerald-600 px-6 py-3 hover:no-underline rounded-t-xl data-[state=closed]:rounded-b-xl border-b border-emerald-800/50 hover:brightness-105 transition-all text-white group">
                           <div className="flex items-center justify-between w-full pr-4">
                             <div className="flex items-center gap-4">
-                              <div className="bg-emerald-600 text-white w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl shadow-md">
+                              <div className="bg-white/20 text-white w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg shadow-inner border border-white/30 backdrop-blur-sm">
                                 {nivelCodigo}
                               </div>
-                              <div className="text-left">
-                                <div className="text-lg font-bold text-[#00563F]">{nivelNombre}</div>
-                                <div className="text-sm text-gray-600 font-normal flex items-center gap-3">
-                                  <span>{asignaturasPorNivel[nivelNombre].length} {asignaturasPorNivel[nivelNombre].length === 1 ? 'asignatura' : 'asignaturas'}</span>
-                                  <span className="text-emerald-700 font-semibold">• {totalHorasNivel}h totales</span>
-                                </div>
+                              <div className="text-left text-white">
+                                <div className="text-lg font-bold tracking-wide">{displayNivelNombre}</div>
                               </div>
+                            </div>
+                            <div className="flex items-center gap-3 group-hover:opacity-90">
+                              <span className="bg-emerald-800/50 border border-emerald-500/30 text-white px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm hidden sm:inline-block">
+                                {asignaturasPorNivel[nivelNombre].length} {asignaturasPorNivel[nivelNombre].length === 1 ? 'asignatura' : 'asignaturas'}
+                              </span>
+                              <span className="bg-emerald-500 border border-emerald-400 text-white px-3 py-1 rounded-full text-xs font-bold shadow-sm">
+                                {totalHorasNivel}h totales
+                              </span>
                             </div>
                           </div>
                         </AccordionTrigger>
-                        <AccordionContent className="p-4 bg-gradient-to-b from-white to-gray-50">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                          {asignaturasPorNivel[nivelNombre].map((asig) => (
-                            <Card key={asig.id} className="border-l-4 border-emerald-500 hover:shadow-md transition-shadow">
-                              <CardHeader className="p-3 pb-2">
-                                <div className="space-y-1">
-                                  <div className="font-bold text-emerald-700 text-xs">{asig.codigo}</div>
-                                  <div className="font-semibold text-gray-800 text-xs leading-tight line-clamp-2">
+                        
+                        {/* Contenido (Tarjetas) */}
+                        <AccordionContent className="p-5 bg-emerald-50/30 rounded-b-xl">
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                            {asignaturasPorNivel[nivelNombre].map((asig) => (
+                              <Card key={asig.id} className="relative overflow-hidden border border-gray-200 hover:border-emerald-400 hover:shadow-lg transition-all duration-300 group flex flex-col bg-white">
+                                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-teal-500 opacity-80 group-hover:opacity-100 transition-opacity"></div>
+                                
+                                <CardHeader className="p-4 pb-3 flex-none">
+                                  <div className="flex justify-between items-start mb-2 gap-2">
+                                    <span className="inline-block bg-gray-100 text-gray-700 text-[11px] font-bold px-2 py-1 rounded-md tracking-wider border border-gray-200 shadow-sm">
+                                      {asig.codigo}
+                                    </span>
+                                    <div className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[11px] font-bold px-2 py-1 rounded-md shadow-sm">
+                                      {calcularTotalHoras(asig)}h
+                                    </div>
+                                  </div>
+                                  <div className="font-bold text-gray-800 text-sm leading-snug group-hover:text-emerald-700 transition-colors line-clamp-2" title={asig.nombre}>
                                     {asig.nombre}
                                   </div>
-                                </div>
-                              </CardHeader>
-                              <CardContent className="p-3 pt-0 space-y-2">
-                                {/* Prerrequisitos y Correquisitos */}
-                                <div className="space-y-1">
-                                  {asig.prerrequisito_codigo ? (
-                                    <div className="bg-orange-50 border border-orange-200 rounded p-1.5">
-                                      <div className="flex items-center gap-1 mb-0.5">
-                                        <span className="font-bold text-orange-700 text-[9px]">PRERREQUISITO:</span>
+                                </CardHeader>
+                                
+                                <CardContent className="p-4 pt-0 space-y-4 flex-1 flex flex-col justify-between">
+                                  {/* Requisitos */}
+                                  <div className="flex flex-col gap-2 mt-1">
+                                    {asig.prerrequisitos_codigos && asig.prerrequisitos_codigos.length > 0 ? (
+                                      <div className="flex flex-col gap-1">
+                                        {asig.prerrequisitos_codigos.map(pre => (
+                                          <div key={pre} className="flex items-center gap-2 text-[10px] bg-orange-50/50 p-1 rounded border border-orange-100">
+                                            <span className="bg-orange-100 text-orange-800 font-bold px-1.5 py-0.5 rounded text-[9px] w-10 text-center shadow-sm">PRE</span>
+                                            <span className="font-bold text-gray-700">{pre}</span>
+                                            <span className="text-gray-500 truncate" title={buscarAsignaturaPorCodigo(pre)?.nombre || 'Nivel anterior'}>
+                                              {buscarAsignaturaPorCodigo(pre)?.nombre || 'Nivel anterior'}
+                                            </span>
+                                          </div>
+                                        ))}
                                       </div>
-                                      <div className="text-[10px] text-gray-700 font-semibold">
-                                        {asig.prerrequisito_codigo}
+                                    ) : (
+                                      <div className="flex items-center gap-2 text-[10px] bg-gray-50 p-1 rounded border border-gray-100">
+                                        <span className="bg-gray-200 text-gray-600 font-bold px-1.5 py-0.5 rounded text-[9px] w-10 text-center">PRE</span>
+                                        <span className="text-gray-400 italic">Ninguno</span>
                                       </div>
-                                      <div className="text-[9px] text-gray-600 line-clamp-1">
-                                        {buscarAsignaturaPorCodigo(asig.prerrequisito_codigo)?.nombre || 'Nivel anterior'}
+                                    )}
+
+                                    {asig.correquisitos_codigos && asig.correquisitos_codigos.length > 0 ? (
+                                      <div className="flex flex-col gap-1">
+                                        {asig.correquisitos_codigos.map(cor => (
+                                          <div key={cor} className="flex items-center gap-2 text-[10px] bg-blue-50/50 p-1 rounded border border-blue-100">
+                                            <span className="bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded text-[9px] w-10 text-center shadow-sm">COR</span>
+                                            <span className="font-bold text-gray-700">{cor}</span>
+                                            <span className="text-gray-500 truncate" title={buscarAsignaturaPorCodigo(cor)?.nombre || 'Mismo nivel'}>
+                                              {buscarAsignaturaPorCodigo(cor)?.nombre || 'Mismo nivel'}
+                                            </span>
+                                          </div>
+                                        ))}
                                       </div>
-                                    </div>
-                                  ) : (
-                                    <div className="bg-gray-50 border border-gray-200 rounded p-1.5 text-center">
-                                      <span className="text-[9px] text-gray-500">Sin prerrequisito</span>
-                                    </div>
-                                  )}
+                                    ) : (
+                                      <div className="flex items-center gap-2 text-[10px] bg-gray-50 p-1 rounded border border-gray-100">
+                                        <span className="bg-gray-200 text-gray-600 font-bold px-1.5 py-0.5 rounded text-[9px] w-10 text-center">COR</span>
+                                        <span className="text-gray-400 italic">Ninguno</span>
+                                      </div>
+                                    )}
+                                  </div>
                                   
-                                  {asig.correquisito_codigo ? (
-                                    <div className="bg-blue-50 border border-blue-200 rounded p-1.5">
-                                      <div className="flex items-center gap-1 mb-0.5">
-                                        <span className="font-bold text-blue-700 text-[9px]">CORREQUISITO:</span>
-                                      </div>
-                                      <div className="text-[10px] text-gray-700 font-semibold">
-                                        {asig.correquisito_codigo}
-                                      </div>
-                                      <div className="text-[9px] text-gray-600 line-clamp-1">
-                                        {buscarAsignaturaPorCodigo(asig.correquisito_codigo)?.nombre || 'Mismo nivel'}
-                                      </div>
+                                  {/* Desglose de Horas */}
+                                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] border-t border-gray-100 pt-3">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-gray-500 font-medium">Docencia:</span>
+                                      <span className="font-bold text-gray-700 bg-gray-100 px-1.5 rounded">{asig.horas?.horasDocencia || 0}h</span>
                                     </div>
-                                  ) : (
-                                    <div className="bg-gray-50 border border-gray-200 rounded p-1.5 text-center">
-                                      <span className="text-[9px] text-gray-500">Sin correquisito</span>
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-gray-500 font-medium">Práctica:</span>
+                                      <span className="font-bold text-gray-700 bg-gray-100 px-1.5 rounded">{asig.horas?.horasPractica || 0}h</span>
                                     </div>
-                                  )}
-                                </div>
-                                
-                                {/* Horas Compactas */}
-                                <div className="space-y-1">
-                                  <div className="flex justify-between text-[10px]">
-                                    <span className="text-gray-600">Docencia:</span>
-                                    <span className="font-bold text-emerald-700">{asig.horas?.horasDocencia || 0}h</span>
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-gray-500 font-medium">Autónoma:</span>
+                                      <span className="font-bold text-gray-700 bg-gray-100 px-1.5 rounded">{asig.horas?.horasAutonoma || 0}h</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-gray-500 font-medium">Vinculación:</span>
+                                      <span className="font-bold text-gray-700 bg-gray-100 px-1.5 rounded">{asig.horas?.horasVinculacion || 0}h</span>
+                                    </div>
+                                    {(asig.horas?.horasPracticaPreprofesional || 0) > 0 && (
+                                      <div className="flex justify-between items-center col-span-2">
+                                        <span className="text-gray-500 font-medium">Preprofesionales:</span>
+                                        <span className="font-bold text-gray-700 bg-gray-100 px-1.5 rounded">{asig.horas!.horasPracticaPreprofesional}h</span>
+                                      </div>
+                                    )}
                                   </div>
-                                  <div className="flex justify-between text-[10px]">
-                                    <span className="text-gray-600">Práctica:</span>
-                                    <span className="font-bold text-emerald-700">{asig.horas?.horasPractica || 0}h</span>
-                                  </div>
-                                  <div className="flex justify-between text-[10px]">
-                                    <span className="text-gray-600">Autónoma:</span>
-                                    <span className="font-bold text-emerald-700">{asig.horas?.horasAutonoma || 0}h</span>
-                                  </div>
-                                  <div className="flex justify-between text-[10px]">
-                                    <span className="text-gray-600">Vinculación:</span>
-                                    <span className="font-bold text-emerald-700">{asig.horas?.horasVinculacion || 0}h</span>
-                                  </div>
-                                  <div className="flex justify-between text-[10px]">
-                                    <span className="text-gray-600">Preprofes.:</span>
-                                    <span className="font-bold text-emerald-700">{asig.horas?.horasPracticaPreprofesional || 0}h</span>
-                                  </div>
-                                </div>
-                                
-                                {/* Total */}
-                                <div className="bg-emerald-600 text-white p-1.5 rounded text-center">
-                                  <div className="text-[10px] font-medium">Total</div>
-                                  <div className="text-sm font-bold">{calcularTotalHoras(asig)}h</div>
-                                </div>
-                              </CardContent>
-                            </Card>
-                          ))}
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
                     );
                   })}
                 </Accordion>

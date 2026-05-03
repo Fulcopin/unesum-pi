@@ -106,8 +106,7 @@ export default function DocenteFormularioDinamicoPage() {
         setError(data.message || 'Error al cargar sesiones');
       }
     } catch (err) {
-      console.error('Error:', err);
-      setError('Error de conexión con el servidor');
+      console.error('Error cargando periodos:', err);
     } finally {
       setLoading(false);
     }
@@ -115,7 +114,8 @@ export default function DocenteFormularioDinamicoPage() {
 
   const fetchPeriodos = async () => {
     try {
-      const response = await fetch('http://localhost:4000/api/periodo', {
+      setLoading(true);
+      const response = await fetch('http://localhost:4000/api/admin/periodos', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -127,8 +127,26 @@ export default function DocenteFormularioDinamicoPage() {
       }
     } catch (err) {
       console.error('Error cargando periodos:', err);
+    } finally {
+      setLoading(false);
     }
   };
+
+  const fetchPeriodos = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('http://localhost:4000/api/admin/periodos', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      const data = await response.json();
+      if (data.success) {
+        setPeriodos(data.data || []);
+      }
+    } catch (err) {
+      console.error('Error cargando periodos:', err);
     } finally {
       setLoading(false);
     }

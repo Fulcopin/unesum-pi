@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState, useEffect, useMemo } from "react"
+import { useRouter } from "next/navigation"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,7 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Pencil, Trash2, Plus, Save, Loader2, UserPlus, ChevronDown, ChevronUp, FileText, BookOpen, GraduationCap, X } from "lucide-react"
+import { Pencil, Trash2, Plus, Save, Loader2, UserPlus, ChevronDown, ChevronUp, FileText, BookOpen, GraduationCap, X, Home } from "lucide-react"
+import * as XLSX from 'xlsx'
 
 import { useAuth } from "@/contexts/auth-context"
 
@@ -22,6 +24,7 @@ interface Carrera { id: number; nombre: string; facultad_id: number }
 interface Nivel { id: number; nombre: string; codigo: string }
 interface Asignatura { id: number; nombre: string; codigo: string; carrera_id: number }
 interface Paralelo { id: number; nombre: string; codigo: string }
+interface Rol { id: number; nombre: string; estado: boolean }
 interface Profesor {
   id: number;
   nombres: string;
@@ -98,6 +101,15 @@ interface Profesor {
     nombre: string;
     codigo: string;
   };
+  rol_id?: number;
+  rol?: {
+    id: number;
+    nombre: string;
+  };
+  roles?: {
+    id: number;
+    nombre: string;
+  }[];
   syllabusDocente?: {
     id: number;
     nombre: string;
@@ -124,6 +136,7 @@ function useToast() {
 }
 
 export default function GestionDocentesPage() {
+  const router = useRouter()
   const { token, getToken } = useAuth() 
   const { toast } = useToast()
 
@@ -136,6 +149,7 @@ export default function GestionDocentesPage() {
   const [paralelos, setParalelos] = useState<Paralelo[]>([])
   const [periodos, setPeriodos] = useState<any[]>([])
   const [mallas, setMallas] = useState<any[]>([])
+  const [roles, setRoles] = useState<Rol[]>([])
   
   // --- Estados de Filtros ---
   const [filtros, setFiltros] = useState({
@@ -160,13 +174,17 @@ export default function GestionDocentesPage() {
   const [expandedProfesorId, setExpandedProfesorId] = useState<number | null>(null)
   const [selectedCarrerasIds, setSelectedCarrerasIds] = useState<number[]>([])
   const [selectedAsignaturasIds, setSelectedAsignaturasIds] = useState<number[]>([])
+  const [selectedRolesIds, setSelectedRolesIds] = useState<number[]>([])
+  const [selectedNivelesIds, setSelectedNivelesIds] = useState<number[]>([])
+  const [selectedParalelosIds, setSelectedParalelosIds] = useState<number[]>([])
   const [formData, setFormData] = useState({
     nombres: "",
     apellidos: "",
     email: "",
-    asignatura: "", // Almacenará el ID de la asignatura
-    nivel: "", // Almacenará el ID del nivel
-    paralelo: "", // Almacenará el ID del paralelo
+    asignatura: "",
+    nivel: "",
+    paralelo: "",
+    rol: "",
     activo: true,
   })
 
@@ -189,7 +207,7 @@ export default function GestionDocentesPage() {
 
   const handleUpload = async () => {
     if (!selectedFile) {
-      toast({ title: "Error", description: "Por favor, seleccione un archivo CSV o Excel para subir.", variant: "destructive" });
+      toast({ title: "Error", description: "Por favor, seleccione un archivo Excel (.xlsx) para subir.", variant: "destructive" });
       return;
     }
 
@@ -251,22 +269,28 @@ export default function GestionDocentesPage() {
   };
 
   const handleDownloadTemplate = () => {
-    const csvContent = "nombres,apellidos,email,carrera_nombre,asignaturas,nivel_nombre,paralelo_nombre,carreras_adicionales,activo\n" +
-      "Juan Carlos,Pérez González,juan.perez@universidad.edu,Ingeniería en Sistemas,Matemáticas I;Física I,Primer Nivel,A,,true\n" +
-      "María Elena,López Ruiz,maria.lopez@universidad.edu,Medicina,Anatomía I,Primer Nivel,B,Enfermería,true";
-    
-    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'plantilla_docentes.csv';
-    link.click();
-    URL.revokeObjectURL(url);
+    const headers = ['nombres', 'apellidos', 'email', 'carrera_nombre', 'asignaturas', 'nivel_nombre', 'paralelo_nombre', 'carreras_adicionales'];
+    const ejemplos = [
+      ['Juan Carlos', 'Pérez González', 'juan.perez@universidad.edu', 'Ingeniería en Sistemas', 'Matemáticas I;Física I', 'Primer Nivel;Segundo Nivel', 'A;B', ''],
+      ['María Elena', 'López Ruiz', 'maria.lopez@universidad.edu', 'Medicina', 'Anatomía I', 'Primer Nivel', 'A', 'Enfermería'],
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...ejemplos]);
+
+    // Ancho de columnas
+    ws['!cols'] = [
+      { wch: 18 }, { wch: 20 }, { wch: 35 }, { wch: 28 },
+      { wch: 30 }, { wch: 18 }, { wch: 12 },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Docentes');
+    XLSX.writeFile(wb, 'plantilla_docentes.xlsx');
   };
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [profesoresRes, facultadesRes, carrerasRes, nivelesRes, asignaturasRes, paralelosRes, periodosRes, mallasRes] = await Promise.all([
+      const [profesoresRes, facultadesRes, carrerasRes, nivelesRes, asignaturasRes, paralelosRes, periodosRes, mallasRes, rolesRes] = await Promise.all([
         apiRequest('/profesores'),
         apiRequest('/datos-academicos/facultades'),
         apiRequest('/datos-academicos/carreras'),
@@ -274,15 +298,16 @@ export default function GestionDocentesPage() {
         apiRequest('/datos-academicos/asignaturas'),
         apiRequest('/datos-academicos/paralelos'),
         apiRequest('/periodo'),
-        apiRequest('/mallas')
+        apiRequest('/mallas'),
+        apiRequest('/roles')
       ]);
 
       if (!profesoresRes.ok || !facultadesRes.ok || !carrerasRes.ok || !nivelesRes.ok || !asignaturasRes.ok || !paralelosRes.ok) {
         throw new Error("Error al cargar los datos iniciales.");
       }
 
-      const [profesoresData, facultadesData, carrerasData, nivelesData, asignaturasData, paralelosData, periodosData, mallasData] = await Promise.all([
-        profesoresRes.json(), facultadesRes.json(), carrerasRes.json(), nivelesRes.json(), asignaturasRes.json(), paralelosRes.json(), periodosRes.json(), mallasRes.json()
+      const [profesoresData, facultadesData, carrerasData, nivelesData, asignaturasData, paralelosData, periodosData, mallasData, rolesData] = await Promise.all([
+        profesoresRes.json(), facultadesRes.json(), carrerasRes.json(), nivelesRes.json(), asignaturasRes.json(), paralelosRes.json(), periodosRes.json(), mallasRes.json(), rolesRes.json()
       ]);
 
       const profesoresArray = Array.isArray(profesoresData?.data) ? profesoresData.data : (Array.isArray(profesoresData) ? profesoresData : []);
@@ -293,6 +318,7 @@ export default function GestionDocentesPage() {
       const paralelosArray = Array.isArray(paralelosData?.data) ? paralelosData.data : (Array.isArray(paralelosData) ? paralelosData : []);
       const periodosArray = Array.isArray(periodosData?.data) ? periodosData.data : (Array.isArray(periodosData) ? periodosData : []);
       const mallasArray = Array.isArray(mallasData?.data) ? mallasData.data : (Array.isArray(mallasData) ? mallasData : []);
+      const rolesArray = Array.isArray(rolesData?.data) ? rolesData.data : (Array.isArray(rolesData) ? rolesData : []);
 
       setProfesores(profesoresArray);
       setFacultades(facultadesArray);
@@ -302,6 +328,7 @@ export default function GestionDocentesPage() {
       setParalelos(paralelosArray);
       setPeriodos(periodosArray);
       setMallas(mallasArray);
+      setRoles(rolesArray);
 
       console.log('✅ Datos cargados:', {
         profesores: profesoresArray.length,
@@ -311,7 +338,8 @@ export default function GestionDocentesPage() {
         asignaturas: asignaturasArray.length,
         paralelos: paralelosArray.length,
         periodos: periodosArray.length,
-        mallas: mallasArray.length
+        mallas: mallasArray.length,
+        roles: rolesArray.length
       });
 
     } catch (error: any) {
@@ -370,7 +398,7 @@ export default function GestionDocentesPage() {
   }, [profesores, filtros]);
   
   // --- Manejadores de Eventos ---
-  const handleSelectChange = (name: 'asignatura' | 'nivel' | 'paralelo', value: string) => {
+  const handleSelectChange = (name: 'asignatura' | 'nivel' | 'paralelo' | 'rol', value: string) => {
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -378,9 +406,12 @@ export default function GestionDocentesPage() {
   };
 
   const handleNew = () => {
-    setFormData({ nombres: "", apellidos: "", email: "", asignatura: "", nivel: "", paralelo: "", activo: true });
+    setFormData({ nombres: "", apellidos: "", email: "", asignatura: "", nivel: "", paralelo: "", rol: "", activo: true });
     setSelectedCarrerasIds([]);
     setSelectedAsignaturasIds([]);
+    setSelectedRolesIds([]);
+    setSelectedNivelesIds([]);
+    setSelectedParalelosIds([]);
     setEditingId(null);
   };
 
@@ -393,6 +424,7 @@ export default function GestionDocentesPage() {
       asignatura: profesor.asignatura_id ? profesor.asignatura_id.toString() : "",
       nivel: profesor.nivel_id ? profesor.nivel_id.toString() : "",
       paralelo: profesor.paralelo_id ? profesor.paralelo_id.toString() : "",
+      rol: profesor.rol_id ? profesor.rol_id.toString() : "",
       activo: profesor.activo,
     });
     // Cargar las carreras asociadas
@@ -407,6 +439,20 @@ export default function GestionDocentesPage() {
       asignaturasProf.push(profesor.asignatura_id);
     }
     setSelectedAsignaturasIds(asignaturasProf);
+    // Cargar los roles asociados
+    const rolesProf = profesor.roles?.map(r => r.id) || [];
+    if (rolesProf.length === 0 && profesor.rol_id) {
+      rolesProf.push(profesor.rol_id);
+    }
+    setSelectedRolesIds(rolesProf);
+    // Cargar niveles M2M (si existen) o el nivel_id individual
+    const nivelesProf: number[] = (profesor as any).niveles?.map((n: any) => n.id) || [];
+    if (nivelesProf.length === 0 && profesor.nivel_id) nivelesProf.push(Number(profesor.nivel_id));
+    setSelectedNivelesIds(nivelesProf);
+    // Cargar paralelos M2M (si existen) o el paralelo_id individual
+    const paralelosProf: number[] = (profesor as any).paralelos?.map((p: any) => p.id) || [];
+    if (paralelosProf.length === 0 && profesor.paralelo_id) paralelosProf.push(Number(profesor.paralelo_id));
+    setSelectedParalelosIds(paralelosProf);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -453,8 +499,12 @@ export default function GestionDocentesPage() {
       carreras_ids: selectedCarrerasIds.length > 0 ? selectedCarrerasIds : [carreraId],
       asignatura_id: selectedAsignaturasIds.length > 0 ? selectedAsignaturasIds[0] : (formData.asignatura ? parseInt(formData.asignatura, 10) : null),
       asignaturas_ids: selectedAsignaturasIds.length > 0 ? selectedAsignaturasIds : (formData.asignatura ? [parseInt(formData.asignatura, 10)] : []),
-      nivel_id: formData.nivel ? parseInt(formData.nivel, 10) : null,
-      paralelo_id: formData.paralelo ? parseInt(formData.paralelo, 10) : null
+      nivel_id: selectedNivelesIds.length > 0 ? selectedNivelesIds[0] : (formData.nivel ? parseInt(formData.nivel, 10) : null),
+      niveles_ids: selectedNivelesIds.length > 0 ? selectedNivelesIds : (formData.nivel ? [parseInt(formData.nivel, 10)] : []),
+      paralelo_id: selectedParalelosIds.length > 0 ? selectedParalelosIds[0] : (formData.paralelo ? parseInt(formData.paralelo, 10) : null),
+      paralelos_ids: selectedParalelosIds.length > 0 ? selectedParalelosIds : (formData.paralelo ? [parseInt(formData.paralelo, 10)] : []),
+      rol_id: selectedRolesIds.length > 0 ? selectedRolesIds[0] : (formData.rol ? parseInt(formData.rol, 10) : null),
+      roles_ids: selectedRolesIds.length > 0 ? selectedRolesIds : (formData.rol ? [parseInt(formData.rol, 10)] : []),
     };
     
     const url = editingId ? `/profesores/${editingId}` : '/profesores';
@@ -483,6 +533,11 @@ export default function GestionDocentesPage() {
     }
   };
 
+  const periodoOk = !!filtros.periodo && filtros.periodo !== "todos";
+  const facultadOk = periodoOk && !!filtros.facultad && filtros.facultad !== "todas";
+  const carreraOk = facultadOk && !!filtros.carrera && filtros.carrera !== "todas";
+  const seccionDeshabilitada = !carreraOk ? "opacity-40 pointer-events-none select-none" : "";
+
   return (
     <ProtectedRoute allowedRoles={["administrador"]}>
       {!mounted ? (
@@ -498,99 +553,116 @@ export default function GestionDocentesPage() {
           </div>
           <div className="bg-white rounded-b-lg shadow-lg p-6">
             {/* Sección de Filtros */}
+            {true && (<>
             <Card className="mb-8 border-2 border-emerald-500">
               <CardHeader className="bg-emerald-50">
                 <CardTitle className="text-emerald-900">Filtros de Búsqueda</CardTitle>
-                <CardDescription>Seleccione los criterios para filtrar los docentes en la tabla</CardDescription>
+                <CardDescription>
+                  Seleccione el periodo para comenzar. Las demás opciones se irán habilitando.
+                </CardDescription>
               </CardHeader>
               <CardContent className="pt-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* PASO 1: Periodo — siempre activo */}
                   <div className="grid gap-2">
-                    <Label htmlFor="filtro-periodo">Periodo Académico</Label>
-                    <Select 
-                      value={filtros.periodo} 
-                      onValueChange={(v) => setFiltros(prev => ({ ...prev, periodo: v }))}
+                    <Label htmlFor="filtro-periodo" className="flex items-center gap-1">
+                      Periodo Académico
+                      <span className="text-red-500 text-xs ml-1">●</span>
+                    </Label>
+                    <Select
+                      value={filtros.periodo}
+                      onValueChange={(v) => setFiltros(prev => ({ ...prev, periodo: v, facultad: "", carrera: "", malla: "" }))}
                     >
                       <SelectTrigger id="filtro-periodo">
-                        <SelectValue placeholder="Todos los periodos" />
+                        <SelectValue placeholder="Seleccione un periodo..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="todos">Todos los periodos</SelectItem>
                         {periodos.map((p) => (
-                          <SelectItem key={p.id} value={p.id.toString()}>
-                            {p.nombre}
-                          </SelectItem>
+                          <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
 
-                  <div className="grid gap-2">
-                    <Label htmlFor="filtro-facultad">Facultad</Label>
-                    <Select 
-                      value={filtros.facultad} 
+                  {/* PASO 2: Facultad — se habilita al elegir periodo */}
+                  <div className={`grid gap-2 transition-opacity duration-300 ${!periodoOk ? "opacity-40 pointer-events-none select-none" : ""}`}>
+                    <Label htmlFor="filtro-facultad" className="flex items-center gap-1">
+                      Facultad
+                      <span className="text-red-500 text-xs ml-1">●</span>
+                    </Label>
+                    <Select
+                      value={filtros.facultad}
                       onValueChange={(v) => setFiltros(prev => ({ ...prev, facultad: v, carrera: "", malla: "" }))}
+                      disabled={!periodoOk}
                     >
                       <SelectTrigger id="filtro-facultad">
-                        <SelectValue placeholder="Todas las facultades" />
+                        <SelectValue placeholder={periodoOk ? "Seleccione una facultad..." : "Primero seleccione un periodo"} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="todas">Todas las facultades</SelectItem>
                         {facultades.map((f) => (
-                          <SelectItem key={f.id} value={f.id.toString()}>
-                            {f.nombre}
-                          </SelectItem>
+                          <SelectItem key={f.id} value={f.id.toString()}>{f.nombre}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
 
-                  <div className="grid gap-2">
-                    <Label htmlFor="filtro-carrera">Carrera</Label>
-                    <Select 
-                      value={filtros.carrera} 
+                  {/* PASO 3: Carrera — se habilita al elegir facultad */}
+                  <div className={`grid gap-2 transition-opacity duration-300 ${!facultadOk ? "opacity-40 pointer-events-none select-none" : ""}`}>
+                    <Label htmlFor="filtro-carrera" className="flex items-center gap-1">
+                      Carrera
+                      <span className="text-red-500 text-xs ml-1">●</span>
+                    </Label>
+                    <Select
+                      value={filtros.carrera}
                       onValueChange={(v) => setFiltros(prev => ({ ...prev, carrera: v, malla: "" }))}
-                      disabled={!filtros.facultad || filtros.facultad === "todas"}
+                      disabled={!facultadOk}
                     >
                       <SelectTrigger id="filtro-carrera">
-                        <SelectValue placeholder="Todas las carreras" />
+                        <SelectValue placeholder={facultadOk ? "Seleccione una carrera..." : "Primero seleccione una facultad"} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="todas">Todas las carreras</SelectItem>
                         {carrerasFiltradasPorFiltro.map((c) => (
-                          <SelectItem key={c.id} value={c.id.toString()}>
-                            {c.nombre}
-                          </SelectItem>
+                          <SelectItem key={c.id} value={c.id.toString()}>{c.nombre}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
 
-                  <div className="grid gap-2">
+                  {/* PASO 4: Malla — se habilita al elegir carrera */}
+                  <div className={`grid gap-2 transition-opacity duration-300 ${!carreraOk ? "opacity-40 pointer-events-none select-none" : ""}`}>
                     <Label htmlFor="filtro-malla">Malla Curricular</Label>
-                    <Select 
-                      value={filtros.malla} 
+                    <Select
+                      value={filtros.malla}
                       onValueChange={(v) => setFiltros(prev => ({ ...prev, malla: v }))}
-                      disabled={!filtros.carrera || filtros.carrera === "todas"}
+                      disabled={!carreraOk}
                     >
                       <SelectTrigger id="filtro-malla">
-                        <SelectValue placeholder="Todas las mallas" />
+                        <SelectValue placeholder={carreraOk ? "Todas las mallas" : "Primero seleccione una carrera"} />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="todas">Todas las mallas</SelectItem>
                         {mallasFiltradasPorCarrera.map((m) => (
-                          <SelectItem key={m.id} value={m.id.toString()}>
-                            {m.codigo_malla}
-                          </SelectItem>
+                          <SelectItem key={m.id} value={m.id.toString()}>{m.codigo_malla}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-                
-                <div className="flex justify-end mt-4">
-                  <Button 
-                    variant="outline" 
+
+                {/* Indicador de progreso */}
+                <div className="flex items-center gap-2 mt-4 text-xs text-gray-500">
+                  <span className={periodoOk ? "text-emerald-600 font-semibold" : "text-gray-400"}>① Periodo</span>
+                  <span className="text-gray-300">→</span>
+                  <span className={facultadOk ? "text-emerald-600 font-semibold" : "text-gray-400"}>② Facultad</span>
+                  <span className="text-gray-300">→</span>
+                  <span className={carreraOk ? "text-emerald-600 font-semibold" : "text-gray-400"}>③ Carrera</span>
+                  <span className="text-gray-300">→</span>
+                  <span className={carreraOk ? "text-emerald-600 font-semibold" : "text-gray-400"}>④ Gestión habilitada</span>
+                </div>
+
+                <div className="flex justify-end mt-2">
+                  <Button
+                    variant="outline"
                     onClick={() => setFiltros({ periodo: "", facultad: "", carrera: "", malla: "" })}
                     className="border-emerald-500 text-emerald-700 hover:bg-emerald-50"
                   >
@@ -599,15 +671,20 @@ export default function GestionDocentesPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Sección Carga + Formulario — deshabilitada hasta elegir carrera */}
+            <div className={`transition-opacity duration-300 ${seccionDeshabilitada}`}>
             <Card className="mb-8">
                <CardHeader>
                 <CardTitle>
                   {editingId ? "Editar Docente" : "Gestión de Docentes"}
                 </CardTitle>
                 <CardDescription>
-                  {editingId 
-                    ? "Actualice los datos del docente." 
-                    : "Registre un nuevo docente individualmente o importe múltiples desde un archivo CSV."
+                  {!carreraOk
+                    ? "Complete los filtros (Periodo → Facultad → Carrera) para habilitar esta sección."
+                    : editingId
+                      ? "Actualice los datos del docente."
+                      : "Registre un nuevo docente individualmente o importe múltiples desde un archivo Excel."
                   }
                 </CardDescription>
               </CardHeader>
@@ -618,7 +695,7 @@ export default function GestionDocentesPage() {
                 <div className="mb-8 p-4 border-2 border-dashed border-blue-300 rounded-lg bg-blue-50/30">
                   <Label className="text-lg font-semibold text-blue-900">Carga Masiva de Docentes</Label>
                   <p className="text-sm text-muted-foreground mb-2">
-                    Suba un archivo CSV o Excel (.xlsx) para crear múltiples docentes a la vez.
+                    Suba un archivo Excel (.xlsx) para crear múltiples docentes a la vez.
                   </p>
                   
                   {/* Estructura de columnas */}
@@ -629,17 +706,16 @@ export default function GestionDocentesPage() {
                       <div><Badge className="bg-red-100 text-red-800 mr-1">Obligatorio</Badge> <code>apellidos</code> — Apellidos del docente</div>
                       <div><Badge className="bg-red-100 text-red-800 mr-1">Obligatorio</Badge> <code>email</code> — Correo electrónico</div>
                       <div><Badge className="bg-red-100 text-red-800 mr-1">Obligatorio</Badge> <code>carrera_nombre</code> — Nombre de la carrera principal</div>
-                      <div><Badge className="bg-blue-100 text-blue-800 mr-1">Opcional</Badge> <code>asignaturas</code> — Asignaturas separadas por <code>;</code></div>
-                      <div><Badge className="bg-blue-100 text-blue-800 mr-1">Opcional</Badge> <code>nivel_nombre</code> — Nombre o código del nivel</div>
-                      <div><Badge className="bg-blue-100 text-blue-800 mr-1">Opcional</Badge> <code>paralelo_nombre</code> — Nombre o código del paralelo</div>
-                      <div><Badge className="bg-blue-100 text-blue-800 mr-1">Opcional</Badge> <code>carreras_adicionales</code> — Carreras extra separadas por <code>;</code></div>
-                      <div><Badge className="bg-blue-100 text-blue-800 mr-1">Opcional</Badge> <code>activo</code> — true/false (default: true)</div>
+                      <div><Badge className="bg-red-100 text-red-800 mr-1">Obligatorio</Badge> <code>asignaturas</code> — Asignaturas separadas por <code>;</code></div>
+                      <div><Badge className="bg-red-100 text-red-800 mr-1">Obligatorio</Badge> <code>nivel_nombre</code> — Nivel(es) separados por <code>;</code> (ej: <em>Primer Nivel;Segundo Nivel</em>)</div>
+                      <div><Badge className="bg-red-100 text-red-800 mr-1">Obligatorio</Badge> <code>paralelo_nombre</code> — Paralelo(s) separados por <code>;</code> (ej: <em>A;B</em>)</div>
+                      <div><Badge className="bg-red-100 text-red-800 mr-1">Obligatorio</Badge> <code>rol_nombre</code> — Nombre o código del rol</div>
                     </div>
                   </div>
 
                   <div className="flex flex-col md:flex-row gap-4 items-start">
                     <div className="grid w-full max-w-sm items-center gap-1.5">
-                      <Input id="csv-file" type="file" accept=".csv,.xlsx,.xls" onChange={handleFileChange} />
+                      <Input id="csv-file" type="file" accept=".xlsx,.xls" onChange={handleFileChange} />
                     </div>
                     <div className="flex gap-2">
                       <Button 
@@ -659,7 +735,7 @@ export default function GestionDocentesPage() {
                         onClick={handleDownloadTemplate}
                         className="border-blue-400 text-blue-700 hover:bg-blue-50"
                       >
-                        📥 DESCARGAR PLANTILLA CSV
+                        📥 DESCARGAR PLANTILLA EXCEL
                       </Button>
                     </div>
                   </div>
@@ -832,9 +908,155 @@ export default function GestionDocentesPage() {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="grid gap-2"><Label htmlFor="nivel">Nivel</Label><Select name="nivel" value={formData.nivel} onValueChange={(v) => handleSelectChange('nivel', v)}><SelectTrigger id="nivel"><SelectValue placeholder="Seleccione nivel" /></SelectTrigger><SelectContent>{niveles.map((n) => (<SelectItem key={n.id} value={n.id.toString()}>{n.nombre}</SelectItem>))}</SelectContent></Select></div>
-                        <div className="grid gap-2"><Label htmlFor="paralelo">Paralelo</Label><Select name="paralelo" value={formData.paralelo} onValueChange={(v) => handleSelectChange('paralelo', v)}><SelectTrigger id="paralelo"><SelectValue placeholder="Seleccione paralelo" /></SelectTrigger><SelectContent>{paralelos.map((p) => (<SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>))}</SelectContent></Select></div>
+                    {/* --- SELECTOR MÚLTIPLE DE NIVELES --- */}
+                    <div className="grid gap-2">
+                      <Label>Niveles Asignados</Label>
+                      <p className="text-sm text-muted-foreground">Un docente puede impartir clases en varios niveles simultáneamente.</p>
+                      <div className="flex gap-2">
+                        <Select
+                          onValueChange={(v) => {
+                            const id = parseInt(v, 10);
+                            if (!selectedNivelesIds.includes(id)) setSelectedNivelesIds(prev => [...prev, id]);
+                          }}
+                        >
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Agregar nivel..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {niveles
+                              .filter(n => !selectedNivelesIds.includes(n.id))
+                              .map((n) => (
+                                <SelectItem key={n.id} value={n.id.toString()}>
+                                  {n.nombre} {n.codigo ? `(${n.codigo})` : ""}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {selectedNivelesIds.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {selectedNivelesIds.map((nid, idx) => {
+                            const niv = niveles.find(n => n.id === nid);
+                            return (
+                              <Badge key={nid} variant="outline" className={`text-sm py-1 px-3 ${idx === 0 ? 'bg-purple-100 text-purple-800 border-purple-300' : 'bg-violet-50 text-violet-700 border-violet-200'}`}>
+                                {niv?.nombre || `Nivel #${nid}`}
+                                {idx === 0 && <span className="ml-1 text-xs">(principal)</span>}
+                                <button type="button" onClick={() => setSelectedNivelesIds(prev => prev.filter(id => id !== nid))} className="ml-2 hover:text-red-600">
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {selectedNivelesIds.length === 0 && (
+                        <p className="text-xs text-amber-600">Seleccione al menos un nivel para el docente.</p>
+                      )}
+                    </div>
+
+                    {/* --- SELECTOR MÚLTIPLE DE PARALELOS --- */}
+                    <div className="grid gap-2">
+                      <Label>Paralelos Asignados</Label>
+                      <p className="text-sm text-muted-foreground">Un docente puede tener varios paralelos (A, B, C…) en distintas asignaturas o niveles.</p>
+                      <div className="flex gap-2">
+                        <Select
+                          onValueChange={(v) => {
+                            const id = parseInt(v, 10);
+                            if (!selectedParalelosIds.includes(id)) setSelectedParalelosIds(prev => [...prev, id]);
+                          }}
+                        >
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Agregar paralelo..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {paralelos
+                              .filter(p => !selectedParalelosIds.includes(p.id))
+                              .map((p) => (
+                                <SelectItem key={p.id} value={p.id.toString()}>
+                                  {p.nombre} {p.codigo ? `(${p.codigo})` : ""}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {selectedParalelosIds.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {selectedParalelosIds.map((pid, idx) => {
+                            const par = paralelos.find(p => p.id === pid);
+                            return (
+                              <Badge key={pid} variant="outline" className={`text-sm py-1 px-3 ${idx === 0 ? 'bg-orange-100 text-orange-800 border-orange-300' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                                {par?.nombre || `Paralelo #${pid}`}
+                                {idx === 0 && <span className="ml-1 text-xs">(principal)</span>}
+                                <button type="button" onClick={() => setSelectedParalelosIds(prev => prev.filter(id => id !== pid))} className="ml-2 hover:text-red-600">
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {selectedParalelosIds.length === 0 && (
+                        <p className="text-xs text-amber-600">Seleccione al menos un paralelo para el docente.</p>
+                      )}
+                    </div>
+
+                    {/* --- SELECTOR MÚLTIPLE DE ROLES --- */}
+                    <div className="grid gap-2">
+                      <Label>Roles Asignados</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Seleccione uno o más roles para este usuario. El primero será el rol principal.
+                      </p>
+                      <Select
+                        onValueChange={(v) => {
+                          const id = parseInt(v, 10);
+                          if (!selectedRolesIds.includes(id)) {
+                            setSelectedRolesIds(prev => [...prev, id]);
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Agregar rol..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {roles
+                            .filter(r => !selectedRolesIds.includes(r.id))
+                            .map((r) => (
+                              <SelectItem key={r.id} value={r.id.toString()}>
+                                {r.nombre}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      {selectedRolesIds.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {selectedRolesIds.map((rid, idx) => {
+                            const rol = roles.find(r => r.id === rid);
+                            return (
+                              <Badge
+                                key={rid}
+                                variant="outline"
+                                className={`text-sm py-1 px-3 ${idx === 0
+                                  ? 'bg-violet-100 text-violet-800 border-violet-300'
+                                  : 'bg-purple-50 text-purple-700 border-purple-200'
+                                }`}
+                              >
+                                {rol?.nombre || `Rol #${rid}`}
+                                {idx === 0 && <span className="ml-1 text-xs opacity-70">(principal)</span>}
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedRolesIds(prev => prev.filter(id => id !== rid))}
+                                  className="ml-2 hover:text-red-600"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {selectedRolesIds.length === 0 && (
+                        <p className="text-xs text-amber-600">Seleccione al menos un rol para el usuario.</p>
+                      )}
                     </div>
                     <div className="flex items-center space-x-4 rounded-md border p-4">
                         <div className="flex-1 space-y-1"><p className="text-sm font-medium">Estado</p><p className="text-sm text-muted-foreground">Define si el docente está activo.</p></div>
@@ -843,6 +1065,16 @@ export default function GestionDocentesPage() {
                     <div className="flex gap-4 pt-4">
                         <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700" disabled={submitting}>{submitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />GUARDANDO...</> : <><Save className="mr-2 h-4 w-4" />GUARDAR</>}</Button>
                         <Button type="button" onClick={handleNew} variant="outline" className="border-blue-500 text-blue-600 hover:bg-blue-50" disabled={submitting}><Plus className="mr-2 h-4 w-4" />NUEVO</Button>
+                        <Button
+                          type="button"
+                          onClick={() => router.push('/dashboard/admin')}
+                          variant="outline"
+                          className="border-gray-400 text-gray-700 hover:bg-gray-50 px-6"
+                          disabled={submitting}
+                          >
+                          <Home className="h-4 w-4 mr-2" />
+                          MENÚ PRINCIPAL
+                          </Button>
                     </div>
                 </form>
               </CardContent>
@@ -874,6 +1106,7 @@ export default function GestionDocentesPage() {
                           <TableHead>Asignatura</TableHead>
                           <TableHead>Nivel</TableHead>
                           <TableHead>Paralelo</TableHead>
+                          <TableHead>Roles</TableHead>
                           <TableHead className="text-center">P. Analítico</TableHead>
                           <TableHead className="text-center">Syllabus</TableHead>
                           <TableHead>Estado</TableHead>
@@ -950,8 +1183,54 @@ export default function GestionDocentesPage() {
                                     </div>
                                   ) : <span className="text-muted-foreground text-sm">No asignado</span>}
                                 </TableCell>
-                                <TableCell>{profesor.nivel?.nombre || <span className="text-muted-foreground text-sm">N/A</span>}</TableCell>
-                                <TableCell>{profesor.paralelo?.nombre || <span className="text-muted-foreground text-sm">N/A</span>}</TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    const todosNiveles = (profesor as any).niveles?.length > 0
+                                      ? (profesor as any).niveles
+                                      : profesor.nivel ? [profesor.nivel] : [];
+                                    return todosNiveles.length > 0 ? (
+                                      <div className="flex flex-col gap-1">
+                                        {todosNiveles.map((n: any, idx: number) => (
+                                          <Badge key={n.id} variant="outline" className={`text-xs ${idx === 0 ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-violet-50 text-violet-600 border-violet-200'}`}>
+                                            {n.nombre}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    ) : <span className="text-muted-foreground text-sm">N/A</span>;
+                                  })()}
+                                </TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    const todosParalelos = (profesor as any).paralelos?.length > 0
+                                      ? (profesor as any).paralelos
+                                      : profesor.paralelo ? [profesor.paralelo] : [];
+                                    return todosParalelos.length > 0 ? (
+                                      <div className="flex flex-col gap-1">
+                                        {todosParalelos.map((p: any, idx: number) => (
+                                          <Badge key={p.id} variant="outline" className={`text-xs ${idx === 0 ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}>
+                                            {p.nombre}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    ) : <span className="text-muted-foreground text-sm">N/A</span>;
+                                  })()}
+                                </TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    const todosRoles = (profesor as any).roles?.length > 0
+                                      ? (profesor as any).roles
+                                      : [];
+                                    return todosRoles.length > 0 ? (
+                                      <div className="flex flex-col gap-1">
+                                        {todosRoles.map((r: any) => (
+                                          <Badge key={r.id} variant="outline" className="text-xs bg-violet-50 text-violet-700 border-violet-200">
+                                            {r.nombre}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    ) : <Badge variant="outline" className="text-xs bg-gray-50 text-gray-500 border-gray-200">Sin rol</Badge>;
+                                  })()}
+                                </TableCell>
                                 <TableCell className="text-center">
                                   {totalProgramas > 0 ? (
                                     <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-200 cursor-pointer" onClick={() => setExpandedProfesorId(isExpanded ? null : profesor.id)}>
@@ -995,7 +1274,7 @@ export default function GestionDocentesPage() {
                               {/* Fila expandible con detalles de documentos */}
                               {isExpanded && (
                                 <TableRow key={`${profesor.id}-detail`} className="bg-emerald-50/50">
-                                  <TableCell colSpan={11} className="p-4">
+                                  <TableCell colSpan={12} className="p-4">
                                     <div className="space-y-4">
                                       {/* Mallas */}
                                       <div className="bg-white rounded-lg border p-4">
@@ -1124,7 +1403,7 @@ export default function GestionDocentesPage() {
                           );
                         })}
                         {profesoresFiltrados.length === 0 && (
-                          <TableRow><TableCell colSpan={11} className="text-center py-8 text-gray-500">
+                          <TableRow><TableCell colSpan={12} className="text-center py-8 text-gray-500">
                             No se encontraron docentes para esta carrera.
                           </TableCell></TableRow>
                         )}
@@ -1134,6 +1413,8 @@ export default function GestionDocentesPage() {
                 </div>
               </CardContent>
             </Card>
+            </div>{/* fin sección deshabilitada */}
+            </>)}
           </div>
         </main>
       </div>

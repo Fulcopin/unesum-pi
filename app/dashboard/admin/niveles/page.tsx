@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,7 +13,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Pencil, Trash2, Plus, Save, Loader2 } from "lucide-react"
+import { Pencil, Trash2, Plus, Save, Loader2,Home } from "lucide-react"
 
 import { useAuth } from "@/contexts/auth-context"
 import type { Nivel } from "@/types"
@@ -36,6 +37,7 @@ function useToast() {
 }
 
 export default function FuncionesSustantivasPage() {
+  const router = useRouter()
   const { token, getToken } = useAuth() 
   const { toast } = useToast()
   const [funciones, setFunciones] = useState<Nivel[]>([])
@@ -48,6 +50,53 @@ export default function FuncionesSustantivasPage() {
     nombre: "",
     estado: "activo" as "activo" | "inactivo",
   })
+
+  const ordinalMap: Record<string, number> = {
+    primero: 1,
+    primer: 1,
+    segundo: 2,
+    tercera: 3,
+    tercero: 3,
+    cuarto: 4,
+    quinta: 5,
+    quinto: 5,
+    sexta: 6,
+    sexto: 6,
+    septima: 7,
+    septimo: 7,
+    octava: 8,
+    octavo: 8,
+    novena: 9,
+    noveno: 9,
+    decima: 10,
+    decimo: 10,
+  };
+
+  const numberToOrdinalMap: Record<number, string> = {
+    1: "primero",
+    2: "segundo",
+    3: "tercero",
+    4: "cuarto",
+    5: "quinto",
+    6: "sexto",
+    7: "septimo",
+    8: "octavo",
+    9: "noveno",
+    10: "decimo",
+  };
+
+  const romanToNumberMap: Record<string, number> = {
+    i: 1,
+    ii: 2,
+    iii: 3,
+    iv: 4,
+    v: 5,
+    vi: 6,
+    vii: 7,
+    viii: 8,
+    ix: 9,
+    x: 10,
+  };
 
   // Función para hacer peticiones al API con el token
   // Función para hacer peticiones al API con el token - VERSIÓN CORREGIDA
@@ -87,7 +136,8 @@ const apiRequest = async (url: string, options = {}) => {
       }
       
       const data = await response.json()
-      setFunciones(data.data || [])
+      const nivelesData: Nivel[] = data.data || []
+      setFunciones(nivelesData)
     } catch (error) {
       console.error("Error al cargar los niveles:", error)
       toast({
@@ -126,6 +176,88 @@ const apiRequest = async (url: string, options = {}) => {
       })
       return
     }
+
+    if (!romanPreview) {
+      toast({
+        title: "Error",
+        description: "Ingrese un nivel valido usando numero o palabra ordinal (ejemplo: primero).",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const parseNumeroNivel = (texto: string): number | null => {
+      const numero = texto.match(/\d+/);
+      if (numero) {
+        const valor = Number(numero[0]);
+        return Number.isInteger(valor) && valor > 0 ? valor : null;
+      }
+
+      const normalizado = texto
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim();
+
+      if (!normalizado) return null;
+
+      const palabras = normalizado.split(/\s+/);
+      for (const palabra of palabras) {
+        if (ordinalMap[palabra]) return ordinalMap[palabra];
+        if (romanToNumberMap[palabra]) return romanToNumberMap[palabra];
+      }
+
+      return null;
+    };
+
+    const numeroNuevo = parseNumeroNivel(formData.nombre);
+    const nombreNormalizadoNuevo = formData.nombre
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+
+    const nivelDuplicado = funciones.find((nivel) => {
+      if (editingId && nivel.id.toString() === editingId) return false;
+
+      const textoExistente = `${nivel.romano || ""} ${nivel.ordinal || ""} ${nivel.nombre || ""}`.trim();
+      const numeroExistente = parseNumeroNivel(textoExistente);
+      const nombreNormalizadoExistente = (nivel.nombre || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim();
+
+      if (numeroNuevo && numeroExistente && numeroNuevo === numeroExistente) {
+        return nivel;
+      }
+
+      return !!nombreNormalizadoNuevo && nombreNormalizadoExistente === nombreNormalizadoNuevo ? nivel : undefined;
+    });
+
+    if (nivelDuplicado) {
+      const aceptarEliminar = confirm(
+        `Este nivel ya existe (${nivelDuplicado.nombre}). Si aceptas, se eliminará el duplicado y se guardará el nuevo registro.`
+      )
+
+      if (!aceptarEliminar) {
+        handleNew()
+        return
+      }
+
+      const responseDelete = await apiRequest(`/niveles/${nivelDuplicado.id}`, { method: "DELETE" })
+      if (!responseDelete.ok) {
+        const error = await responseDelete.json().catch(() => ({}))
+        throw new Error(error.message || "No se pudo eliminar el duplicado")
+      }
+
+      toast({
+        title: "Duplicado eliminado",
+        description: "Se eliminó el nivel duplicado y se continuará con el guardado.",
+      })
+
+      await fetchFunciones()
+    }
   
     try {
       setSubmitting(true)
@@ -133,6 +265,8 @@ const apiRequest = async (url: string, options = {}) => {
       // Preparar datos sin el campo código (se genera automáticamente en el backend)
       const dataToSend = {
         nombre: formData.nombre,
+        ordinal: ordinalPreview || null,
+        romano: romanPreview || null,
         estado: formData.estado
       }
       
@@ -271,6 +405,65 @@ const handleEdit = (funcion: Nivel) => {
     }
   }
 
+  const toRoman = (num: number): string => {
+    if (!Number.isInteger(num) || num <= 0 || num > 3999) return "";
+
+    const values = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+    const symbols = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"];
+
+    let n = num;
+    let roman = "";
+
+    for (let i = 0; i < values.length; i++) {
+      while (n >= values[i]) {
+        roman += symbols[i];
+        n -= values[i];
+      }
+    }
+
+    return roman;
+  };
+
+  const extraerNumeroNivel = (texto: string): number | null => {
+    const numero = texto.match(/\d+/);
+    if (numero) {
+      const valor = Number(numero[0]);
+      return Number.isInteger(valor) && valor > 0 ? valor : null;
+    }
+
+    const normalizado = texto
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+
+    if (!normalizado) return null;
+
+    const palabras = normalizado.split(/\s+/);
+    for (const palabra of palabras) {
+      if (ordinalMap[palabra]) {
+        return ordinalMap[palabra];
+      }
+      if (romanToNumberMap[palabra]) {
+        return romanToNumberMap[palabra];
+      }
+    }
+
+    return null;
+  };
+
+  const romanPreview = (() => {
+    const nivel = extraerNumeroNivel(formData.nombre);
+    if (!nivel) return "";
+    return toRoman(nivel);
+  })();
+
+  const ordinalPreview = (() => {
+    const nivel = extraerNumeroNivel(formData.nombre);
+    if (!nivel) return "";
+    return numberToOrdinalMap[nivel] || "";
+  })();
+
   return (
     <ProtectedRoute allowedRoles={["administrador"]}>
       <div className="min-h-screen bg-gray-50">
@@ -289,18 +482,47 @@ const handleEdit = (funcion: Nivel) => {
                 <form onSubmit={handleSubmit} className="space-y-6">
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <Label htmlFor="nombre" className="text-sm font-medium">
-                        Nivel *
-                      </Label>
-                      <Input
-                        id="nombre"
-                        placeholder="Ingrese el Nivel"
-                        value={formData.nombre}
-                        onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                        required
-                        className="border-gray-300"
-                        maxLength={100}
-                      />
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="nombre" className="text-sm font-medium">
+                            Nivel *
+                          </Label>
+                          <Input
+                            id="nombre"
+                            placeholder="Ingrese el Nivel"
+                            value={formData.nombre}
+                            onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                            required
+                            className="border-gray-300"
+                            maxLength={100}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="nivel-ordinal" className="text-sm font-medium">
+                            Ordinal
+                          </Label>
+                          <Input
+                            id="nivel-ordinal"
+                            value={ordinalPreview}
+                            placeholder="Descripcion ordinal"
+                            readOnly
+                            className="border-gray-300 bg-gray-50 font-semibold capitalize"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="nivel-romano" className="text-sm font-medium">
+                            Romano
+                          </Label>
+                          <Input
+                            id="nivel-romano"
+                            value={romanPreview}
+                            placeholder="Descripcion romano"
+                            readOnly
+                            className="border-gray-300 bg-gray-50 font-semibold tracking-wide"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500">Ejemplo: primero en ordinal y I en romano</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="estado" className="text-sm font-medium">
@@ -351,6 +573,16 @@ const handleEdit = (funcion: Nivel) => {
                       <Plus className="h-4 w-4 mr-2" />
                       NUEVO
                     </Button>
+                    <Button
+                      type="button"
+                      onClick={() => router.push('/dashboard/admin')}
+                      variant="outline"
+                      className="border-gray-400 text-gray-700 hover:bg-gray-50 px-6"
+                      disabled={submitting}
+                    >
+                      <Home className="h-4 w-4 mr-2" />
+                      MENÚ PRINCIPAL
+                    </Button>
                   </div>
                 </form>
               </CardContent>
@@ -371,17 +603,33 @@ const handleEdit = (funcion: Nivel) => {
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-gray-50">
-                          <TableHead className="font-semibold">Código</TableHead>
                           <TableHead className="font-semibold">Nivel</TableHead>
+                          <TableHead className="font-semibold">Ordinal</TableHead>
+                          <TableHead className="font-semibold">Romano</TableHead>
                           <TableHead className="font-semibold">Estado</TableHead>
                           <TableHead className="font-semibold">Acciones</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {funciones.map((funcion, index) => (
+                        {funciones.map((funcion) => (
                           <TableRow key={funcion.id} className="hover:bg-gray-50">
-                            <TableCell className="font-medium">{index + 1}</TableCell>
                             <TableCell>{funcion.nombre}</TableCell>
+                            <TableCell className="capitalize">
+                              {(() => {
+                                if (funcion.ordinal) return funcion.ordinal;
+                                const nivel = extraerNumeroNivel(funcion.nombre);
+                                if (!nivel) return "-";
+                                return numberToOrdinalMap[nivel] || "-";
+                              })()}
+                            </TableCell>
+                            <TableCell className="font-semibold">
+                              {(() => {
+                                if (funcion.romano) return funcion.romano;
+                                const nivel = extraerNumeroNivel(funcion.nombre);
+                                if (!nivel) return "-";
+                                return toRoman(nivel);
+                              })()}
+                            </TableCell>
                             
                             <TableCell>
                               <Badge
@@ -434,7 +682,7 @@ const handleEdit = (funcion: Nivel) => {
                         ))}
                         {funciones.length === 0 && !loading && (
                           <TableRow>
-                            <TableCell colSpan={4} className="text-center py-8 text-gray-500">
+                            <TableCell colSpan={5} className="text-center py-8 text-gray-500">
                               No hay nivel registrados
                             </TableCell>
                           </TableRow>

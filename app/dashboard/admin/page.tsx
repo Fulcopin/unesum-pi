@@ -5,7 +5,8 @@ import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 // --- 1. IMPORTA EL NUEVO ICONO ---
-import { Users, BookOpen, Activity, Calendar, FileSpreadsheet, Settings, Edit3, FileText, Library, LucideCamera, LucideAlarmClock, LucideActivity, LucideActivitySquare, LucideAirVent, LucideArchiveRestore,GraduationCap,
+import {
+  Users, BookOpen, Activity, Calendar, FileSpreadsheet, Settings, Edit3, FileText, Library, LucideCamera, LucideAlarmClock, LucideActivity, LucideActivitySquare, LucideAirVent, LucideArchiveRestore, GraduationCap,
   Grid3x3,
   ClipboardList,
   LucideAccessibility,
@@ -13,14 +14,42 @@ import { Users, BookOpen, Activity, Calendar, FileSpreadsheet, Settings, Edit3, 
   LucideArchive,
   Upload,
   Sparkles,
-  Bot } from "lucide-react"
+  Bot,
+  ClipboardEdit,
+  ShieldCheck,
+  Pen,
+  QrCode,
+  UserPlus,
+} from "lucide-react"
 import Link from "next/link"
 
 export default function AdminDashboard() {
   const adminModules = [
     {
+      title: "Mis Documentos para Firmar",
+      description: "Ve todos los documentos pendientes de tu firma (syllabus y programas analíticos) y fírmalos de inmediato",
+      icon: Pen,
+      href: "/dashboard/admin/mis-firmas",
+      color: "bg-indigo-700",
+      destacado: true,
+    },
+    {
+      title: "Mi QR Personal",
+      description: "Ver y descargar tu sello digital personal de identidad para firmar documentos",
+      icon: QrCode,
+      href: "/dashboard/admin/mi-qr",
+      color: "bg-emerald-600",
+    },
+    {
       title: "Gestión de Usuarios",
-      description: "Administrar usuarios del sistema y roles",
+      description: "Registrar y administrar todos los usuarios del sistema (docentes, decanos, comisión, dirección, etc.)",
+      icon: UserPlus,
+      href: "/dashboard/admin/usuarios",
+      color: "bg-blue-600",
+    },
+    {
+      title: "Gestión de Roles",
+      description: "Crear y administrar los roles del sistema",
       icon: Users,
       href: "/dashboard/admin/users",
       color: "bg-cyan-500",
@@ -59,36 +88,37 @@ export default function AdminDashboard() {
       icon: FileText,
       href: "/dashboard/admin/syllabus",
       color: "bg-orange-500",
-    },*/  
-     {
+    },*/
+    /*{
       title: "Syllabus",
       description: "Gestionar Syllabus",
       icon: Sparkles,
       href: "/dashboard/admin/syllabus/extraer-titulos",
       color: "bg-orange-500",
-    },
+    },*/
     {
       title: "Funciones Sustantivas",
       description: "Registrar y gestionar funciones sustantivas",
       icon: BookOpen,
       href: "/dashboard/admin/funciones-sustantivas",
-      color: "bg-cyan-500",
+      color: "bg-orange-500",
     },
     {
       title: "Gestión de Docentes",
       description: "Administrar información de docentes",
       icon: Users,
       href: "/dashboard/admin/docentes",
-      color: "bg-purple-500",
+      color: "bg-cyan-500",
+
     },
     {
       title: "Actividades Extracurriculares",
       description: "Gestionar actividades y seguimiento",
-      icon: Activity,
+      icon: LucideActivitySquare,
       href: "/dashboard/admin/actividades",
-      color: "bg-orange-500",
+      color: "bg-purple-500",
     },
-   
+
     /*{
       title: "Malla Curricular",
       description: "Malla Curricular",
@@ -98,19 +128,19 @@ export default function AdminDashboard() {
     },*/
     {
       title: "Programa Analítico",
-      description: "Gestionar Programa Analíticos",
+      description: "Configuración de Programa Analíticos",
       icon: ClipboardList,
       href: "/dashboard/admin/programa-analitico",
-      color: "bg-cyan-500",
+      color: "bg-orange-500",
     },
-   
+
     // --- 2. AÑADE EL NUEVO MÓDULO AQUÍ ---
-   {
-      title: "Configuración del Syllabus",
-      description: "Cargar y editar syllabus desde documentos Word",
+    {
+      title: "Syllabus",
+      description: "Configuración de Syllabus",
       icon: FileText,
       href: "/dashboard/admin/editor-syllabus",
-      color: "bg-purple-500",
+      color: "bg-cyan-500",
     },
     /*{
       title: "Configuración",
@@ -119,14 +149,14 @@ export default function AdminDashboard() {
       href: "/dashboard/admin/settings",
       color: "bg-purple-500",
     },*/
-     {
+    {
       title: "Facultades y Carreras",
       description: "Ingresa facultades y carreras académicas",
       icon: Library,
       href: "/dashboard/admin/gestion-academica",
       color: "bg-purple-500",
     },
-     {
+    {
       title: "Niveles",
       description: "Ingresa Niveles",
       icon: LucideAlarmClock,
@@ -134,8 +164,8 @@ export default function AdminDashboard() {
       color: "bg-orange-500",
     },
     {
-      title: "Asignaturas - Malla Curricular",
-      description: "Registro de asignaturas para la malla curricular",
+      title: "Malla -  Asignaturas",
+      description: "Asignaturas de la Malla de la Carrera",
       icon: GraduationCap,
       href: "/dashboard/admin/asignaturas/registro",
       color: "bg-cyan-500",
@@ -155,12 +185,20 @@ export default function AdminDashboard() {
       color: "bg-orange-500",
     },
     {
-      title: "Asistente IA",
-      description: "Consulta documentos curriculares con IA · Subir PDFs, gestionar índice y hacer preguntas",
-      icon: Bot,
-      href: "/dashboard/admin/asistente-ia",
-      color: "bg-violet-600",
+      title: "Asignaturas",
+      description: "Gestiona Asignaturas",
+      icon: ClipboardEdit,
+      href: "/dashboard/admin/materias",
+      color: "bg-cyan-500",
     },
+    
+    /* {
+       title: "Asistente IA",
+       description: "Consulta documentos curriculares con IA · Subir PDFs, gestionar índice y hacer preguntas",
+       icon: Bot,
+       href: "/dashboard/admin/asistente-ia",
+       color: "bg-violet-600",
+     },*/
   ]
 
   return (
@@ -177,22 +215,36 @@ export default function AdminDashboard() {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {adminModules.map((module) => {
               const IconComponent = module.icon
+              const esDestacado = (module as any).destacado
               return (
-                <Card key={module.href} className="hover:shadow-lg transition-shadow cursor-pointer">
+                <Card
+                  key={module.href}
+                  className={`hover:shadow-lg transition-shadow cursor-pointer ${
+                    esDestacado ? 'border-indigo-300 bg-indigo-50 md:col-span-2 lg:col-span-3' : ''
+                  }`}
+                >
                   <CardHeader className="pb-3">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${module.color} text-white`}>
-                        <IconComponent className="h-6 w-6" />
+                        <IconComponent className={esDestacado ? "h-8 w-8" : "h-6 w-6"} />
                       </div>
                       <div>
-                        <CardTitle className="text-lg">{module.title}</CardTitle>
+                        <CardTitle className={esDestacado ? "text-xl" : "text-lg"}>{module.title}</CardTitle>
                       </div>
                     </div>
                   </CardHeader>
                   <CardContent>
                     <CardDescription className="mb-4">{module.description}</CardDescription>
                     <Link href={module.href}>
-                      <Button className="w-full bg-emerald-600 hover:bg-emerald-700">Acceder</Button>
+                      <Button
+                        className={`w-full ${
+                          esDestacado
+                            ? 'bg-indigo-700 hover:bg-indigo-800 text-base py-5'
+                            : 'bg-emerald-600 hover:bg-emerald-700'
+                        }`}
+                      >
+                        {esDestacado ? 'Ver mis documentos pendientes →' : 'Acceder'}
+                      </Button>
                     </Link>
                   </CardContent>
                 </Card>

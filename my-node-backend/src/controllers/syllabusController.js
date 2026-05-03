@@ -224,6 +224,7 @@ exports.verificarExistencia = async (req, res) => {
   try {
     const { periodo, materia, asignatura_id } = req.query;
     const usuario_id = req.user.id;
+    const { Op } = require('sequelize');
 
     console.log('🔍 Verificando existencia:', { usuario_id, periodo, materia, asignatura_id });
 
@@ -241,9 +242,29 @@ exports.verificarExistencia = async (req, res) => {
       });
     }
 
-    // Construir condición WHERE - paranoid:true ya filtra los eliminados automáticamente
+    // Resolver periodo: construir array con ID y nombre para búsqueda flexible
+    // (el admin guarda con nombre del periodo, la comisión busca con ID, o viceversa)
+    const periodoValues = [String(periodo)];
+    try {
+      const periodoRecord = await db.Periodo.findByPk(parseInt(periodo));
+      if (periodoRecord && periodoRecord.nombre && !periodoValues.includes(periodoRecord.nombre)) {
+        periodoValues.push(periodoRecord.nombre);
+      }
+    } catch(e) { /* ignore */ }
+    // Si enviaron nombre (no numérico), buscar su ID
+    if (isNaN(parseInt(periodo))) {
+      try {
+        const periodoByName = await db.Periodo.findOne({ where: { nombre: periodo } });
+        if (periodoByName && !periodoValues.includes(String(periodoByName.id))) {
+          periodoValues.push(String(periodoByName.id));
+        }
+      } catch(e) { /* ignore */ }
+    }
+    console.log('📅 Periodo values a buscar:', periodoValues);
+
+    // Construir condición WHERE con todos los valores de periodo posibles
     const whereCondicion = {
-      periodo: periodo
+      periodo: { [Op.in]: periodoValues }
     };
 
     if (asignatura_id) {
@@ -254,20 +275,21 @@ exports.verificarExistencia = async (req, res) => {
 
     let syllabusExistente = await Syllabus.findOne({
       where: whereCondicion,
-      attributes: ['id', 'nombre', 'materias', 'asignatura_id', 'createdAt', 'updatedAt']
+      attributes: ['id', 'nombre', 'materias', 'asignatura_id', 'createdAt', 'updatedAt'],
+      order: [['createdAt', 'DESC']]
     });
 
     // Si no se encontró con asignatura_id, intentar buscar por nombre de materia
     // (el admin puede haber subido sin asignatura_id vinculado)
     if (!syllabusExistente && asignatura_id && materia) {
       console.log('🔄 No encontrado por asignatura_id, buscando por nombre de materia:', materia);
-      const { Op } = require('sequelize');
       syllabusExistente = await Syllabus.findOne({
         where: {
-          periodo: periodo,
+          periodo: { [Op.in]: periodoValues },
           materias: { [Op.iLike]: `%${materia}%` }
         },
-        attributes: ['id', 'nombre', 'materias', 'asignatura_id', 'createdAt', 'updatedAt']
+        attributes: ['id', 'nombre', 'materias', 'asignatura_id', 'createdAt', 'updatedAt'],
+        order: [['createdAt', 'DESC']]
       });
     }
     
@@ -278,13 +300,13 @@ exports.verificarExistencia = async (req, res) => {
         const asigRecord = await db.Asignatura.findByPk(asignatura_id, { attributes: ['nombre'] });
         if (asigRecord && asigRecord.nombre) {
           console.log('🔄 Buscando por nombre de asignatura resuelto:', asigRecord.nombre);
-          const { Op } = require('sequelize');
           syllabusExistente = await Syllabus.findOne({
             where: {
-              periodo: periodo,
+              periodo: { [Op.in]: periodoValues },
               materias: { [Op.iLike]: `%${asigRecord.nombre}%` }
             },
-            attributes: ['id', 'nombre', 'materias', 'asignatura_id', 'createdAt', 'updatedAt']
+            attributes: ['id', 'nombre', 'materias', 'asignatura_id', 'createdAt', 'updatedAt'],
+            order: [['createdAt', 'DESC']]
           });
         }
       } catch(e) { console.log('⚠️ Error resolviendo nombre de asignatura:', e.message); }
@@ -292,9 +314,9 @@ exports.verificarExistencia = async (req, res) => {
 
     // Último fallback: buscar CUALQUIER syllabus del periodo (admin subió sin materia ni asignatura_id)
     if (!syllabusExistente) {
-      console.log('🔄 Último fallback: buscando cualquier syllabus del periodo:', periodo);
+      console.log('🔄 Último fallback: buscando cualquier syllabus del periodo:', periodoValues);
       syllabusExistente = await Syllabus.findOne({
-        where: { periodo: periodo },
+        where: { periodo: { [Op.in]: periodoValues } },
         attributes: ['id', 'nombre', 'materias', 'asignatura_id', 'createdAt', 'updatedAt'],
         order: [['createdAt', 'DESC']]
       });

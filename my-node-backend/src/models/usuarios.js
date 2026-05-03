@@ -41,6 +41,11 @@ module.exports = function(sequelize, DataTypes) {
       type: DataTypes.STRING(50),
       allowNull: false
     },
+    roles: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: []
+    },
     facultad: {
       type: DataTypes.STRING(100),
       allowNull: true

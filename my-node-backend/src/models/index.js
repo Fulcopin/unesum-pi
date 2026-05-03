@@ -21,6 +21,8 @@ const initUnidadTematica = require('./unidades_tematicas');
 const initAsignaturaRequisito = require('./asignatura_requisitos');
 const initperiodo = require('./periodos');
 const initMalla = require('./mallas');
+const initRol = require('./rol');
+const initFirmaDocumento = require('./firma_documento');
 // =========================================================================
 // --- PASO 1: IMPORTA TU NUEVO MODELO ---
 // Asegúrate de que el nombre del archivo sea correcto ('./clasificacion_academica')
@@ -47,6 +49,9 @@ const initSyllabusDocente = require('./SyllabusDocente');
 const initProgramaAnaliticoDocente = require('./ProgramaAnaliticoDocente');
 const initProfesorCarrera = require('./profesor_carreras');
 const initProfesorAsignatura = require('./profesor_asignaturas');
+const initProfesorNivel = require('./profesor_niveles');
+const initProfesorParalelo = require('./profesor_paralelos');
+const initProfesorRol = require('./profesor_roles');
 
 
 // Inicializa el modelo Usuario
@@ -67,6 +72,8 @@ const UnidadTematica = initUnidadTematica(sequelize, Sequelize.DataTypes);
 const AsignaturaRequisito = initAsignaturaRequisito(sequelize, Sequelize.DataTypes);
 const Periodo = initperiodo(sequelize, Sequelize.DataTypes);
 const Malla = initMalla(sequelize, Sequelize.DataTypes);
+const Rol = initRol(sequelize, Sequelize.DataTypes);
+const FirmaDocumento = initFirmaDocumento(sequelize, Sequelize.DataTypes);
 
 // =========================================================================
 // --- PASO 2: INICIALIZA TU NUEVO MODELO ---
@@ -93,6 +100,9 @@ const SyllabusDocente = initSyllabusDocente(sequelize, Sequelize.DataTypes);
 const ProgramaAnaliticoDocente = initProgramaAnaliticoDocente(sequelize, Sequelize.DataTypes);
 const ProfesorCarrera = initProfesorCarrera(sequelize, Sequelize.DataTypes);
 const ProfesorAsignatura = initProfesorAsignatura(sequelize, Sequelize.DataTypes);
+const ProfesorNivel = initProfesorNivel(sequelize, Sequelize.DataTypes);
+const ProfesorParalelo = initProfesorParalelo(sequelize, Sequelize.DataTypes);
+const ProfesorRol = initProfesorRol(sequelize, Sequelize.DataTypes);
 
 
 // Definir relaciones
@@ -133,8 +143,29 @@ ProfesorAsignatura.belongsTo(Asignatura, { foreignKey: 'asignatura_id', as: 'asi
 Profesor.belongsTo(Nivel, { foreignKey: 'nivel_id', as: 'nivel' });
 Nivel.hasMany(Profesor, { foreignKey: 'nivel_id', as: 'profesores' });
 
+// Relación M2M: un profesor puede tener múltiples niveles
+Profesor.belongsToMany(Nivel, { through: ProfesorNivel, foreignKey: 'profesor_id', otherKey: 'nivel_id', as: 'niveles' });
+Nivel.belongsToMany(Profesor, { through: ProfesorNivel, foreignKey: 'nivel_id', otherKey: 'profesor_id', as: 'profesoresNiveles' });
+Profesor.hasMany(ProfesorNivel, { foreignKey: 'profesor_id', as: 'profesorNiveles' });
+ProfesorNivel.belongsTo(Profesor, { foreignKey: 'profesor_id', as: 'profesor' });
+ProfesorNivel.belongsTo(Nivel,    { foreignKey: 'nivel_id',    as: 'nivel' });
+
 Profesor.belongsTo(Paralelo, { foreignKey: 'paralelo_id', as: 'paralelo' });
 Paralelo.hasMany(Profesor, { foreignKey: 'paralelo_id', as: 'profesores' });
+
+// Relación M2M: un profesor puede tener múltiples paralelos
+Profesor.belongsToMany(Paralelo, { through: ProfesorParalelo, foreignKey: 'profesor_id', otherKey: 'paralelo_id', as: 'paralelos' });
+Paralelo.belongsToMany(Profesor, { through: ProfesorParalelo, foreignKey: 'paralelo_id', otherKey: 'profesor_id', as: 'profesoresParalelos' });
+Profesor.hasMany(ProfesorParalelo, { foreignKey: 'profesor_id', as: 'profesorParalelos' });
+ProfesorParalelo.belongsTo(Profesor, { foreignKey: 'profesor_id', as: 'profesor' });
+ProfesorParalelo.belongsTo(Paralelo, { foreignKey: 'paralelo_id', as: 'paralelo' });
+
+// Relación M2M: un profesor puede tener múltiples roles
+Profesor.belongsToMany(Rol, { through: ProfesorRol, foreignKey: 'profesor_id', otherKey: 'rol_id', as: 'roles' });
+Rol.belongsToMany(Profesor, { through: ProfesorRol, foreignKey: 'rol_id', otherKey: 'profesor_id', as: 'profesoresRoles' });
+Profesor.hasMany(ProfesorRol, { foreignKey: 'profesor_id', as: 'profesorRoles' });
+ProfesorRol.belongsTo(Profesor, { foreignKey: 'profesor_id', as: 'profesor' });
+ProfesorRol.belongsTo(Rol,      { foreignKey: 'rol_id',      as: 'rol' });
 
 Syllabus.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'creador' });
 Syllabus.belongsTo(Profesor, { foreignKey: 'profesor_id', as: 'profesor' });
@@ -274,6 +305,8 @@ module.exports = {
   ClasificacionAcademica, 
   Periodo,
   Malla,
+  Rol,
+  FirmaDocumento,
   // Modelos de Programa Analítico
   PlantillaPrograma,
   SeccionPlantilla,
@@ -292,5 +325,8 @@ module.exports = {
   SyllabusDocente,
   ProgramaAnaliticoDocente,
   ProfesorCarrera,
-  ProfesorAsignatura
+  ProfesorAsignatura,
+  ProfesorNivel,
+  ProfesorParalelo,
+  ProfesorRol
 };

@@ -37,43 +37,66 @@ const validateLogin = [
 ];
 
 
+// Roles que viven en la tabla `usuarios`
+const ADMIN_TABLE_ROLES = new Set([
+  'administrador',
+  'comision_academica',
+  'comision',
+  'direccion',
+  'decano',
+  'subdecano',
+  'estudiante',
+]);
+
+// Roles que viven en la tabla `profesores`
+const TEACHER_TABLE_ROLES = new Set(['profesor', 'docente']);
+
 const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ success: false, message: 'Token de acceso requerido' });
     }
 
     const token = authHeader.substring(7);
-    
-    // Decodifica el token para obtener el payload { id, rol }
     const decoded = jwt.verify(token, process.env.JWT_SECRET || '0000');
-    
+
+    const rolActivo = decoded.rol;
+    const rolesToken = Array.isArray(decoded.roles) && decoded.roles.length > 0
+      ? decoded.roles
+      : (rolActivo ? [rolActivo] : []);
+    const tablaOrigen = decoded.tabla;
+
     let user = null;
 
-    // Decide en qué tabla buscar basándose en el rol del token
-    if (decoded.rol === 'administrador' || decoded.rol === 'comision_academica' || decoded.rol === 'comision') {
-      // Administradores y comisión académica están en la tabla usuarios
+    // 1) Usar la tabla origen si viene en el token (preferido)
+    if (tablaOrigen === 'usuarios') {
       user = await Usuario.findByPk(decoded.id);
-      // Verificamos el estado
-      if (user && !user.estado) {
-        return res.status(401).json({ success: false, message: 'La cuenta del usuario está inactiva.' });
-      }
-    } else if (decoded.rol === 'profesor' || decoded.rol === 'docente') {
-      // Profesores y docentes están en la tabla profesores
+    } else if (tablaOrigen === 'profesores') {
       user = await Profesor.findByPk(decoded.id);
-      // Aquí podrías añadir una comprobación de estado si la tabla 'profesores' la tuviera
+    } else {
+      // 2) Compatibilidad: deducir por el rol activo
+      if (ADMIN_TABLE_ROLES.has(rolActivo)) {
+        user = await Usuario.findByPk(decoded.id);
+      } else if (TEACHER_TABLE_ROLES.has(rolActivo)) {
+        user = await Profesor.findByPk(decoded.id);
+      }
     }
 
-    // Si no se encontró ningún usuario en ninguna de las tablas
     if (!user) {
       return res.status(401).json({ success: false, message: 'Usuario no válido o no encontrado.' });
     }
 
-    // Adjunta el usuario encontrado y el rol del token a la petición
+    // Verificar estado si el modelo lo tiene
+    if (user.estado === false) {
+      return res.status(401).json({ success: false, message: 'La cuenta del usuario está inactiva.' });
+    }
+
     req.user = user;
-    req.user.rol = decoded.rol; // MUY IMPORTANTE para que `authorize` funcione bien
+    req.user.rol = rolActivo;
+    req.user.roles = rolesToken;
+    req.user.tabla = tablaOrigen;
 
     next();
   } catch (error) {
@@ -85,25 +108,33 @@ const authenticate = async (req, res, next) => {
   }
 };
 
-// --- SIN CAMBIOS AQUÍ ---
+// authorize: pasa si el rol activo del usuario está en la lista,
+// O si alguno de sus roles disponibles coincide.
 const authorize = (roles = []) => {
   if (typeof roles === 'string') {
     roles = [roles];
   }
   return (req, res, next) => {
-    // Esta función ahora funcionará correctamente porque `req.user.rol` es fiable
+    const rolActivo = req.user?.rol;
+    const rolesUsuario = Array.isArray(req.user?.roles) && req.user.roles.length > 0
+      ? req.user.roles
+      : (rolActivo ? [rolActivo] : []);
+
+    const ok =
+      !!req.user &&
+      roles.length > 0 &&
+      (roles.includes(rolActivo) || rolesUsuario.some(r => roles.includes(r)));
+
     console.log('🔐 Autorización:', {
-      userRole: req.user?.rol,
+      rolActivo,
+      rolesUsuario,
       requiredRoles: roles,
       hasUser: !!req.user,
-      isAuthorized: req.user && roles.length && roles.includes(req.user.rol)
+      isAuthorized: ok,
     });
-    
-    if (req.user && roles.length && roles.includes(req.user.rol)) {
-      next();
-    } else {
-      return res.status(403).json({ message: 'No tienes permiso para realizar esta acción.' });
-    }
+
+    if (ok) return next();
+    return res.status(403).json({ message: 'No tienes permiso para realizar esta acción.' });
   };
 };
 

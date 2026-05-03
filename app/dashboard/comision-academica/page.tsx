@@ -18,8 +18,11 @@ import {
   FileSpreadsheet, 
   Eye,
   Trash2,
-  Calendar
+  Calendar,
+  Pen,
+  QrCode,
 } from 'lucide-react'
+import Link from 'next/link'
 import { useAuth } from '@/contexts/auth-context'
 import axios from 'axios'
 
@@ -252,6 +255,31 @@ export default function ComisionAcademicaPage() {
       </div>
 
       <div className="container mx-auto px-4 max-w-7xl space-y-6">
+        {/* Banner Mis Firmas */}
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-4">
+          <div className="flex items-center gap-3 flex-1">
+            <div className="bg-indigo-700 text-white p-2 rounded-lg">
+              <Pen className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="font-semibold text-indigo-900">Mis Documentos para Firmar</p>
+              <p className="text-sm text-indigo-600">Firma syllabus y programas analíticos pendientes de tu aprobación</p>
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <Link href="/dashboard/comision-academica/mis-firmas">
+              <Button className="bg-indigo-700 hover:bg-indigo-800 text-white">
+                <Pen className="h-4 w-4 mr-2" /> Ver y Firmar
+              </Button>
+            </Link>
+            <Link href="/dashboard/comision-academica/mi-qr">
+              <Button variant="outline" className="border-indigo-300 text-indigo-700">
+                <QrCode className="h-4 w-4 mr-2" /> Mi QR
+              </Button>
+            </Link>
+          </div>
+        </div>
+
         {/* Menú de navegación */}
         <Card>
           <CardContent className="pt-6">

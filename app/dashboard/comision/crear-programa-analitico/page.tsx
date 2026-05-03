@@ -15,7 +15,9 @@ import { useAuth } from "@/contexts/auth-context"
 import * as mammoth from "mammoth"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
-import { useSearchParams } from "next/navigation" 
+import { useSearchParams, useRouter, usePathname } from "next/navigation"
+import { periodoAlIdSelect, periodoIdCoincideEnLista } from "@/lib/periodo-select"
+import { flattenTabRowsForPdfAutoTable } from "@/lib/programa-analitico-pdf-grid"
 // --- INTERFACES DE DATOS ---
 interface TableCell { 
   id: string; 
@@ -38,6 +40,133 @@ interface TabData { id: string; title: string; rows: TableRow[]; }
 interface ProgramaAnaliticoData { id: string | number; name: string; description: string; tabs: TabData[]; metadata: { subject?: string; period?: string; level?: string; createdAt: string; updatedAt: string; }; }
 interface SavedProgramaAnaliticoRecord { id: number; nombre: string; periodo: string; materias: string; datos_tabla: ProgramaAnaliticoData; created_at: string; updated_at: string; }
 
+/** Textos donde puede venir la materia (admin suele omitir asignatura_id pero guarda nombre en `nombre`/metadata). */
+function textosAsignaturaDesdeProgramaGuardado(s: any): string[] {
+  const out: string[] = []
+  if (s?.nombre != null && String(s.nombre).trim()) out.push(String(s.nombre))
+  if (s?.materias != null && String(s.materias).trim()) out.push(String(s.materias))
+  let dt = s?.datos_tabla ?? s?.datos_programa
+  if (typeof dt === "string") {
+    try {
+      dt = JSON.parse(dt)
+    } catch {
+      dt = null
+    }
+  }
+  if (dt && typeof dt === "object") {
+    if (dt.metadata?.subject) out.push(String(dt.metadata.subject))
+    if (dt.name) out.push(String(dt.name))
+  }
+  return out
+}
+
+function coincidenciaAsignaturaFlexible(
+  s: any,
+  asignaturaIdParam: string | null,
+  asignaturaNombre?: string | null,
+  asignaturaCodigo?: string | null
+): boolean {
+  if (!asignaturaIdParam) return false
+  if (String(s.asignatura_id ?? "") === String(asignaturaIdParam)) return true
+  const mn = asignaturaNombre ? String(asignaturaNombre).toLowerCase().trim() : ""
+  if (mn) {
+    for (const t of textosAsignaturaDesdeProgramaGuardado(s)) {
+      const low = t.toLowerCase().trim()
+      if (!low) continue
+      if (low === mn || low.includes(mn) || mn.includes(low)) return true
+    }
+  }
+  const cod = asignaturaCodigo ? String(asignaturaCodigo).trim().toLowerCase() : ""
+  if (cod.length >= 3) {
+    for (const t of textosAsignaturaDesdeProgramaGuardado(s)) {
+      const low = t.toLowerCase().trim()
+      if (low.includes(cod)) return true
+    }
+  }
+  return false
+}
+
+/** Alineación con admin/handleLoad: validación sólo títulos, secciones legacy, rows sueltos. */
+function aplicarNormalizacionesDatosTabla(
+  programaRow: { id: number; nombre: string; periodo?: string },
+  editorDataIn: unknown
+): any {
+  let ed = editorDataIn as any
+  if (!ed || typeof ed !== "object") return editorDataIn
+
+  if (
+    ed.tipo === "ProgramaAnalitico_validado" &&
+    Array.isArray(ed.titulos) &&
+    !ed.tabs?.length
+  ) {
+    const ts = Date.now()
+    const rows = ed.titulos.map((titulo: string, index: number) => ({
+      id: `row-${ts}-${index}`,
+      cells: [
+        {
+          id: `cell-${ts}-${index}-0`,
+          content: titulo,
+          colSpan: 1,
+          rowSpan: 1,
+          isEditable: true
+        },
+        {
+          id: `cell-${ts}-${index}-1`,
+          content: "",
+          colSpan: 1,
+          rowSpan: 1,
+          isEditable: true
+        }
+      ]
+    }))
+    ed = {
+      version: "2.0",
+      name: programaRow.nombre,
+      metadata: {
+        ...ed.metadata,
+        subject: programaRow.nombre,
+        period: programaRow.periodo,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      tabs: [{ id: `tab-${ts}`, title: "Programa Analítico importado", rows }]
+    }
+  }
+
+  if (!ed.tabs?.length) {
+    if (ed.secciones && Array.isArray(ed.secciones)) {
+      const ts = Date.now()
+      ed.tabs = ed.secciones.map((sec: any, idx: number) => ({
+        id: `tab-sec-${idx}-${ts}`,
+        title: sec.titulo || sec.nombre || `Sección ${idx + 1}`,
+        rows: Array.isArray(sec.datos)
+          ? sec.datos.map((fila: any, rIdx: number) => ({
+              id: `row-${idx}-${rIdx}-${ts}`,
+              cells: (Array.isArray(fila) ? fila : [fila]).map((celda: any, cIdx: number) => ({
+                id: `cell-${idx}-${rIdx}-${cIdx}-${ts}`,
+                content:
+                  typeof celda === "string"
+                    ? celda
+                    : (celda?.contenido || celda?.content || JSON.stringify(celda) || ""),
+                isHeader: rIdx === 0,
+                rowSpan: 1,
+                colSpan: 1,
+                isEditable: true,
+                textOrientation: "horizontal" as const
+              }))
+            }))
+          : []
+      }))
+    } else if (ed.rows && Array.isArray(ed.rows)) {
+      ed.tabs = [{ id: `tab-${Date.now()}`, title: "General", rows: ed.rows }]
+    }
+  }
+  return ed
+}
+
+/** Comisión: estructura de tabla definida por administración; solo edición de contenido. */
+const HERRAMIENTAS_TABLA_BLOQUEADAS = true
+
 export default function EditorProgramaAnaliticoPage() {
   const { token, getToken, user } = useAuth()
   
@@ -57,12 +186,14 @@ export default function EditorProgramaAnaliticoPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
   const [selectedCells, setSelectedCells] = useState<string[]>([])
   const [editingCell, setEditingCell] = useState<string | null>(null)
   const [editContent, setEditContent] = useState("")
   const [modalCell, setModalCell] = useState<{id: string, content: string, isEditable: boolean} | null>(null)
   const [configModeDocente, setConfigModeDocente] = useState(false)
-  const asignaturaIdParam = searchParams.get("asignatura")
+  const asignaturaIdParam = searchParams.get("asignatura") ?? ""
   const periodoParam = searchParams.get("periodo")
   const programaIdParam = searchParams.get("id")
   const nuevaParam = searchParams.get("nueva")
@@ -74,6 +205,30 @@ export default function EditorProgramaAnaliticoPage() {
   const activeTab = activeProgramaAnalitico?.tabs.find(t => t.id === activeTabId);
   const tableData = activeTab ? activeTab.rows : [];
   const [asignaturaInfo, setAsignaturaInfo] = useState<any>(null)
+
+  /**
+   * Reinicia el editor y, si viene desde la guía de asignaturas (asignatura + periodo),
+   * fuerza `?nueva=true` en la URL para que el efecto cargue la plantilla subida por administración.
+   */
+  const handleInicioNuevoPrograma = () => {
+    setActiveProgramaAnaliticoId(null)
+    setprogramas([])
+    setActiveTabId(null)
+    setShowProgramaAnaliticoSelector(false)
+
+    if (asignaturaIdParam && selectedPeriod) {
+      const params = new URLSearchParams(searchParams.toString())
+      params.delete("id")
+      params.set("nueva", "true")
+      params.set("asignatura", String(asignaturaIdParam))
+      params.set("periodo", selectedPeriod)
+      const q = params.toString()
+      router.replace(q ? `${pathname}?${q}` : pathname)
+      return
+    }
+
+    setShowProgramaAnaliticoSelector(true)
+  }
 
   // Cargar información de la materia seleccionada
   useEffect(() => {
@@ -89,6 +244,10 @@ export default function EditorProgramaAnaliticoPage() {
     }
     cargarMateria()
   }, [asignaturaIdParam])
+
+  useEffect(() => {
+    if (HERRAMIENTAS_TABLA_BLOQUEADAS) setConfigModeDocente(false)
+  }, [])
   // --- CARGA INICIAL ---
   useEffect(() => {
     const fetchData = async () => {
@@ -140,15 +299,31 @@ export default function EditorProgramaAnaliticoPage() {
     }
   }, [activeProgramaAnalitico, activeTabId]);
 
-  // Helper: compara periodo flexible (por ID o nombre)
-  const matchPeriodo = (sPeriodo: string, selPeriodo: string) => {
-    if (!sPeriodo && !selPeriodo) return true; // ambos null = coinciden
-    if (!sPeriodo || !selPeriodo) return false; // uno es null = no coinciden
-    if (sPeriodo === selPeriodo) return true;
-    const periodoObj = periodos.find((p: any) => p.id.toString() === selPeriodo);
-    const periodoNombre = periodoObj?.nombre || '';
-    return sPeriodo === periodoNombre || periodoNombre === sPeriodo;
-  };
+  // Helper: periodo en BD puede ser nombre del periodo; URL de comisión envía id como en syllabus
+  const matchPeriodo = (sPeriodo: string | null | undefined, selPeriodo: string) => {
+    const sp = String(sPeriodo ?? "").trim()
+    const sel = String(selPeriodo ?? "").trim()
+    if (!sp && !sel) return true
+    if (!sp || !sel) return false
+    if (sp === sel) return true
+    if (periodos.length > 0) {
+      const idRec = periodoAlIdSelect(sp, periodos)
+      const idSel = periodoAlIdSelect(sel, periodos)
+      if (
+        idRec &&
+        idSel &&
+        periodoIdCoincideEnLista(idRec, periodos) &&
+        periodoIdCoincideEnLista(idSel, periodos) &&
+        idRec === idSel
+      ) {
+        return true
+      }
+    }
+    const periodoObj = periodos.find((p: any) => p.id.toString() === sel)
+    const periodoNombre = periodoObj?.nombre != null ? String(periodoObj.nombre).trim() : ""
+    if (periodoNombre && (sp === periodoNombre || sp.toLowerCase() === periodoNombre.toLowerCase())) return true
+    return false
+  }
 
   // Cargar automáticamente el programa cuando se selecciona un periodo
   useEffect(() => {
@@ -200,6 +375,11 @@ export default function EditorProgramaAnaliticoPage() {
           try { editorData = JSON.parse(editorData); } catch(e) {}
         }
         if (!editorData) return;
+
+        editorData = aplicarNormalizacionesDatosTabla(
+          { id: programaData.id, nombre: programaData.nombre, periodo: programaData.periodo },
+          editorData
+        );
         
         editorData.id = programaData.id;
         if (!editorData.name) editorData.name = programaData.nombre;
@@ -219,7 +399,7 @@ export default function EditorProgramaAnaliticoPage() {
                 isEditable: true
               }))
             }))
-          }));
+          }))
         } else if ((editorData as any).rows) {
           editorData.tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: (editorData as any).rows }];
         }
@@ -227,7 +407,6 @@ export default function EditorProgramaAnaliticoPage() {
         setprogramas([editorData]);
         setActiveProgramaAnaliticoId(editorData.id);
         setActiveTabId(editorData.tabs?.[0]?.id || null);
-        if (programaData.periodo) setSelectedPeriod(programaData.periodo);
         
         // También agregar a savedprogramas para que guardar lo detecte
         setSavedprogramas(prev => {
@@ -239,7 +418,16 @@ export default function EditorProgramaAnaliticoPage() {
       }
     };
     cargarProgramaDirecto();
-  }, [programaIdParam]);
+  }, [programaIdParam, savedprogramas]);
+
+  // BD puede guardar el periodo como nombre; el Select exige id — cubre URL ?id= y carga desde la lista
+  useEffect(() => {
+    if (activeProgramaAnaliticoId == null || periodos.length === 0) return;
+    const p = savedprogramas.find((s: any) => String(s.id) === String(activeProgramaAnaliticoId));
+    if (!p?.periodo) return;
+    const id = periodoAlIdSelect(p.periodo, periodos);
+    if (periodoIdCoincideEnLista(id, periodos)) setSelectedPeriod(id);
+  }, [activeProgramaAnaliticoId, periodos, savedprogramas]);
 
   // --- API ---
   const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
@@ -257,6 +445,157 @@ export default function EditorProgramaAnaliticoPage() {
     if (!response.ok) throw new Error(data.message || "Error en la petición al API.")
     return data
   }
+
+  // Igual que syllabus con ?nueva=true: si el administrador ya subió un programa para esta asignatura y periodo, abrirlo como plantilla
+  useEffect(() => {
+    if (programaIdParam) return
+    if (nuevaParam !== "true") return
+    if (!selectedPeriod || !asignaturaIdParam) return
+    if (isListLoading) return
+    if (activeProgramaAnaliticoId != null) return
+
+    let cancelled = false
+
+    async function recolectarCandidatosDesdeApis(): Promise<any[]> {
+      const byId = new Map<number, any>()
+      const mergeList = (list: any[]) => {
+        for (const row of list || []) {
+          const id = Number(row?.id)
+          if (Number.isFinite(id)) byId.set(id, row)
+        }
+      }
+      try {
+        const res = await apiRequest(
+          `/api/programa-analitico?asignatura_id=${encodeURIComponent(asignaturaIdParam)}`
+        )
+        mergeList(Array.isArray(res?.data) ? res.data : [])
+      } catch {
+        /* ignore */
+      }
+      try {
+        const total = await apiRequest("/api/programa-analitico")
+        mergeList(Array.isArray(total?.data) ? total.data : [])
+      } catch {
+        /* ignore */
+      }
+      return Array.from(byId.values())
+    }
+
+    ;(async () => {
+      try {
+        let candidatos = savedprogramas.filter(
+          (s: any) =>
+            matchPeriodo(s.periodo, selectedPeriod) &&
+            coincidenciaAsignaturaFlexible(
+              s,
+              asignaturaIdParam,
+              asignaturaInfo?.nombre ?? null,
+              asignaturaInfo?.codigo ?? null
+            )
+        )
+
+        if (candidatos.length === 0) {
+          const mergedList = await recolectarCandidatosDesdeApis()
+          candidatos = mergedList.filter(
+            (s: any) =>
+              matchPeriodo(s.periodo, selectedPeriod) &&
+              coincidenciaAsignaturaFlexible(
+                s,
+                asignaturaIdParam,
+                asignaturaInfo?.nombre ?? null,
+                asignaturaInfo?.codigo ?? null
+              )
+          )
+        }
+
+        if (cancelled || candidatos.length === 0) {
+          if (!cancelled && candidatos.length === 0) {
+            console.log(
+              "ℹ️ No hay programa del administrador para esta asignatura y periodo; use la lista o suba un Word."
+            )
+          }
+          return
+        }
+
+        candidatos.sort((a: any, b: any) => {
+          const ta = new Date(a.updatedAt || a.updated_at || 0).getTime()
+          const tb = new Date(b.updatedAt || b.updated_at || 0).getTime()
+          return tb - ta
+        })
+
+        const elegido = candidatos[0]
+        const full = await apiRequest(`/api/programa-analitico/${elegido.id}`)
+        const programaData = full?.data
+        if (cancelled || !programaData) return
+
+        let editorData = programaData.datos_tabla
+        if (typeof editorData === "string") {
+          try {
+            editorData = JSON.parse(editorData)
+          } catch {
+            return
+          }
+        }
+        if (!editorData) return
+
+        editorData = aplicarNormalizacionesDatosTabla(
+          { id: programaData.id, nombre: programaData.nombre, periodo: programaData.periodo },
+          editorData
+        )
+
+        editorData.id = programaData.id
+        if (!editorData.name) editorData.name = programaData.nombre
+
+        if (editorData.tabs) {
+          editorData.tabs = editorData.tabs.map((t: any) => ({
+            ...t,
+            rows: (t.rows || []).map((r: any) => ({
+              ...r,
+              cells: (r.cells || []).map((c: any) => ({
+                ...c,
+                backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
+                textColor: c.styles?.textColor || c.textColor,
+                textAlign: c.styles?.textAlign || c.textAlign,
+                textOrientation: c.styles?.textOrientation || c.textOrientation,
+                isEditable: true
+              }))
+            }))
+          }))
+        } else if ((editorData as any).rows) {
+          editorData.tabs = [{ id: `tab-${Date.now()}`, title: "General", rows: (editorData as any).rows }]
+        }
+
+        setprogramas([editorData])
+        setActiveProgramaAnaliticoId(editorData.id)
+        setActiveTabId(editorData.tabs?.[0]?.id || null)
+
+        setSavedprogramas(prev => {
+          const exists = prev.find((s: any) => s.id === programaData.id)
+          return exists ? prev : [programaData, ...prev]
+        })
+
+        console.log("✅ Programa cargado (plantilla del administrador por periodo y asignatura):", programaData.id)
+      } catch (e) {
+        console.error("Error cargando programa plantilla administrador:", e)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    nuevaParam,
+    programaIdParam,
+    selectedPeriod,
+    asignaturaIdParam,
+    isListLoading,
+    activeProgramaAnaliticoId,
+    asignaturaInfo?.nombre,
+    asignaturaInfo?.codigo,
+    savedprogramas,
+    periodos
+  ])
+
   // Sincronizacion Inteligente: soporta 2 metodos
   // 1) Word con etiquetas [NOMBRE] -> match directo (prioridad)
   // 2) Word con tablas -> extrae datos de tablas HTML con mammoth (frontend)
@@ -342,6 +681,15 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
           console.log("  Fila " + idx + ":", textos.map(t => '"' + t.substring(0, 50) + '"').join(" | "));
         }
 
+        // CASO GENERAL: filas tipo clave|valor repetidas en bloques pareados (muy habitual en PA subidos por docentes)
+        else if (textos.length >= 4 && textos.length <= 20 && textos.length % 2 === 0) {
+          for (let k = 0; k + 1 < textos.length; k += 2) {
+            const ck = textos[k]?.trim()?.toUpperCase() || '';
+            const val = textos[k + 1]?.trim() || '';
+            if (ck.length < 2 || ck.length >= 110 || val.length < 1) continue;
+            if (!wordData[ck]) wordData[ck] = val;
+          }
+        }
         // CASO ESPECIAL: Fila con 4 celdas tipo | CLAVE1 | VALOR1 | CLAVE2 | VALOR2 |
         // Ejemplo: | ASIGNATURA | Tecnologías Emergentes | PERIODO ACADÉMICO | PI 2025 |
         if (textos.length === 4) {
@@ -392,7 +740,7 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
             wordData["UT " + utNum] = utTitulo + (descripcion ? " | " + descripcion : "");
             if (descripcion) {
               wordData["UT-" + utNum + "-DESCRIPCION"] = descripcion;
-              wordData["UNIDAD " + utNum] = descripcion;
+              wordData["UNIDADES " + utNum] = descripcion;
             }
             console.log("  >>> UT " + utNum + " detectada");
           }
@@ -402,11 +750,11 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
       // Tambien buscar en el texto plano, linea por linea
       // CUIDADO: Solo buscar etiquetas largas y significativas para evitar falsos positivos
       // NO buscar etiquetas cortas como "DESCRIPCIÓN", "DOCENTE", "NIVEL" etc. que generan basura
+      // No listar aquí encabezados que deben rellenarse desde texto (bibliografía, contenidos…)
       const etiquetasCortas = new Set([
         "DESCRIPCIÓN", "DESCRIPCION", "UNIDADES TEMÁTICAS", "UNIDADES TEMATICAS",
         "PROGRAMA ANALÍTICO DE ASIGNATURA", "PROGRAMA ANALITICO DE ASIGNATURA",
-        "BIBLIOGRAFÍA BÁSICA", "BIBLIOGRAFIA BASICA", "BIBLIOGRAFÍA COMPLEMENTARIA",
-        "CONTENIDOS DE LA ASIGNATURA", "ASIGNATURA", "NIVEL", "DOCENTE", "PERIODO",
+        "ASIGNATURA", "NIVEL", "DOCENTE", "PERIODO",
         "CARRERA", "CODIGO", "MATERIA", "CREDITOS", "HORAS", "SEMESTRE", "MODALIDAD",
         "DIRECTOR/A ACADÉMICO/A", "COORDINADOR/A DE CARRERA", "DECANO/A DE FACULTAD",
       ]);
@@ -649,11 +997,11 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
       // ====================================================
       // LLENADO ESPECIAL: Unidades Tematicas (UT 1, UT 2, etc.)
       // Las filas de UTs estan VACIAS en el editor, no tienen texto para match.
-      // Buscamos la fila header (UNIDADES TEMATICAS | DESCRIPCION)
+      // Buscamos la fila header (UNIDADES TEMÁTICAS | DESCRIPCION)
       // y llenamos las filas vacias debajo con UT 1, UT 2, etc. del Word.
       // ====================================================
       let headerRowIdx = -1;
-      let utColIdx = -1;    // Columna de "UNIDADES TEMATICAS"
+      let utColIdx = -1;    // Columna de "UNIDADES TEMÁTICAS"
       let descColIdx = -1;  // Columna de "DESCRIPCION"
 
       // Buscar la fila que tiene "UNIDADES TEMÁTICAS" (y opcionalmente "DESCRIPCIÓN" en la MISMA fila)
@@ -937,11 +1285,10 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
     "BIBLIOGRAFIA - FUENTES DE CONSULTA": ["BIBLIOGRAFIA - FUENTES DE CONSULTA", "BIBLIOGRAFIA BASICA", "BIBLIOGRAFIA"],
     "BIBLIOGRAFIA BASICA": ["BIBLIOGRAFIA BASICA", "BIBLIOGRAFIA"],
     "BIBLIOGRAFIA COMPLEMENTARIA": ["BIBLIOGRAFIA COMPLEMENTARIA"],
-    "CONTENIDOS DE LA ASIGNATURA": ["CONTENIDOS DE LA ASIGNATURA", "CONTENIDOS"],
+    "CONTENIDO DE LA ASIGNATURA": ["CONTENIDOS DE LA ASIGNATURA", "CONTENIDO DE LA ASIGNATURA", "CONTENIDO", "UNIDADES TEMÁTICAS"],
+    "CARACTERIZACION DE LA ASIGNATURA": ["CARACTERIZACION DE LA ASIGNATURA", "CARACTERIZACION"],
     "PROCEDIMIENTOS DE EVALUACION": ["PROCEDIMIENTOS DE EVALUACION", "EVALUACION"],
     "OBJETIVOS DE LA ASIGNATURA": ["OBJETIVOS DE LA ASIGNATURA", "OBJETIVOS"],
-    "CARACTERIZACION DE LA ASIGNATURA": ["CARACTERIZACION DE LA ASIGNATURA", "CARACTERIZACION"],
-    "CARACTERIZACION": ["CARACTERIZACION"],
     "COMPETENCIAS": ["COMPETENCIAS"],
     "METODOLOGIA": ["METODOLOGIA"],
     "ASIGNATURA": ["ASIGNATURA"],
@@ -1031,10 +1378,58 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
         const asigId = parseInt(asignaturaIdParam, 10);
         if (!isNaN(asigId)) payload.asignatura_id = asigId;
       }
-      
-      const isUpdate = typeof activeProgramaAnalitico.id === "number"
-      const endpoint = isUpdate ? `/api/programa-analitico/${activeProgramaAnalitico.id}` : "/api/programa-analitico"
-      const method = isUpdate ? "PUT" : "POST"
+
+      // Mismo criterio que syllabus: un solo programa por asignatura+periodo (incluye el que subió el administrador)
+      let existingId: number | null = null;
+      const asigIdLookup = asignaturaIdParam ? parseInt(asignaturaIdParam, 10) : NaN;
+      try {
+        if (!isNaN(asigIdLookup)) {
+          const byId = new Map<number, any>();
+          const mergeList = (list: any[]) => {
+            for (const row of list || []) {
+              const id = Number(row?.id)
+              if (Number.isFinite(id)) byId.set(id, row)
+            }
+          };
+          try {
+            const lr = await apiRequest(
+              `/api/programa-analitico?asignatura_id=${encodeURIComponent(String(asigIdLookup))}`
+            )
+            mergeList(Array.isArray(lr?.data) ? lr.data : [])
+          } catch {
+            /* ignore */
+          }
+          try {
+            const lf = await apiRequest("/api/programa-analitico")
+            mergeList(Array.isArray(lf?.data) ? lf.data : [])
+          } catch {
+            /* ignore */
+          }
+          const listAll = Array.from(byId.values());
+          const candidatos = listAll.filter(
+            (s: any) =>
+              matchPeriodo(s.periodo, selectedPeriod) &&
+              coincidenciaAsignaturaFlexible(
+                s,
+                asignaturaIdParam,
+                asignaturaInfo?.nombre ?? null,
+                asignaturaInfo?.codigo ?? null
+              )
+          );
+          candidatos.sort((a: any, b: any) => {
+            const ta = new Date(a.updatedAt || a.updated_at || 0).getTime()
+            const tb = new Date(b.updatedAt || b.updated_at || 0).getTime()
+            return tb - ta
+          });
+          if (candidatos.length > 0) existingId = Number(candidatos[0].id);
+        }
+      } catch {
+        /* si falla la búsqueda, se intenta POST */
+      }
+
+      const isUpdate = existingId !== null;
+      const endpoint = isUpdate ? `/api/programa-analitico/${existingId}` : "/api/programa-analitico";
+      const method = isUpdate ? "PUT" : "POST";
 
       const result = await apiRequest(endpoint, { method, body: JSON.stringify(payload) })
       const savedRecord = result.data as SavedProgramaAnaliticoRecord;
@@ -1223,8 +1618,10 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
       setActiveProgramaAnaliticoId(editorData.id);
       setActiveTabId(editorData.tabs[0]?.id || null);
       
-      // Establecer el periodo seleccionado
-      setSelectedPeriod(ProgramaAnaliticoToLoad.periodo);
+      if (ProgramaAnaliticoToLoad.periodo && periodos.length > 0) {
+        const id = periodoAlIdSelect(ProgramaAnaliticoToLoad.periodo, periodos);
+        if (periodoIdCoincideEnLista(id, periodos)) setSelectedPeriod(id);
+      }
       console.log("✅ ProgramaAnalitico cargado exitosamente");
       console.log("   - ID:", editorData.id);
       console.log("   - Nombre:", editorData.name);
@@ -1688,269 +2085,268 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
     }
   };
 
-  const handlePrintToPdf = async () => { 
-    if(!activeProgramaAnalitico || !activeTab) return;
-
-    // Usar orientación landscape para más espacio horizontal
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const handlePrintToPdf = async () => {
+    if (!activeProgramaAnalitico) return;
+  
+    const doc = new jsPDF({
+      orientation: "p",
+      unit: "pt",
+      format: "a4"
+    });
+  
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-
-    // Cargar el logo de la universidad
-    let logoLoaded = false;
-    try {
-      const logoImg = new Image();
-      logoImg.crossOrigin = 'anonymous';
-      await new Promise<void>((resolve, reject) => {
-        logoImg.onload = () => resolve();
-        logoImg.onerror = () => reject(new Error('No se pudo cargar el logo'));
-        logoImg.src = '/images/unesum-logo-official.png';
-      });
+    const margin = 40;
+  
+    // --- CABECERA ---
+    const addHeader = () => {
+      // Logo UNESUM (asumiendo que tienes la imagen en base64)
+      // Si no la tienes, puedes omitir esta parte o cargarla
+      // const logoBase64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg...");
+      // doc.addImage(logoBase64, 'PNG', margin, 15, 80, 80);
       
-      // Dibujar logo a la izquierda del encabezado
-      const logoWidth = 20;
-      const logoHeight = 20;
-      doc.addImage(logoImg, 'PNG', 12, 3, logoWidth, logoHeight);
-      logoLoaded = true;
-    } catch (e) {
-      console.warn('⚠️ No se pudo cargar el logo para el PDF:', e);
-    }
-
-    // Encabezado del documento (centrado, con espacio para el logo)
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text("UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ", pageWidth / 2, 50, { align: "center" });
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text("Creada mediante Ley Orgánica 2001-38, publicada en el Registro Oficial No. 261 del 7 de febrero del 2001", pageWidth / 2, 65, { align: "center" });
+      doc.setLineWidth(1);
+      doc.line(margin, 90, pageWidth - margin, 90);
+    };
+  
+    addHeader();
+    let finalY = 100;
+  
+    // --- TÍTULO DEL DOCUMENTO ---
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text("UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ", pageWidth / 2, 8, { align: 'center' });
-    
-    doc.setFontSize(12);
-    doc.text("PROGRAMA ANALÍTICO DE ASIGNATURA", pageWidth / 2, 14, { align: 'center' });
-    
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.text(activeProgramaAnalitico.name, pageWidth / 2, 20, { align: 'center' });
+    doc.text("PROGRAMA ANALÍTICO DE ASIGNATURA", pageWidth / 2, finalY + 15, { align: "center" });
+    finalY += 40;
+  
+    // --- TABLAS DE CONTENIDO (mantener merges) ---
+    const MAX_COLS = 48;
 
-    doc.setFontSize(8);
-    doc.text(`${activeTab.title}`, pageWidth / 2, 25, { align: 'center' });
-
-    // Construir body respetando rowSpan y colSpan
-    // IMPORTANTE: Aplicar auto-llenado de ASIGNATURA, NIVEL y PERIODO como se ve en pantalla
-    const body: any[][] = [];
-
-    for (let r = 0; r < activeTab.rows.length; r++) {
-      const row = activeTab.rows[r];
-      const pdfRow: any[] = [];
-
-      for (let c = 0; c < row.cells.length; c++) {
-        const cell = row.cells[c];
-
-        // Saltar celdas con rowSpan=0 o colSpan=0 (ocultas por merge)
-        if (cell.rowSpan === 0 || cell.colSpan === 0) continue;
-
-        // Obtener contenido: usar auto-llenado para las primeras filas (ASIGNATURA, NIVEL, PERIODO)
-        let content = cell.content || '';
-        
-        if (r <= 5 && asignaturaInfo && c > 0) {
-          const cellIzquierda = row.cells[c - 1];
-          const etiqueta = (cellIzquierda?.content || '').toUpperCase().trim();
-          
-          if (etiqueta === "ASIGNATURA" && !content) {
-            content = `${asignaturaInfo.codigo || ""} - ${asignaturaInfo.nombre || ""}`;
-          } else if ((etiqueta === "PERIODO ACADÉMICO ORDINARIO (PAO)" || etiqueta === "PAO" || etiqueta === "PERIODO") && !content) {
-            const periodoNombre = periodos.find(p => p.id?.toString() === selectedPeriod)?.nombre || selectedPeriod;
-            content = formatPeriodoSimple(periodoNombre) || '';
-          } else if (etiqueta === "NIVEL" && !content) {
-            content = asignaturaInfo.nivel?.nombre || '';
-          }
+    const splitTextChunks = (text: string, maxLen: number) => {
+      if (text.length <= maxLen) return [text];
+      const parts = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+      const chunks: string[] = [];
+      let buffer = "";
+      for (const p of parts) {
+        if ((buffer + "\n\n" + p).trim().length > maxLen && buffer) {
+          chunks.push(buffer.trim());
+          buffer = p;
+        } else {
+          buffer = buffer ? `${buffer}\n\n${p}` : p;
         }
+      }
+      if (buffer.trim()) chunks.push(buffer.trim());
+      if (chunks.length === 0) return [text];
+      return chunks;
+    };
 
-        if (cell.textOrientation === 'vertical' && content) {
-          content = content.split('').join('\n');
-        }
-
-        pdfRow.push({
-          content: content,
-          rowSpan: cell.rowSpan || 1,
-          colSpan: cell.colSpan || 1,
-          styles: {
-            fontStyle: cell.isHeader ? 'bold' : 'normal',
-            fillColor: cell.backgroundColor || (cell.isHeader ? '#E5E7EB' : '#FFFFFF'),
-            textColor: cell.textColor || '#1F2937',
-            fontSize: cell.textOrientation === 'vertical' ? 6 : 8,
-            cellPadding: 2,
-            halign: cell.isHeader ? 'center' : (cell.textAlign as any || 'left'),
-            valign: 'middle',
-            minCellHeight: cell.textOrientation === 'vertical' ? 30 : 8,
-            cellWidth: cell.textOrientation === 'vertical' ? 10 : 'auto',
-            overflow: 'linebreak',
-          }
+    const expandRowsForPdf = (tabRows: any[]) => {
+      const expanded: any[] = [];
+      for (const row of tabRows) {
+        const activeCells = (row.cells || []).filter(
+          (c: any) => (c?.rowSpan ?? 1) > 0 && (c?.colSpan ?? 1) > 0
+        );
+        const totalCols = activeCells.reduce((sum: number, c: any) => sum + (c.colSpan ?? 1), 0);
+        const bigCell = activeCells.find((c: any) => {
+          const content = String(c?.content ?? "");
+          return (c?.colSpan ?? 1) >= totalCols && content.length > 900;
         });
+
+        if (bigCell) {
+          const chunks = splitTextChunks(String(bigCell.content ?? ""), 900);
+          for (const chunk of chunks) {
+            expanded.push({
+              ...row,
+              cells: [
+                {
+                  ...bigCell,
+                  content: chunk,
+                  rowSpan: 1
+                }
+              ]
+            });
+          }
+        } else {
+          expanded.push(row);
+        }
+      }
+      return expanded;
+    };
+
+    const buildAutoTableRows = (tabRows: any[]) => {
+      const rowsForPdf = expandRowsForPdf(tabRows);
+      const rowCount = rowsForPdf.length;
+      if (rowCount === 0) return { head: [], body: [] };
+
+      const occ: boolean[][] = Array.from({ length: rowCount }, () => Array(MAX_COLS).fill(false));
+      const grid: (any | null)[][] = Array.from({ length: rowCount }, () => Array(MAX_COLS).fill(null));
+
+      const nextVacant = (r: number, fromC: number) => {
+        let c = fromC;
+        while (c < MAX_COLS && occ[r]?.[c]) c++;
+        return c;
+      };
+
+      const occupy = (r: number, c: number, rs: number, cs: number) => {
+        for (let ur = r; ur < r + rs && ur < rowCount; ur++) {
+          if (!occ[ur]) occ[ur] = Array(MAX_COLS).fill(false);
+          for (let uc = c; uc < c + cs && uc < MAX_COLS; uc++) {
+            occ[ur][uc] = true;
+          }
+        }
+      };
+
+      for (let r = 0; r < rowCount; r++) {
+        let colPtr = nextVacant(r, 0);
+        for (const cell of rowsForPdf[r].cells) {
+          const rsRaw = cell.rowSpan ?? 1;
+          const csRaw = cell.colSpan ?? 1;
+          if (rsRaw <= 0 || csRaw <= 0) continue;
+
+          const rawContent = String(cell.content ?? "");
+          const tooTall = rawContent.length > 1200;
+          const rs = tooTall ? 1 : Math.max(1, Math.min(rsRaw, rowCount - r));
+          const cs = Math.max(1, Math.min(csRaw, MAX_COLS - colPtr));
+
+          colPtr = nextVacant(r, colPtr);
+          if (colPtr >= MAX_COLS) break;
+
+          occupy(r, colPtr, rs, cs);
+
+          const styles: any = {};
+          if (cell.backgroundColor) styles.fillColor = cell.backgroundColor;
+          if (cell.textColor) styles.textColor = cell.textColor;
+          if (cell.textAlign) styles.halign = cell.textAlign;
+          if (cell.isHeader) styles.fontStyle = "bold";
+
+          const entry: any = { content: rawContent };
+          if (rs > 1) entry.rowSpan = rs;
+          if (cs > 1) entry.colSpan = cs;
+          if (Object.keys(styles).length) entry.styles = styles;
+
+          grid[r][colPtr] = entry;
+          colPtr += cs;
+        }
       }
 
-      if (pdfRow.length > 0) {
-        body.push(pdfRow);
+      let lastCol = 0;
+      for (let r = 0; r < rowCount; r++) {
+        for (let c = 0; c < MAX_COLS; c++) {
+          if (occ[r]?.[c]) lastCol = Math.max(lastCol, c + 1);
+        }
       }
+      lastCol = Math.max(lastCol, 1);
+
+      const head: any[] = [];
+      const body: any[] = [];
+      for (let r = 0; r < rowCount; r++) {
+        const rowOut: any[] = [];
+        for (let c = 0; c < lastCol; ) {
+          const cellEntry = grid[r][c];
+          if (cellEntry) {
+            rowOut.push(cellEntry);
+            const span = typeof cellEntry.colSpan === "number" ? cellEntry.colSpan : 1;
+            c += Math.max(1, span);
+          } else {
+            rowOut.push({ content: "" });
+            c += 1;
+          }
+        }
+
+        const rowHasHeader = rowsForPdf[r]?.cells?.some((c: any) => c?.isHeader);
+        if (rowHasHeader) head.push(rowOut);
+        else body.push(rowOut);
+      }
+
+      return { head, body };
+    };
+
+    for (const tab of activeProgramaAnalitico.tabs) {
+      const { head, body } = buildAutoTableRows(tab.rows);
+      if (head.length === 0 && body.length === 0) continue;
+
+      autoTable(doc, {
+        head: head.length > 0 ? head : undefined,
+        body,
+        startY: finalY,
+        theme: "grid",
+        styles: {
+          fontSize: 8,
+          cellPadding: 2,
+          overflow: "linebreak",
+          cellWidth: "wrap"
+        },
+        headStyles: {
+          fillColor: [220, 220, 220],
+          textColor: [0, 0, 0],
+          fontStyle: "bold",
+          halign: "center"
+        },
+        rowPageBreak: "auto",
+        pageBreak: "auto",
+        didDrawPage: (data) => {
+          // Añadir cabecera en cada nueva página
+          if (data.pageNumber > 1) {
+            addHeader();
+          }
+        },
+        margin: { top: 100 }
+      });
+
+      finalY = (doc as any).lastAutoTable.finalY;
+    }
+  
+    // --- SECCIÓN DE FIRMAS ---
+    const signatureHeight = 140;
+    if (finalY + signatureHeight > pageHeight - margin) {
+      doc.addPage();
+      addHeader();
+      finalY = 100;
     }
 
-    autoTable(doc, {
-      body: body as any,
-      startY: 28,
-      theme: 'grid',
-      styles: {
-        fontSize: 8,
-        cellPadding: 2,
-        lineColor: '#9CA3AF',
-        lineWidth: 0.3,
-        overflow: 'linebreak',
-      },
-      headStyles: {
-        fillColor: '#E5E7EB',
-        textColor: '#1F2937',
-        fontStyle: 'bold',
-      },
-      margin: { left: 10, right: 10 },
-      tableWidth: 'auto',
-    });
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("VISADO", pageWidth / 2, finalY + 20, { align: "center" });
 
-    // ==============================
-    // SECCIÓN DE FIRMAS (4 columnas)
-    // ==============================
-    // Buscar nombres de las autoridades en TODAS las pestañas del programa analítico
-    const cargos: { cargo: string; nombre: string; patrones: string[] }[] = [
-      { cargo: "DECANO/A DE FACULTAD", nombre: "", patrones: ["DECANO/A DE FACULTAD", "DECANO DE FACULTAD", "DECANA DE FACULTAD", "DECANO/A"] },
-      { cargo: "DIRECTOR/A ACADÉMICO/A", nombre: "", patrones: ["DIRECTOR/A ACADEMICO", "DIRECTOR/A ACADÉMICO", "DIRECTOR ACADEMICO", "DIRECTORA ACADEMICA"] },
-      { cargo: "COORDINADOR/A DE CARRERA", nombre: "", patrones: ["COORDINADOR/A DE CARRERA", "COORDINADOR DE CARRERA", "COORDINADORA DE CARRERA"] },
-      { cargo: "DOCENTE", nombre: "", patrones: ["DOCENTE"] },
+    const sigStartY = finalY + 40;
+    const sigLines = "_________________________";
+    const sigRows = [
+      [sigLines, sigLines, sigLines, sigLines],
+      [
+        "Ing. Alfonso Moreno Mg",
+        "Lcda. Alexandra Monserrate Pionce Parrales Mg. Duie.",
+        "Ing. Mario Javier Marcillo Merino, Mg",
+        "Lcdo. Fulco Berdy Pincay Ponce, MSIG"
+      ],
+      [
+        "DECANO/A DE FACULTAD",
+        "DIRECTOR/A ACADÉMICO/A",
+        "COORDINADOR/A DE CARRERA",
+        "DOCENTE"
+      ]
     ];
 
-    // Recorrer todas las pestañas buscando los nombres asociados a cada cargo
-    // Priorizar pestaña VISADO si existe
-    const tabsOrdenadas = [...activeProgramaAnalitico.tabs].sort((a, b) => {
-      const aVisado = a.title.toUpperCase().includes("VISADO") ? 0 : 1;
-      const bVisado = b.title.toUpperCase().includes("VISADO") ? 0 : 1;
-      return aVisado - bVisado;
+    autoTable(doc, {
+      body: sigRows,
+      startY: sigStartY,
+      theme: "plain",
+      styles: {
+        fontSize: 9,
+        halign: "center",
+        valign: "middle",
+        cellPadding: 2
+      },
+      margin: { left: margin, right: margin },
+      tableWidth: pageWidth - margin * 2
     });
-
-    for (const tab of tabsOrdenadas) {
-      for (let r = 0; r < tab.rows.length; r++) {
-        const row = tab.rows[r];
-        for (let c = 0; c < row.cells.length; c++) {
-          const cell = row.cells[c];
-          const textoRaw = (cell.content || '').trim();
-          if (!textoRaw || textoRaw.length < 4) continue;
-          const textoNorm = textoRaw.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-          
-          // Verificar si esta celda contiene un cargo
-          for (const cargoObj of cargos) {
-            if (cargoObj.nombre) continue; // Ya encontramos un nombre para este cargo
-            
-            const matched = cargoObj.patrones.some(p => {
-              const pNorm = p.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-              return textoNorm.includes(pNorm);
-            });
-            
-            if (!matched) continue;
-
-            // Buscar el nombre de la persona asociada
-            // Caso especial: si la celda contiene "CARGO\nNombre" (cargo y nombre en la misma celda)
-            const lineas = textoRaw.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            if (lineas.length >= 2) {
-              // La primera línea es el cargo, la segunda puede ser el nombre
-              const posibleNombre = lineas.find(l => {
-                const lu = l.toUpperCase();
-                return !lu.includes("DECANO") && !lu.includes("DIRECTOR") && 
-                       !lu.includes("COORDINADOR") && !lu.includes("DOCENTE") &&
-                       !lu.includes("FACULTAD") && !lu.includes("CARRERA") &&
-                       !lu.includes("ACADÉMICO") && !lu.includes("ACADEMICO") &&
-                       l.length > 5;
-              });
-              if (posibleNombre) {
-                cargoObj.nombre = posibleNombre;
-                continue;
-              }
-            }
-            
-            // Opción 1: celda siguiente en la misma fila
-            if (c + 1 < row.cells.length) {
-              const nextCell = row.cells[c + 1];
-              const nextContent = (nextCell.content || '').trim();
-              if (nextContent && nextContent.length > 3) {
-                const nu = nextContent.toUpperCase();
-                if (!nu.includes("DECANO") && !nu.includes("DIRECTOR") &&
-                    !nu.includes("COORDINADOR") && !nu.includes("ACADÉMICO") &&
-                    !nu.includes("CARRERA") && !nu.includes("FACULTAD")) {
-                  cargoObj.nombre = nextContent;
-                  continue;
-                }
-              }
-            }
-            
-            // Opción 2: fila siguiente, misma columna
-            if (r + 1 < tab.rows.length) {
-              const nextRow = tab.rows[r + 1];
-              if (c < nextRow.cells.length) {
-                const belowCell = nextRow.cells[c];
-                const belowContent = (belowCell.content || '').trim();
-                if (belowContent && belowContent.length > 3) {
-                  const bu = belowContent.toUpperCase();
-                  if (!bu.includes("DECANO") && !bu.includes("DIRECTOR") &&
-                      !bu.includes("COORDINADOR") && !bu.includes("ACADÉMICO") &&
-                      !bu.includes("CARRERA") && !bu.includes("FACULTAD")) {
-                    cargoObj.nombre = belowContent;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Calcular posición Y después de la tabla (compatible con jspdf-autotable v3/v5)
-    const finalY = (doc as any).lastAutoTable?.finalY 
-      || (doc as any).previousAutoTable?.finalY 
-      || 25;
-    let firmaY = finalY + 20;
-
-    // Si no cabe en la página actual, agregar nueva página
-    if (firmaY + 45 > pageHeight) {
-      doc.addPage();
-      firmaY = 30;
-    }
-
-    // Dibujar sección de firmas
-    const marginLeft = 15;
-    const marginRight = 15;
-    const usableWidth = pageWidth - marginLeft - marginRight;
-    const colWidth = usableWidth / 4;
-    const lineLength = colWidth - 15;
-
-    // Título de sección
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("FIRMAS DE RESPONSABILIDAD", pageWidth / 2, firmaY, { align: 'center' });
-    firmaY += 15;
-
-    for (let i = 0; i < cargos.length; i++) {
-      const x = marginLeft + (colWidth * i) + (colWidth / 2);
-      
-      // Línea de firma
-      doc.setLineWidth(0.5);
-      doc.setDrawColor(0, 0, 0);
-      doc.line(x - lineLength / 2, firmaY, x + lineLength / 2, firmaY);
-
-      // Nombre de la persona (debajo de la línea)
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "normal");
-      const nombre = cargos[i].nombre || "________________________";
-      doc.text(nombre, x, firmaY + 5, { align: 'center', maxWidth: lineLength });
-
-      // Cargo (debajo del nombre)
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "bold");
-      doc.text(cargos[i].cargo, x, firmaY + 12, { align: 'center', maxWidth: lineLength });
-    }
-
-    doc.save(`${activeProgramaAnalitico.name}_${activeTab.title}.pdf`);
-  }
+  
+    doc.save("programa_analitico.pdf");
+  };
 
   // ==============================
   // LIMPIAR: Borrar celdas editables (dejar solo etiquetas/headers y datos de BD)
@@ -2072,8 +2468,8 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
   };
 
   const handleNewProgramaAnalitico = () => {
-    setShowProgramaAnaliticoSelector(true);
-  };
+    handleInicioNuevoPrograma()
+  }
 
   const programasFiltered = selectedPeriod 
     ? savedprogramas.filter(s => matchPeriodo(s.periodo, selectedPeriod) || !s.periodo)
@@ -2135,7 +2531,7 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
               <Card className="mb-6 border-t-4 border-t-emerald-600">
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between text-emerald-800">
-                    <span>Editor de Programa AnalÃ­tico</span>
+                    <span>Editor de Programa Analítico</span>
                     <div className="flex gap-2">
                       <Button onClick={handleNewProgramaAnalitico} className="bg-emerald-600 hover:bg-emerald-700">
                         <Plus className="h-4 w-4 mr-2" /> Nuevo
@@ -2184,11 +2580,20 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <Button onClick={() => fileInputRef.current?.click()} className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={isLoading}>
-                        {isLoading ? "Procesando..." : <><Upload className="h-4 w-4 mr-2" /> Subir Nuevo Word (.docx)</>}
-                      </Button>
-                      <input ref={fileInputRef} type="file" accept=".docx" onChange={(e) => { handleProgramaAnaliticoUpload(e); setShowProgramaAnaliticoSelector(false); }} className="hidden" />
-                      
+                      {user?.rol === 'comision_academica' ? (
+                        <div className="p-3 bg-emerald-50 border border-emerald-100 rounded">
+                          <p className="text-sm text-emerald-800 mb-2">Seleccione una plantilla subida por el administrador para el periodo seleccionado.</p>
+                          <p className="text-xs text-gray-500">Si no aparece ninguna plantilla, pida al administrador que suba el programa para este periodo.</p>
+                        </div>
+                      ) : (
+                        <>
+                          <Button onClick={() => fileInputRef.current?.click()} className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={isLoading}>
+                            {isLoading ? "Procesando..." : <><Upload className="h-4 w-4 mr-2" /> Subir Nuevo Word (.docx)</>}
+                          </Button>
+                          <input ref={fileInputRef} type="file" accept=".docx" onChange={(e) => { handleProgramaAnaliticoUpload(e); setShowProgramaAnaliticoSelector(false); }} className="hidden" />
+                        </>
+                      )}
+
                       <div className="border-t pt-4">
                         <h3 className="font-semibold mb-3">O seleccione uno existente:</h3>
                         {isListLoading ? (
@@ -2287,7 +2692,7 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                   <CardTitle className="flex flex-wrap items-center justify-between gap-4 text-emerald-800">
                     <span className="truncate">{activeProgramaAnalitico.name}</span>
                     <div className="flex-shrink-0 flex items-center gap-2">
-                       <Button onClick={() => { setActiveProgramaAnaliticoId(null); setprogramas([]); }} variant="outline" size="sm"> <Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
+                       <Button onClick={handleInicioNuevoPrograma} variant="outline" size="sm"> <Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
                        <Button onClick={handleSaveToDB} className="bg-blue-600 hover:bg-blue-700" size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> Guardar</>}</Button>
                        <Button onClick={handlePrintToPdf} variant="outline" size="sm" disabled={!activeTab}><FileDown className="h-4 w-4 mr-2" /> Exportar PDF</Button>
                        <Button onClick={handleClearSync} variant="outline" size="sm" disabled={!activeTab} className="text-orange-600 hover:text-orange-700 border-orange-200 hover:bg-orange-50"><Eraser className="h-4 w-4 mr-2" /> Limpiar</Button>
@@ -2373,31 +2778,38 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
               {activeTab && (
                 <Card className="border-emerald-100 shadow-md">
                   <CardContent className="p-4">
-                    <div className="flex flex-wrap gap-2 mb-4 p-2 border rounded-md bg-emerald-50/50">
-                       <Button size="sm" className="bg-white text-emerald-700 border-emerald-200" onClick={() => handleInsertRow('above')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Fila ↑</Button>
-                       <Button size="sm" className="bg-white text-emerald-700 border-emerald-200" onClick={() => handleInsertRow('below')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Fila ↓</Button>
-                       <Button size="sm" className="bg-white text-emerald-700 border-emerald-200" onClick={() => handleInsertColumn('left')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Col ←</Button>
-                       <Button size="sm" className="bg-white text-emerald-700 border-emerald-200" onClick={() => handleInsertColumn('right')} disabled={!selectedCells.length || configModeDocente}><Plus className="h-3 w-3 mr-1"/>Col →</Button>
+                    <div className={`flex flex-wrap gap-2 mb-2 p-2 border rounded-md bg-emerald-50/50 ${HERRAMIENTAS_TABLA_BLOQUEADAS ? "opacity-60 pointer-events-none" : ""}`}>
+                       <Button size="sm" className="bg-white text-emerald-700 border-emerald-200" onClick={() => handleInsertRow('above')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Fila ↑</Button>
+                       <Button size="sm" className="bg-white text-emerald-700 border-emerald-200" onClick={() => handleInsertRow('below')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Fila ↓</Button>
+                       <Button size="sm" className="bg-white text-emerald-700 border-emerald-200" onClick={() => handleInsertColumn('left')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Col ←</Button>
+                       <Button size="sm" className="bg-white text-emerald-700 border-emerald-200" onClick={() => handleInsertColumn('right')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Col →</Button>
                        <div className="w-px h-6 bg-emerald-200 mx-1"></div>
-                       <Button size="sm" onClick={removeSelectedRow} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente}><Minus className="h-3 w-3 mr-1"/>Fila</Button>
-                       <Button size="sm" onClick={removeSelectedColumn} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente}><Minus className="h-3 w-3 mr-1"/>Col</Button>
+                       <Button size="sm" onClick={removeSelectedRow} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Minus className="h-3 w-3 mr-1"/>Fila</Button>
+                       <Button size="sm" onClick={removeSelectedColumn} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Minus className="h-3 w-3 mr-1"/>Col</Button>
                        <div className="w-px h-6 bg-emerald-200 mx-1"></div>
-                       <Button size="sm" onClick={toggleVerticalText} className="bg-white text-emerald-700 border-emerald-200" disabled={!selectedCells.length || configModeDocente} title="Rotar Texto Verticalmente"><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
-                       <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2 || configModeDocente} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
-                       <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length || configModeDocente} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
+                       <Button size="sm" onClick={toggleVerticalText} className="bg-white text-emerald-700 border-emerald-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} title="Rotar Texto Verticalmente"><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
+                       <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2 || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
+                       <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
                        <div className="w-px h-6 bg-emerald-200 mx-1"></div>
                        <Button
                          size="sm"
                          onClick={() => setConfigModeDocente(!configModeDocente)}
                          className={configModeDocente ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}
                          variant={configModeDocente ? "default" : "outline"}
+                         disabled={HERRAMIENTAS_TABLA_BLOQUEADAS}
                        >
                          <Settings className="h-4 w-4 mr-1" />
                          {configModeDocente ? 'Salir Config. Docente' : 'Config. Celdas Docente'}
                        </Button>
                     </div>
+                    {HERRAMIENTAS_TABLA_BLOQUEADAS && (
+                      <p className="text-xs text-slate-600 mb-4 flex items-center gap-2">
+                        <Lock className="h-3.5 w-3.5 shrink-0" />
+                        Caja de herramientas bloqueada: la estructura la define el administrador. Solo puede editar el contenido de las celdas permitidas.
+                      </p>
+                    )}
 
-                    {configModeDocente && (
+                    {configModeDocente && !HERRAMIENTAS_TABLA_BLOQUEADAS && (
                       <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="text-purple-800 font-bold text-sm flex items-center gap-2">

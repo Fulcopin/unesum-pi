@@ -10,8 +10,10 @@ interface User {
   nombres: string
   apellidos: string
   correo_electronico: string
-  rol: string
-  email: string;     // <-- ¡CAMBIO AQUÍ! (de correo_electronico a email)
+  rol: string                  // rol activo
+  roles?: string[]             // todos los roles disponibles del usuario
+  availableRoles?: string[]    // alias por compatibilidad
+  email: string;
   cedula_identidad: string
   telefono?: string
   fecha_nacimiento?: Date
@@ -34,6 +36,7 @@ interface AuthContextType extends AuthState {
   logout: () => void
   clearError: () => void
   getToken: () => string
+  cambiarRol: (nuevoRol: string) => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -323,6 +326,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const cambiarRol = async (nuevoRol: string): Promise<boolean> => {
+    try {
+      const token = localStorage.getItem('token')
+      if (!token) return false
+
+      const response = await axios.post(
+        `${API_URL}/auth/cambiar-rol`,
+        { rol: nuevoRol },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+
+      if (response.data?.success && response.data.token && response.data.user) {
+        const { token: newToken, user: newUser } = response.data
+        localStorage.setItem('token', newToken)
+        localStorage.setItem('token_time', Date.now().toString())
+        localStorage.setItem('user_data', JSON.stringify(newUser))
+        setState(prev => ({ ...prev, user: newUser, token: newToken }))
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error('Error al cambiar rol:', error)
+      return false
+    }
+  }
+
   const clearError = () => setState(prev => ({ ...prev, error: null }))
   const getToken = (): string => {
     // Si está en el estado, devolverlo
@@ -343,7 +372,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       register, 
       logout,
       clearError,
-      getToken
+      getToken,
+      cambiarRol
     }}>
       {children}
     </AuthContext.Provider>

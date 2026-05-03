@@ -22,6 +22,9 @@ const syllabusExtractionRoutes = require('./syllabusExtractionRoutes');
 const comisionAcademicaRoutes = require('./comisionAcademica.routes');
 const docenteEditorRoutes = require('./docenteEditor.routes');
 const ragRoutes = require('./rag.routes');
+const usuariosRoutes = require('./usuarios.routes');
+const rolRoutes = require('./rol.routes');
+const firmasRoutes = require('./firmas.routes');
 const router = express.Router();
 
 module.exports = (app) => {
@@ -54,4 +57,7 @@ module.exports = (app) => {
   router.use('/comision-academica', comisionAcademicaRoutes);
   router.use('/docente-editor', docenteEditorRoutes);
   router.use('/rag', ragRoutes);
+  router.use('/usuarios', usuariosRoutes);
+  router.use('/roles', rolRoutes);
+  router.use('/firmas', firmasRoutes);
 };

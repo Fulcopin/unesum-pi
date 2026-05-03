@@ -27,6 +27,7 @@ interface MallaModalProps {
   open: boolean;
   onClose: () => void;
   onMallaSelected: (mallaData: MallaData) => void;
+  onPersonalizada?: () => void;
 }
 
 interface MallaData {
@@ -51,7 +52,7 @@ interface Carrera {
 
 const API_BASE_URL = 'http://localhost:4000/api';
 
-export default function MallaModal({ open, onClose, onMallaSelected }: MallaModalProps) {
+export default function MallaModal({ open, onClose, onMallaSelected, onPersonalizada }: MallaModalProps) {
   const router = useRouter();
   const { token, getToken } = useAuth();
   const [mallasExistentes, setMallasExistentes] = useState<any[]>([]);
@@ -376,6 +377,7 @@ export default function MallaModal({ open, onClose, onMallaSelected }: MallaModa
             <ArrowLeft className="h-4 w-4" />
             Menú
           </Button>
+
           <div className="flex gap-2 flex-1 justify-end">
             <Button variant="outline" onClick={handleCancelar}>
               Cancelar

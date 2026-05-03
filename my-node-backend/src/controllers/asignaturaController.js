@@ -113,23 +113,26 @@ exports.getAllAsignaturas = async (req, res) => {
                 plainAsig.horas = { horasDocencia: 0, horasPractica: 0, horasAutonoma: 0, horasVinculacion: 0, horasPracticaPreprofesional: 0 };
             }
             
-            // Procesar prerrequisitos y correquisitos
-            let prerrequisito = null;
-            let correquisito = null;
+        // Procesar prerrequisitos y correquisitos como arrays
+            const prerrequisitos_codigos = [];
+            const correquisitos_codigos = [];
             
             if (plainAsig.asignatura_requisitos && Array.isArray(plainAsig.asignatura_requisitos)) {
                 plainAsig.asignatura_requisitos.forEach(req => {
                     if (req.tipo === 'PRERREQUISITO' && req.requisito) {
-                        prerrequisito = `${req.requisito.codigo} - ${req.requisito.nombre}`;
+                        prerrequisitos_codigos.push(req.requisito.codigo);
                     }
                     if (req.tipo === 'CORREQUISITO' && req.requisito) {
-                        correquisito = `${req.requisito.codigo} - ${req.requisito.nombre}`;
+                        correquisitos_codigos.push(req.requisito.codigo);
                     }
                 });
             }
             
-            plainAsig.prerrequisito = prerrequisito;
-            plainAsig.correquisito = correquisito;
+            plainAsig.prerrequisitos_codigos = prerrequisitos_codigos;
+            plainAsig.correquisitos_codigos = correquisitos_codigos;
+            // Compatibilidad hacia atrás
+            plainAsig.prerrequisito = prerrequisitos_codigos.length > 0 ? prerrequisitos_codigos.join(', ') : null;
+            plainAsig.correquisito = correquisitos_codigos.length > 0 ? correquisitos_codigos.join(', ') : null;
             
             // Eliminar la propiedad asignatura_requisitos del objeto final
             delete plainAsig.asignatura_requisitos;
@@ -200,7 +203,8 @@ exports.createAsignaturaBase = async (req, res) => {
     const {
       carrera_id, nivel_id, organizacion_id,
       nombre, codigo,
-      prerrequisito_codigo, correquisito_codigo
+      prerrequisitos_codigos = [],
+      correquisitos_codigos = []
     } = req.body;
     
     // Verificar si el código ya existe
@@ -217,9 +221,11 @@ exports.createAsignaturaBase = async (req, res) => {
       nombre, codigo, carrera_id, nivel_id, organizacion_id,
     }, { transaction });
 
-    // --- LÓGICA DE PRERREQUISITO MEJORADA ---
-    if (prerrequisito_codigo) {
-      const prerequisito = await Asignatura.findOne({ where: { codigo: prerrequisito_codigo } });
+    // Crear prerrequisitos (array)
+    const prereqCodigos = Array.isArray(prerrequisitos_codigos) ? prerrequisitos_codigos : (prerrequisitos_codigos ? [prerrequisitos_codigos] : []);
+    for (const prereqCodigo of prereqCodigos) {
+      if (!prereqCodigo) continue;
+      const prerequisito = await Asignatura.findOne({ where: { codigo: prereqCodigo } });
       if (prerequisito) {
         await AsignaturaRequisito.create({
           asignatura_id: nuevaAsignatura.id,
@@ -227,15 +233,15 @@ exports.createAsignaturaBase = async (req, res) => {
           tipo: 'PRERREQUISITO'
         }, { transaction });
       } else {
-        // --- CAMBIO CLAVE ---
-        // Si se proveyó un código pero no se encontró la asignatura, lanzamos un error.
-        throw new Error(`El código de prerrequisito '${prerrequisito_codigo}' no corresponde a ninguna asignatura existente.`);
+        throw new Error(`El código de prerrequisito '${prereqCodigo}' no corresponde a ninguna asignatura existente.`);
       }
     }
 
-    // --- LÓGICA DE CORREQUISITO MEJORADA ---
-    if (correquisito_codigo) {
-      const correquisito = await Asignatura.findOne({ where: { codigo: correquisito_codigo } });
+    // Crear correquisitos (array)
+    const correqCodigos = Array.isArray(correquisitos_codigos) ? correquisitos_codigos : (correquisitos_codigos ? [correquisitos_codigos] : []);
+    for (const correqCodigo of correqCodigos) {
+      if (!correqCodigo) continue;
+      const correquisito = await Asignatura.findOne({ where: { codigo: correqCodigo } });
       if (correquisito) {
         await AsignaturaRequisito.create({
           asignatura_id: nuevaAsignatura.id,
@@ -243,8 +249,7 @@ exports.createAsignaturaBase = async (req, res) => {
           tipo: 'CORREQUISITO'
         }, { transaction });
       } else {
-        // --- CAMBIO CLAVE ---
-        throw new Error(`El código de correquisito '${correquisito_codigo}' no corresponde a ninguna asignatura existente.`);
+        throw new Error(`El código de correquisito '${correqCodigo}' no corresponde a ninguna asignatura existente.`);
       }
     }
 
@@ -256,9 +261,7 @@ exports.createAsignaturaBase = async (req, res) => {
     await transaction.rollback();
     console.error('Error al crear la asignatura base:', error);
     
-    // Manejo especial para errores de código duplicado
     if (error.name === 'SequelizeUniqueConstraintError') {
-      const duplicateField = error.errors[0]?.path;
       const duplicateValue = error.errors[0]?.value;
       return res.status(400).json({ 
         success: false, 
@@ -266,7 +269,6 @@ exports.createAsignaturaBase = async (req, res) => {
       });
     }
     
-    // Otros errores
     return res.status(400).json({
       success: false, 
       message: error.message || 'Error al crear la asignatura base'
@@ -283,12 +285,12 @@ exports.updateAsignaturaBase = async (req, res) => {
         const {
             carrera_id, nivel_id, organizacion_id,
             nombre, codigo,
-            prerrequisito_codigo, correquisito_codigo
+            prerrequisitos_codigos = [],
+            correquisitos_codigos = []
         } = req.body;
 
         const asignatura = await Asignatura.findByPk(id);
         if (!asignatura) {
-            // No es necesario 'await transaction.rollback()' aquí, ya que no se ha hecho ninguna escritura
             return res.status(404).json({ success: false, message: 'Asignatura no encontrada.' });
         }
 
@@ -296,10 +298,14 @@ exports.updateAsignaturaBase = async (req, res) => {
             nombre, codigo, carrera_id, nivel_id, organizacion_id
         }, { transaction });
 
+        // Eliminar todos los requisitos actuales y recrearlos
         await AsignaturaRequisito.destroy({ where: { asignatura_id: id }, transaction });
 
-        if (prerrequisito_codigo) {
-            const prerequisito = await Asignatura.findOne({ where: { codigo: prerrequisito_codigo } });
+        // Prerrequisitos (array)
+        const prereqCodigos = Array.isArray(prerrequisitos_codigos) ? prerrequisitos_codigos : (prerrequisitos_codigos ? [prerrequisitos_codigos] : []);
+        for (const prereqCodigo of prereqCodigos) {
+            if (!prereqCodigo) continue;
+            const prerequisito = await Asignatura.findOne({ where: { codigo: prereqCodigo } });
             if (prerequisito) {
                 await AsignaturaRequisito.create({
                     asignatura_id: id,
@@ -307,13 +313,15 @@ exports.updateAsignaturaBase = async (req, res) => {
                     tipo: 'PRERREQUISITO'
                 }, { transaction });
             } else {
-                // --- CAMBIO CLAVE ---
-                throw new Error(`El código de prerrequisito '${prerrequisito_codigo}' no corresponde a ninguna asignatura existente.`);
+                throw new Error(`El código de prerrequisito '${prereqCodigo}' no corresponde a ninguna asignatura existente.`);
             }
         }
 
-        if (correquisito_codigo) {
-            const correquisito = await Asignatura.findOne({ where: { codigo: correquisito_codigo } });
+        // Correquisitos (array)
+        const correqCodigos = Array.isArray(correquisitos_codigos) ? correquisitos_codigos : (correquisitos_codigos ? [correquisitos_codigos] : []);
+        for (const correqCodigo of correqCodigos) {
+            if (!correqCodigo) continue;
+            const correquisito = await Asignatura.findOne({ where: { codigo: correqCodigo } });
             if (correquisito) {
                 await AsignaturaRequisito.create({
                     asignatura_id: id,
@@ -321,8 +329,7 @@ exports.updateAsignaturaBase = async (req, res) => {
                     tipo: 'CORREQUISITO'
                 }, { transaction });
             } else {
-                // --- CAMBIO CLAVE ---
-                throw new Error(`El código de correquisito '${correquisito_codigo}' no corresponde a ninguna asignatura existente.`);
+                throw new Error(`El código de correquisito '${correqCodigo}' no corresponde a ninguna asignatura existente.`);
             }
         }
 
@@ -333,7 +340,7 @@ exports.updateAsignaturaBase = async (req, res) => {
     } catch (error) {
         await transaction.rollback();
         console.error('Error al actualizar la asignatura base:', error);
-        return res.status(400).json({ // Usamos 400 (Bad Request)
+        return res.status(400).json({
             success: false, message: error.message || 'Error al actualizar la asignatura base'
         });
     }
@@ -349,7 +356,12 @@ exports.addHoras = async (req, res) => {
             horasVinculacion, horasPracticaPreprofesional
         } = req.body;
 
-        await DistribucionHoras.upsert({
+        // Debug logs: inspeccionar params y body recibidos
+        console.log('[DEBUG] addHoras - params:', req.params);
+        console.log('[DEBUG] addHoras - body:', req.body);
+
+        // Ejecutar upsert y registrar resultado
+        const upsertResult = await DistribucionHoras.upsert({
             asignatura_id: asignaturaId,
             horas_docencia: horasDocencia,
             horas_practica: horasPractica,
@@ -358,8 +370,12 @@ exports.addHoras = async (req, res) => {
             horas_practica_preprofesional: horasPracticaPreprofesional
         });
 
+        console.log('[DEBUG] addHoras - upsert result:', upsertResult);
+
         return res.status(200).json({
-            success: true, message: 'Distribución de horas guardada exitosamente'
+            success: true,
+            message: 'Distribución de horas guardada exitosamente',
+            data: upsertResult
         });
     } catch (error) {
         console.error('Error al guardar las horas:', error);
