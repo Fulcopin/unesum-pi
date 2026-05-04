@@ -2087,265 +2087,225 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
 
   const handlePrintToPdf = async () => {
     if (!activeProgramaAnalitico) return;
-  
-    const doc = new jsPDF({
-      orientation: "p",
-      unit: "pt",
-      format: "a4"
-    });
-  
-    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Portrait A4 en pt
+    const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
+    const pageWidth  = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 40;
-  
-    // --- CABECERA ---
+
+    // Datos de cabecera
+    const programaTitle = activeProgramaAnalitico.name || '';
+    const periodoObj = periodos.find((p: any) =>
+      String(p.id) === String(periodoParam) || p.nombre === (activeProgramaAnalitico as any).periodo
+    );
+    const periodoName = periodoObj?.nombre || (activeProgramaAnalitico as any).periodo || '';
+
+    // --- LOGO UNESUM (con timeout para no congelar) ---
+    let logoImg: HTMLImageElement | null = null;
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      await Promise.race([
+        new Promise<void>((resolve, reject) => {
+          img.onload  = () => { logoImg = img; resolve(); };
+          img.onerror = () => reject(new Error('logo-error'));
+          img.src = '/images/unesum-logo-official.png';
+        }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
+      ]);
+    } catch { /* logo no disponible */ }
+
+    // --- CABECERA (se repite en cada página via didDrawPage) ---
     const addHeader = () => {
-      // Logo UNESUM (asumiendo que tienes la imagen en base64)
-      // Si no la tienes, puedes omitir esta parte o cargarla
-      // const logoBase64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg...");
-      // doc.addImage(logoBase64, 'PNG', margin, 15, 80, 80);
-      
-      doc.setFontSize(12);
-      doc.setFont("helvetica", "bold");
-      doc.text("UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ", pageWidth / 2, 50, { align: "center" });
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.text("Creada mediante Ley Orgánica 2001-38, publicada en el Registro Oficial No. 261 del 7 de febrero del 2001", pageWidth / 2, 65, { align: "center" });
-      doc.setLineWidth(1);
-      doc.line(margin, 90, pageWidth - margin, 90);
+      if (logoImg) doc.addImage(logoImg, 'PNG', margin, 10, 50, 50);
+      doc.setFontSize(12); doc.setFont('helvetica', 'bold');
+      doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 30, { align: 'center' });
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+      doc.text('Creada mediante Ley Orgánica 2001-38, publicada en el Registro Oficial No. 261 del 7 de febrero del 2001', pageWidth / 2, 46, { align: 'center' });
+      doc.setLineWidth(1); doc.line(margin, 58, pageWidth - margin, 58);
+      doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+      doc.text('PROGRAMA ANALÍTICO', pageWidth / 2, 72, { align: 'center' });
+      if (programaTitle || periodoName) {
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+        const sub = [programaTitle, periodoName].filter(Boolean).join('   –   ');
+        doc.text(sub, pageWidth / 2, 86, { align: 'center' });
+      }
     };
-  
+
     addHeader();
     let finalY = 100;
-  
-    // --- TÍTULO DEL DOCUMENTO ---
-    doc.setFontSize(14);
-    doc.setFont("helvetica", "bold");
-    doc.text("PROGRAMA ANALÍTICO DE ASIGNATURA", pageWidth / 2, finalY + 15, { align: "center" });
-    finalY += 40;
-  
-    // --- TABLAS DE CONTENIDO (mantener merges) ---
-    const MAX_COLS = 48;
 
-    const splitTextChunks = (text: string, maxLen: number) => {
-      if (text.length <= maxLen) return [text];
-      const parts = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
-      const chunks: string[] = [];
-      let buffer = "";
-      for (const p of parts) {
-        if ((buffer + "\n\n" + p).trim().length > maxLen && buffer) {
-          chunks.push(buffer.trim());
-          buffer = p;
-        } else {
-          buffer = buffer ? `${buffer}\n\n${p}` : p;
-        }
-      }
-      if (buffer.trim()) chunks.push(buffer.trim());
-      if (chunks.length === 0) return [text];
-      return chunks;
-    };
+    // ────────────────────────────────────────────────────────────────────────────
+    // buildBody: convierte las filas del editor en filas para jspdf-autotable.
+    //
+    // REGLA CLAVE: jspdf-autotable tiene un bug con rowSpan ("row -1" → bucle infinito).
+    // Solución: nunca emitimos rowSpan. En su lugar usamos una cuadrícula (grid):
+    //   · La celda real ocupa su posición [r][c].
+    //   · Las posiciones "tapadas" por su rowSpan en filas siguientes se emiten como
+    //     celdas vacías con el MISMO colSpan, de modo que la tabla mantiene
+    //     el número correcto de columnas en cada fila y no se desalinea.
+    // ────────────────────────────────────────────────────────────────────────────
+    const MAX_COLS = 16;
 
-    const expandRowsForPdf = (tabRows: any[]) => {
+    const buildBody = (tabRows: any[]): any[][] => {
+      if (!tabRows?.length) return [];
+
+      // Expandir celdas muy largas en varias filas para evitar "page height" overflow
       const expanded: any[] = [];
       for (const row of tabRows) {
-        const activeCells = (row.cells || []).filter(
+        const active = (row.cells || []).filter(
           (c: any) => (c?.rowSpan ?? 1) > 0 && (c?.colSpan ?? 1) > 0
         );
-        const totalCols = activeCells.reduce((sum: number, c: any) => sum + (c.colSpan ?? 1), 0);
-        const bigCell = activeCells.find((c: any) => {
-          const content = String(c?.content ?? "");
-          return (c?.colSpan ?? 1) >= totalCols && content.length > 900;
-        });
-
-        if (bigCell) {
-          const chunks = splitTextChunks(String(bigCell.content ?? ""), 900);
-          for (const chunk of chunks) {
-            expanded.push({
-              ...row,
-              cells: [
-                {
-                  ...bigCell,
-                  content: chunk,
-                  rowSpan: 1
-                }
-              ]
-            });
-          }
+        const totalCols = active.reduce((s: number, c: any) => s + (c.colSpan ?? 1), 0);
+        const big = active.find(
+          (c: any) => (c?.colSpan ?? 1) >= totalCols && String(c?.content ?? '').length > 800
+        );
+        if (big) {
+          const text = String(big.content ?? '');
+          const parts = text.match(/[\s\S]{1,800}(\s|$)/g) || [text];
+          for (const chunk of parts)
+            expanded.push({ ...row, cells: [{ ...big, content: chunk.trim(), rowSpan: 1 }] });
         } else {
           expanded.push(row);
         }
       }
-      return expanded;
-    };
 
-    const buildAutoTableRows = (tabRows: any[]) => {
-      const rowsForPdf = expandRowsForPdf(tabRows);
-      const rowCount = rowsForPdf.length;
-      if (rowCount === 0) return { head: [], body: [] };
-
-      const occ: boolean[][] = Array.from({ length: rowCount }, () => Array(MAX_COLS).fill(false));
+      const rowCount = expanded.length;
+      // occ[r][c]     → ¿está ocupada esta posición?
+      // csOf[r][c]    → colSpan del bloque que ocupa esta posición
+      const occ:  boolean[][] = Array.from({ length: rowCount }, () => Array(MAX_COLS).fill(false));
+      const csOf: number[][]  = Array.from({ length: rowCount }, () => Array(MAX_COLS).fill(1));
       const grid: (any | null)[][] = Array.from({ length: rowCount }, () => Array(MAX_COLS).fill(null));
 
-      const nextVacant = (r: number, fromC: number) => {
-        let c = fromC;
+      const nextFree = (r: number, from: number) => {
+        let c = from;
         while (c < MAX_COLS && occ[r]?.[c]) c++;
         return c;
       };
 
-      const occupy = (r: number, c: number, rs: number, cs: number) => {
-        for (let ur = r; ur < r + rs && ur < rowCount; ur++) {
-          if (!occ[ur]) occ[ur] = Array(MAX_COLS).fill(false);
-          for (let uc = c; uc < c + cs && uc < MAX_COLS; uc++) {
-            occ[ur][uc] = true;
-          }
-        }
-      };
-
       for (let r = 0; r < rowCount; r++) {
-        let colPtr = nextVacant(r, 0);
-        for (const cell of rowsForPdf[r].cells) {
-          const rsRaw = cell.rowSpan ?? 1;
-          const csRaw = cell.colSpan ?? 1;
-          if (rsRaw <= 0 || csRaw <= 0) continue;
+        let ptr = nextFree(r, 0);
+        for (const cell of expanded[r].cells) {
+          if ((cell.rowSpan ?? 1) <= 0 || (cell.colSpan ?? 1) <= 0) continue;
+          ptr = nextFree(r, ptr);
+          if (ptr >= MAX_COLS) break;
 
-          const rawContent = String(cell.content ?? "");
-          const tooTall = rawContent.length > 1200;
-          const rs = tooTall ? 1 : Math.max(1, Math.min(rsRaw, rowCount - r));
-          const cs = Math.max(1, Math.min(csRaw, MAX_COLS - colPtr));
+          const rs = Math.max(1, Math.min(cell.rowSpan ?? 1, rowCount - r));
+          const cs = Math.max(1, Math.min(cell.colSpan ?? 1, MAX_COLS - ptr));
 
-          colPtr = nextVacant(r, colPtr);
-          if (colPtr >= MAX_COLS) break;
-
-          occupy(r, colPtr, rs, cs);
+          // Marcar como ocupado y guardar colSpan para filas de continuación
+          for (let ur = r; ur < r + rs; ur++)
+            for (let uc = ptr; uc < ptr + cs; uc++) {
+              occ[ur][uc] = true;
+              csOf[ur][uc] = cs;
+            }
 
           const styles: any = {};
           if (cell.backgroundColor) styles.fillColor = cell.backgroundColor;
-          if (cell.textColor) styles.textColor = cell.textColor;
-          if (cell.textAlign) styles.halign = cell.textAlign;
-          if (cell.isHeader) styles.fontStyle = "bold";
+          if (cell.textColor)        styles.textColor  = cell.textColor;
+          if (cell.textAlign)        styles.halign     = cell.textAlign;
+          if (cell.isHeader) {
+            styles.fontStyle = styles.fontStyle || 'bold';
+            if (!styles.fillColor) styles.fillColor = [220, 220, 220];
+          }
 
-          const entry: any = { content: rawContent };
-          if (rs > 1) entry.rowSpan = rs;
+          const entry: any = { content: String(cell.content ?? '') };
           if (cs > 1) entry.colSpan = cs;
           if (Object.keys(styles).length) entry.styles = styles;
-
-          grid[r][colPtr] = entry;
-          colPtr += cs;
+          grid[r][ptr] = entry;
+          ptr += cs;
         }
       }
 
-      let lastCol = 0;
-      for (let r = 0; r < rowCount; r++) {
-        for (let c = 0; c < MAX_COLS; c++) {
+      let lastCol = 1;
+      for (let r = 0; r < rowCount; r++)
+        for (let c = 0; c < MAX_COLS; c++)
           if (occ[r]?.[c]) lastCol = Math.max(lastCol, c + 1);
-        }
-      }
-      lastCol = Math.max(lastCol, 1);
 
-      const head: any[] = [];
-      const body: any[] = [];
-      for (let r = 0; r < rowCount; r++) {
-        const rowOut: any[] = [];
-        for (let c = 0; c < lastCol; ) {
-          const cellEntry = grid[r][c];
-          if (cellEntry) {
-            rowOut.push(cellEntry);
-            const span = typeof cellEntry.colSpan === "number" ? cellEntry.colSpan : 1;
-            c += Math.max(1, span);
+      return Array.from({ length: rowCount }, (_, r) => {
+        const out: any[] = [];
+        let c = 0;
+        while (c < lastCol) {
+          const entry = grid[r][c];
+          if (entry !== null) {
+            // Celda real
+            out.push(entry);
+            c += Math.max(1, entry.colSpan ?? 1);
+          } else if (occ[r][c]) {
+            // Continuación de rowSpan: emitir celda vacía con el colSpan correcto
+            // para que la tabla no pierda columnas en esta fila
+            const cs = csOf[r][c];
+            const empty: any = { content: '' };
+            if (cs > 1) empty.colSpan = cs;
+            out.push(empty);
+            c += cs;
           } else {
-            rowOut.push({ content: "" });
-            c += 1;
+            out.push({ content: '' });
+            c++;
           }
         }
-
-        const rowHasHeader = rowsForPdf[r]?.cells?.some((c: any) => c?.isHeader);
-        if (rowHasHeader) head.push(rowOut);
-        else body.push(rowOut);
-      }
-
-      return { head, body };
+        return out;
+      });
     };
 
+    // --- PESTAÑAS ---
     for (const tab of activeProgramaAnalitico.tabs) {
-      const { head, body } = buildAutoTableRows(tab.rows);
-      if (head.length === 0 && body.length === 0) continue;
+      const body = buildBody(tab.rows);
+      if (body.length === 0) continue;
 
       autoTable(doc, {
-        head: head.length > 0 ? head : undefined,
         body,
         startY: finalY,
-        theme: "grid",
+        theme: 'grid',
         styles: {
           fontSize: 8,
-          cellPadding: 2,
-          overflow: "linebreak",
-          cellWidth: "wrap"
-        },
-        headStyles: {
-          fillColor: [220, 220, 220],
+          cellPadding: 3,
+          lineColor: [160, 160, 160],
+          lineWidth: 0.3,
+          overflow: 'linebreak',
+          halign: 'left',
+          valign: 'middle',
           textColor: [0, 0, 0],
-          fontStyle: "bold",
-          halign: "center"
         },
-        rowPageBreak: "auto",
-        pageBreak: "auto",
+        tableWidth: pageWidth - margin * 2,
+        margin: { left: margin, right: margin, top: 100 },
+        rowPageBreak: 'auto',
+        pageBreak: 'auto',
         didDrawPage: (data) => {
-          // Añadir cabecera en cada nueva página
-          if (data.pageNumber > 1) {
-            addHeader();
-          }
+          if (data.pageNumber > 1) addHeader();
         },
-        margin: { top: 100 }
       });
 
-      finalY = (doc as any).lastAutoTable.finalY;
+      finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 8;
+
+      // Ceder el hilo al navegador entre pestañas para no congelar la UI
+      await new Promise<void>(r => setTimeout(r, 0));
     }
-  
-    // --- SECCIÓN DE FIRMAS ---
-    const signatureHeight = 140;
+
+    // --- SECCIÓN VISADO ---
+    const signatureHeight = 120;
     if (finalY + signatureHeight > pageHeight - margin) {
-      doc.addPage();
-      addHeader();
-      finalY = 100;
+      doc.addPage(); addHeader(); finalY = 100;
     }
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+    doc.text('VISADO', pageWidth / 2, finalY + 20, { align: 'center' });
 
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "bold");
-    doc.text("VISADO", pageWidth / 2, finalY + 20, { align: "center" });
-
-    const sigStartY = finalY + 40;
-    const sigLines = "_________________________";
-    const sigRows = [
-      [sigLines, sigLines, sigLines, sigLines],
-      [
-        "Ing. Alfonso Moreno Mg",
-        "Lcda. Alexandra Monserrate Pionce Parrales Mg. Duie.",
-        "Ing. Mario Javier Marcillo Merino, Mg",
-        "Lcdo. Fulco Berdy Pincay Ponce, MSIG"
-      ],
-      [
-        "DECANO/A DE FACULTAD",
-        "DIRECTOR/A ACADÉMICO/A",
-        "COORDINADOR/A DE CARRERA",
-        "DOCENTE"
-      ]
-    ];
-
+    const VISADO_COLS = ['DECANO/A DE FACULTAD', 'DIRECTOR/A ACADÉMICO/A', 'COORDINADOR/A DE CARRERA', 'DOCENTE'];
     autoTable(doc, {
-      body: sigRows,
-      startY: sigStartY,
-      theme: "plain",
-      styles: {
-        fontSize: 9,
-        halign: "center",
-        valign: "middle",
-        cellPadding: 2
-      },
+      body: [
+        [{ content: '', colSpan: 1 }, { content: '', colSpan: 1 }, { content: '', colSpan: 1 }, { content: '', colSpan: 1 }],
+        VISADO_COLS.map(label => ({ content: label, styles: { halign: 'center', fontStyle: 'bold', fontSize: 8 } })),
+      ],
+      startY: finalY + 30,
+      theme: 'plain',
+      styles: { fontSize: 9, halign: 'center', valign: 'middle', cellPadding: 4, minCellHeight: 40 },
+      tableWidth: pageWidth - margin * 2,
       margin: { left: margin, right: margin },
-      tableWidth: pageWidth - margin * 2
     });
-  
-    doc.save("programa_analitico.pdf");
+
+    const slug = programaTitle.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 40) || 'Programa_Analitico';
+    doc.save(`PA_${slug}.pdf`);
   };
 
   // ==============================

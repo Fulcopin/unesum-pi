@@ -5,6 +5,7 @@ const { Op } = require('sequelize');
 const {
   FirmaDocumento,
   Syllabus,
+  SyllabusComisionAcademica,
   ProgramasAnaliticos,
   Asignatura,
   Carrera,
@@ -15,23 +16,32 @@ const {
 } = require('../models');
 
 // =========================================================================
-// Configuración del flujo: NUEVO ORDEN
-//   1) Decano firma primero (puede firmar todos de una vez)
-//   2) Dirección de Carrera firma segundo
-//   3) Docente firma al subir su syllabus / programa analítico
+// Configuración del flujo: ORDEN OFICIAL UNESUM
+//   1) Docente firma al subir / completar su programa analítico o syllabus
+//   2) Coordinador/a de Carrera (comisión académica) revisa y firma
+//   3) Decano/a de Facultad firma
+//   4) Director/a Académico/a es el ÚLTIMO en firmar (da visado definitivo)
 // =========================================================================
-const ETAPAS_ORDEN = ['decano', 'direccion', 'docente'];
+const ETAPAS_ORDEN = ['docente', 'coordinador', 'decano', 'director_academico'];
+
+// Labels en español para mensajes de error
+const ETAPA_LABELS_ES = {
+  docente:             'Docente',
+  coordinador:         'Coordinador/a de Carrera',
+  decano:              'Decano/a de Facultad',
+  director_academico:  'Director/a Académico/a',
+};
 
 // Mapa rol activo del usuario -> etapa que firma
 const ROL_A_ETAPA = {
-  decano:              'decano',
-  subdecano:           'decano',
-  administrador:       'decano',
-  direccion:           'direccion',
-  comision:            'direccion',
-  comision_academica:  'direccion',
   docente:             'docente',
   profesor:            'docente',
+  comision:            'coordinador',
+  comision_academica:  'coordinador',
+  decano:              'decano',
+  subdecano:           'decano',
+  direccion:           'director_academico',
+  administrador:       'director_academico',
 };
 
 // =========================================================================
@@ -87,11 +97,16 @@ function urlVerificacion(req, hash) {
 
 async function obtenerDocumento(tipo, id) {
   if (tipo === 'syllabus') {
-    return Syllabus.findByPk(id, {
+    // Intentar primero en la tabla 'syllabi', luego en 'syllabus_comision_academica'
+    const doc = await Syllabus.findByPk(id, {
       include: [
         { model: Asignatura, as: 'asignatura' },
         { model: Profesor, as: 'profesor' },
       ],
+    });
+    if (doc) return doc;
+    return SyllabusComisionAcademica.findByPk(id, {
+      include: [{ model: Asignatura, as: 'asignatura' }],
     });
   }
   if (tipo === 'programa_analitico') {
@@ -160,7 +175,20 @@ exports.firmar = async (req, res) => {
         message: `Este documento ya fue firmado en la etapa "${etapaSolicitada}"`,
       });
     }
-    // Sin filtro secuencial: cualquier etapa puede firmar en cualquier momento
+
+    // Verificar orden secuencial (admin puede omitir el orden)
+    if (rolActivo !== 'administrador') {
+      const etapaIdx = ETAPAS_ORDEN.indexOf(etapaSolicitada);
+      for (let i = 0; i < etapaIdx; i++) {
+        if (!porEtapa[ETAPAS_ORDEN[i]]) {
+          const faltante = ETAPA_LABELS_ES[ETAPAS_ORDEN[i]] || ETAPAS_ORDEN[i];
+          return res.status(409).json({
+            success: false,
+            message: `El documento debe ser firmado primero por "${faltante}" antes de que puedas firmarlo`,
+          });
+        }
+      }
+    }
 
     const hash = generarHashFirma({
       documento_tipo: tipo,
@@ -308,6 +336,11 @@ exports.verificar = async (req, res) => {
       documento = await Syllabus.findByPk(firma.documento_id, {
         include: [{ model: Asignatura, as: 'asignatura' }],
       });
+      if (!documento) {
+        documento = await SyllabusComisionAcademica.findByPk(firma.documento_id, {
+          include: [{ model: Asignatura, as: 'asignatura' }],
+        });
+      }
     } else if (firma.documento_tipo === 'programa_analitico') {
       documento = await ProgramasAnaliticos.findByPk(firma.documento_id, {
         include: [{ model: Asignatura, as: 'asignatura' }],

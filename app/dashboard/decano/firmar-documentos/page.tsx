@@ -27,9 +27,10 @@ import { FirmasPanel, TipoDocumento } from '@/components/firmas/firmas-panel';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
 const ETAPA_LABELS: Record<string, string> = {
-  decano: 'Decano',
-  direccion: 'Dirección',
   docente: 'Docente',
+  coordinador: 'Coordinador/a',
+  decano: 'Decano/a',
+  director_academico: 'Director/a Acad.',
 };
 
 interface DocPendiente {
@@ -74,7 +75,11 @@ function DecanoBulkFirmaContent() {
   const [miQR, setMiQR] = useState<{ qr_data_url: string; url_verificacion: string } | null>(null);
 
   const rolActivo = user?.rol || '';
-  const etapaUsuario = rolActivo === 'decano' ? 'decano' : rolActivo === 'direccion' ? 'direccion' : null;
+  const etapaUsuario = rolActivo === 'decano' || rolActivo === 'subdecano' ? 'decano'
+    : rolActivo === 'direccion' || rolActivo === 'administrador' ? 'director_academico'
+    : rolActivo === 'comision' || rolActivo === 'comision_academica' ? 'coordinador'
+    : rolActivo === 'docente' || rolActivo === 'profesor' ? 'docente'
+    : null;
   const etiLabel = ETAPA_LABELS[etapaUsuario || ''] || rolActivo;
 
   // ── Cargar periodos ────────────────────────────────────────────────
@@ -428,7 +433,7 @@ function DecanoBulkFirmaContent() {
 
                   {/* Progreso firmas */}
                   <div className="flex items-center gap-1 flex-shrink-0">
-                    {['decano', 'direccion', 'docente'].map((e) => {
+                    {['docente', 'coordinador', 'decano', 'director_academico'].map((e) => {
                       const f = d.firmas.find((x) => x.etapa === e);
                       return (
                         <span

@@ -8,9 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Save, ArrowLeft, Loader2 } from "lucide-react"
+import { Save, ArrowLeft, Loader2, FileDown } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
+import jsPDF from "jspdf"
+import autoTable from "jspdf-autotable"
+import { FirmasPanel } from "@/components/firmas/firmas-panel"
 
 // --- INTERFACES ---
 interface TableCell {
@@ -312,6 +315,296 @@ export default function DocenteEditorProgramaAnaliticoPage() {
     }
   }
 
+  // =====================================================================
+  // GENERACIÓN DE PDF - PROGRAMA ANALÍTICO DE ASIGNATURA
+  // =====================================================================
+  const handlePrintToPdf = async () => {
+    if (!programaData) return
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+    const pageWidth = doc.internal.pageSize.getWidth()   // 297mm
+    const pageHeight = doc.internal.pageSize.getHeight() // 210mm
+    const marginL = 8
+    const marginR = 8
+    const contentWidth = pageWidth - marginL - marginR    // 281mm
+
+    // --- FIRMAS del documento (para sección VISADO al final) ---
+    let firmasData: any = null
+    if (programa_comision_id) {
+      try {
+        const firmasRes = await Promise.race([
+          apiRequest(`/firmas/programa_analitico/${programa_comision_id}`),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+        ])
+        if ((firmasRes as any).success) firmasData = (firmasRes as any).data
+      } catch { /* firmas no disponibles o timeout */ }
+    }
+
+    // --- LOGO UNESUM ---
+    try {
+      const logoImg = new Image()
+      logoImg.crossOrigin = 'anonymous'
+      await Promise.race([
+        new Promise<void>((resolve, reject) => {
+          logoImg.onload = () => resolve()
+          logoImg.onerror = () => reject()
+          logoImg.src = '/images/unesum-logo-official.png'
+        }),
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
+      ])
+      doc.addImage(logoImg, 'PNG', marginL, 3, 11, 11)
+    } catch { /* logo no disponible o timeout */ }
+
+    // --- ENCABEZADO: rectángulo azul de fondo ---
+    doc.setFillColor(25, 50, 95)
+    doc.rect(marginL, 2, contentWidth, 14, 'F')
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(255, 255, 255)
+    doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 7, { align: 'center' })
+    doc.setFontSize(8)
+    doc.text('PROGRAMA ANALÍTICO DE ASIGNATURA', pageWidth / 2, 12, { align: 'center' })
+
+    // --- MATERIA Y PERIODO (banda gris claro) ---
+    const asignaturaName = asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre || programaData.name || ''
+    const periodoName = periodos.find((p: any) => String(p.id) === selectedPeriod)?.nombre || ''
+    doc.setFillColor(240, 244, 250)
+    doc.rect(marginL, 16, contentWidth, 7, 'F')
+    doc.setFontSize(7)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(25, 50, 95)
+    const headerLine = [asignaturaName, periodoName ? `Periodo: ${periodoName}` : ''].filter(Boolean).join('   |   ')
+    if (headerLine) doc.text(headerLine, pageWidth / 2, 20.5, { align: 'center' })
+
+    let currentY = 25
+
+    // --- CONTENIDO POR CADA PESTAÑA ---
+    for (const tab of programaData.tabs) {
+      if (!tab.rows || tab.rows.length === 0) continue
+
+      if (currentY + 15 > pageHeight - 8) {
+        doc.addPage()
+        currentY = 8
+      }
+
+      // Título de sección: barra coloreada
+      const tabTitleH = 5
+      doc.setFillColor(59, 100, 160)
+      doc.rect(marginL, currentY, contentWidth, tabTitleH, 'F')
+      doc.setFontSize(6.5)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(255, 255, 255)
+      doc.text(tab.title.toUpperCase(), marginL + 2, currentY + 3.5)
+      currentY += tabTitleH + 0.5
+
+      // Calcular número máximo de columnas lógicas
+      let maxCols = 0
+      for (const row of tab.rows) {
+        const vis = row.cells.filter(c => c.rowSpan > 0 && c.colSpan > 0)
+        const logCols = vis.reduce((sum, c) => sum + (c.colSpan || 1), 0)
+        if (logCols > maxCols) maxCols = logCols
+      }
+      if (maxCols === 0) continue
+
+      // Detectar columna PERIODO para darle ancho fijo y centrado
+      let periodoColStart = -1
+      let periodoColSpan = 1
+      outer: for (const row of tab.rows) {
+        let logCol = 0
+        for (const cell of row.cells.filter(c => c.rowSpan > 0 && c.colSpan > 0)) {
+          if ((cell.content || '').toUpperCase().includes('PERIODO')) {
+            periodoColStart = logCol
+            periodoColSpan = cell.colSpan || 1
+            break outer
+          }
+          logCol += cell.colSpan || 1
+        }
+      }
+
+      // Calcular columnStyles: columna PERIODO = 22% del ancho, resto proporcional
+      const colStyles: Record<number, any> = {}
+      if (periodoColStart >= 0 && maxCols > 1) {
+        const periodoW = Math.round(contentWidth * 0.22)
+        const restCols = maxCols - periodoColSpan
+        const restW = restCols > 0 ? Math.round((contentWidth - periodoW) / restCols) : contentWidth
+        for (let i = 0; i < maxCols; i++) {
+          if (i >= periodoColStart && i < periodoColStart + periodoColSpan) {
+            colStyles[i] = { cellWidth: periodoW / periodoColSpan, halign: 'center' }
+          } else {
+            colStyles[i] = { cellWidth: restW }
+          }
+        }
+      }
+
+      // Construir cuerpo de la tabla (rowSpan siempre 1 para evitar el warning "row -1" de jspdf-autotable)
+      const body: any[][] = []
+
+      for (const row of tab.rows) {
+        const pdfRow: any[] = []
+        let currentLogCol = 0
+
+        for (const cell of row.cells) {
+          if (currentLogCol >= maxCols) break
+          const isGhost = (cell.rowSpan ?? 1) <= 0 || (cell.colSpan ?? 1) <= 0
+
+          if (isGhost) {
+            // Celda cubierta por span anterior → filler vacío
+            pdfRow.push({
+              content: '',
+              rowSpan: 1,
+              colSpan: 1,
+              styles: {
+                fillColor: [255, 255, 255],
+                textColor: [30, 30, 30],
+                fontSize: 6,
+                cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
+              }
+            })
+            currentLogCol++
+          } else {
+            let cellSpan = cell.colSpan || 1
+            if (currentLogCol + cellSpan > maxCols) cellSpan = Math.max(1, maxCols - currentLogCol)
+
+            const isHeader = cell.isHeader
+            const content = (cell.content || '').replace(/\r\n/g, '\n')
+            const isPeriodoCell = periodoColStart >= 0 && currentLogCol >= periodoColStart && currentLogCol < periodoColStart + periodoColSpan
+
+            pdfRow.push({
+              content,
+              rowSpan: 1,
+              colSpan: cellSpan,
+              styles: {
+                fontStyle: isHeader ? 'bold' as const : 'normal' as const,
+                fillColor: isHeader ? [220, 229, 242] : (cell.backgroundColor || [255, 255, 255]),
+                textColor: isHeader ? [25, 50, 95] : [30, 30, 30],
+                fontSize: isHeader ? 6.5 : 6,
+                cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
+                halign: (isHeader || isPeriodoCell) ? 'center' as const : 'left' as const,
+                valign: 'top' as const,
+                overflow: 'linebreak' as const,
+              }
+            })
+            currentLogCol += cellSpan
+          }
+        }
+
+        if (pdfRow.length > 0) body.push(pdfRow)
+      }
+
+      if (body.length > 0) {
+        autoTable(doc, {
+          body: body as any,
+          startY: currentY,
+          theme: 'grid',
+          styles: {
+            fontSize: 6,
+            cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
+            lineColor: [180, 190, 210],
+            lineWidth: 0.12,
+            overflow: 'linebreak',
+            halign: 'left',
+            valign: 'top',
+            textColor: [30, 30, 30],
+            minCellHeight: 3,
+          },
+          margin: { left: marginL, right: marginR, top: 8 },
+        })
+
+        const finalY = (doc as any).lastAutoTable?.finalY ?? (doc as any).previousAutoTable?.finalY ?? currentY + 8
+        currentY = finalY + 2
+      }
+
+      // Ceder el hilo al navegador entre pestañas para no congelar la UI
+      await new Promise<void>(r => setTimeout(r, 0))
+    }
+
+    // ─── SECCIÓN VISADO ────────────────────────────────────────────────────
+    const VISADO_ETAPAS = [
+      { etapa: 'decano',             label: 'DECANO/A DE FACULTAD' },
+      { etapa: 'director_academico', label: 'DIRECTOR/A ACADÉMICO/A' },
+      { etapa: 'coordinador',        label: 'COORDINADOR/A DE CARRERA' },
+      { etapa: 'docente',            label: 'DOCENTE' },
+    ]
+
+    const VTITLE_H = 5
+    const VHEADER_H = 7
+    const VSIGN_H = 36
+    const VTOTAL = VTITLE_H + VHEADER_H + VSIGN_H + 3
+
+    if (currentY + VTOTAL > pageHeight - 5) { doc.addPage(); currentY = 8 }
+    currentY += 3
+
+    // Title bar
+    doc.setFillColor(25, 50, 95)
+    doc.rect(marginL, currentY, contentWidth, VTITLE_H, 'F')
+    doc.setFontSize(7)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(255, 255, 255)
+    doc.text('VISADO', marginL + 4, currentY + 3.5)
+    currentY += VTITLE_H
+
+    const colW = contentWidth / 4
+
+    // Column header row (light blue)
+    doc.setFillColor(220, 229, 242)
+    doc.rect(marginL, currentY, contentWidth, VHEADER_H, 'F')
+    doc.setDrawColor(180, 190, 210)
+    doc.setLineWidth(0.12)
+    doc.rect(marginL, currentY, contentWidth, VHEADER_H)
+
+    VISADO_ETAPAS.forEach((cfg, i) => {
+      const x = marginL + i * colW
+      if (i > 0) doc.line(x, currentY, x, currentY + VHEADER_H)
+      doc.setFontSize(5.5)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(25, 50, 95)
+      const lns = doc.splitTextToSize(cfg.label, colW - 3)
+      doc.text(lns, x + colW / 2, currentY + 4, { align: 'center' })
+    })
+    currentY += VHEADER_H
+
+    // Signature boxes
+    doc.setDrawColor(180, 190, 210)
+    doc.setLineWidth(0.12)
+    doc.rect(marginL, currentY, contentWidth, VSIGN_H)
+
+    VISADO_ETAPAS.forEach((cfg, i) => {
+      const x = marginL + i * colW
+      if (i > 0) doc.line(x, currentY, x, currentY + VSIGN_H)
+
+      const etapaInfo = firmasData?.etapas?.find((e: any) => e.etapa === cfg.etapa)
+
+      if (etapaInfo?.firmado && etapaInfo.firma) {
+        // Nombre
+        doc.setFontSize(6)
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(30, 30, 30)
+        const lns = doc.splitTextToSize(etapaInfo.firma.usuario_nombre || '', colW - 4)
+        doc.text(lns, x + colW / 2, currentY + 6, { align: 'center' })
+        // QR
+        if (etapaInfo.firma.qr_data_url) {
+          try {
+            const qrSz = 16
+            doc.addImage(etapaInfo.firma.qr_data_url, 'PNG', x + (colW - qrSz) / 2, currentY + 10, qrSz, qrSz)
+          } catch {}
+        }
+        // Fecha
+        const fecha = `Fecha: ${new Date(etapaInfo.firma.firmado_at).toLocaleDateString('es-EC')}`
+        doc.setFontSize(5.5)
+        doc.setTextColor(80, 80, 80)
+        doc.text(fecha, x + colW / 2, currentY + VSIGN_H - 3, { align: 'center' })
+      } else {
+        doc.setFontSize(6)
+        doc.setFont('helvetica', 'italic')
+        doc.setTextColor(150, 150, 150)
+        doc.text('Pendiente de firma', x + colW / 2, currentY + VSIGN_H / 2 + 3, { align: 'center' })
+      }
+    })
+
+    const slug = asignaturaName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 40) || 'Programa_Analitico'
+    doc.save(`PA_${slug}.pdf`)
+  }
+
   return (
     <ProtectedRoute allowedRoles={["profesor", "docente"]}>
       <div className="min-h-screen bg-gray-50">
@@ -356,6 +649,9 @@ export default function DocenteEditorProgramaAnaliticoPage() {
               </Select>
               <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700" disabled={isSaving || !programaData}>
                 {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Guardando...</> : <><Save className="h-4 w-4 mr-2" /> Guardar</>}
+              </Button>
+              <Button onClick={handlePrintToPdf} variant="outline" disabled={!programaData}>
+                <FileDown className="h-4 w-4 mr-2" /> Exportar PDF
               </Button>
             </div>
           </div>
@@ -488,6 +784,21 @@ export default function DocenteEditorProgramaAnaliticoPage() {
                 </Card>
               )}
             </>
+          )}
+
+          {/* Panel de firmas digitales */}
+          {programa_comision_id && (
+            <div className="mt-6">
+              <FirmasPanel
+                tipo="programa_analitico"
+                documentoId={programa_comision_id}
+                documentoNombre={
+                  asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre
+                  || programaData?.name
+                  || 'Programa Analítico'
+                }
+              />
+            </div>
           )}
         </main>
 

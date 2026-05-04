@@ -52,9 +52,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
 const ETAPA_LABELS: Record<string, string> = {
   docente: 'Docente',
-  comision_academica: 'Comisión Académica',
-  direccion: 'Dirección',
-  decano: 'Decano',
+  coordinador: 'Coordinador/a de Carrera',
+  decano: 'Decano/a de Facultad',
+  director_academico: 'Director/a Académico/a',
 };
 
 interface DocumentoListado {

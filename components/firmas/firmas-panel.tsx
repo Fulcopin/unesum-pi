@@ -22,18 +22,20 @@ export type TipoDocumento = 'syllabus' | 'programa_analitico';
 
 const ETAPA_LABELS: Record<string, string> = {
   docente: 'Docente',
-  comision_academica: 'Comisión Académica',
-  direccion: 'Dirección de Carrera',
-  decano: 'Decano',
+  coordinador: 'Coordinador/a de Carrera',
+  decano: 'Decano/a de Facultad',
+  director_academico: 'Director/a Académico/a',
 };
 
 const ROL_A_ETAPA: Record<string, string> = {
   docente: 'docente',
   profesor: 'docente',
-  comision: 'comision_academica',
-  comision_academica: 'comision_academica',
-  direccion: 'direccion',
+  comision: 'coordinador',
+  comision_academica: 'coordinador',
   decano: 'decano',
+  subdecano: 'decano',
+  direccion: 'director_academico',
+  administrador: 'director_academico',
 };
 
 interface EtapaFirma {

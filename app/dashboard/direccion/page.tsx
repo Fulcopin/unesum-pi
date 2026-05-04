@@ -32,6 +32,13 @@ export default function DireccionDashboard() {
       color: "bg-indigo-600",
     },
     {
+      title: "Firma Masiva de Documentos",
+      description: "Firmar en lote todos los programas analíticos pendientes de tu firma como Director/a Académico/a",
+      icon: ClipboardSignature,
+      href: "/dashboard/direccion/firmar-documentos",
+      color: "bg-emerald-700",
+    },
+    {
       title: "Dashboard Ejecutivo",
       description: "Resumen general de indicadores institucionales",
       icon: BarChart3,

@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Save, ArrowLeft, Loader2, Lock, Unlock, FileDown } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
+import { FirmasPanel } from "@/components/firmas/firmas-panel"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 
@@ -476,6 +477,18 @@ export default function DocenteEditorSyllabusPage() {
   const handlePrintToPdf = async () => {
     if (!syllabusData) return;
 
+    // --- FIRMAS del documento (para sección VISADO al final) ---
+    let firmasData: any = null
+    if (syllabus_comision_id) {
+      try {
+        const fr = await Promise.race([
+          apiRequest(`/firmas/syllabus/${syllabus_comision_id}`),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+        ])
+        if ((fr as any).success) firmasData = (fr as any).data
+      } catch { /* firmas no disponibles o timeout */ }
+    }
+
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -487,11 +500,14 @@ export default function DocenteEditorSyllabusPage() {
     try {
       const logoImg = new Image();
       logoImg.crossOrigin = 'anonymous';
-      await new Promise<void>((resolve, reject) => {
-        logoImg.onload = () => resolve();
-        logoImg.onerror = () => reject();
-        logoImg.src = '/images/unesum-logo-official.png';
-      });
+      await Promise.race([
+        new Promise<void>((resolve, reject) => {
+          logoImg.onload = () => resolve();
+          logoImg.onerror = () => reject();
+          logoImg.src = '/images/unesum-logo-official.png';
+        }),
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
+      ]);
       doc.addImage(logoImg, 'PNG', marginL, 3, 12, 12);
     } catch { /* logo no disponible */ }
 
@@ -837,6 +853,78 @@ export default function DocenteEditorSyllabusPage() {
       }
     }
 
+    // ─── SECCIÓN VISADO ────────────────────────────────────────────────────
+    const VISADO_ETAPAS = [
+      { etapa: 'decano',             label: 'DECANO/A DE FACULTAD' },
+      { etapa: 'director_academico', label: 'DIRECTOR/A ACADÉMICO/A' },
+      { etapa: 'coordinador',        label: 'COORDINADOR/A DE CARRERA' },
+      { etapa: 'docente',            label: 'DOCENTE' },
+    ]
+    const VTITLE_H = 5
+    const VHEADER_H = 7
+    const VSIGN_H = 36
+    const VTOTAL = VTITLE_H + VHEADER_H + VSIGN_H + 3
+
+    if (currentY + VTOTAL > pageHeight - 5) { doc.addPage(); currentY = 8 }
+    currentY += 3
+
+    doc.setFillColor(25, 50, 95)
+    doc.rect(marginL, currentY, contentWidth, VTITLE_H, 'F')
+    doc.setFontSize(7)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(255, 255, 255)
+    doc.text('VISADO', marginL + 4, currentY + 3.5)
+    currentY += VTITLE_H
+
+    const colW = contentWidth / 4
+
+    doc.setFillColor(220, 229, 242)
+    doc.rect(marginL, currentY, contentWidth, VHEADER_H, 'F')
+    doc.setDrawColor(180, 190, 210)
+    doc.setLineWidth(0.12)
+    doc.rect(marginL, currentY, contentWidth, VHEADER_H)
+    VISADO_ETAPAS.forEach((cfg, i) => {
+      const x = marginL + i * colW
+      if (i > 0) doc.line(x, currentY, x, currentY + VHEADER_H)
+      doc.setFontSize(5.5)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(25, 50, 95)
+      const lns = doc.splitTextToSize(cfg.label, colW - 3)
+      doc.text(lns, x + colW / 2, currentY + 4, { align: 'center' })
+    })
+    currentY += VHEADER_H
+
+    doc.setDrawColor(180, 190, 210)
+    doc.setLineWidth(0.12)
+    doc.rect(marginL, currentY, contentWidth, VSIGN_H)
+    VISADO_ETAPAS.forEach((cfg, i) => {
+      const x = marginL + i * colW
+      if (i > 0) doc.line(x, currentY, x, currentY + VSIGN_H)
+      const etapaInfo = firmasData?.etapas?.find((e: any) => e.etapa === cfg.etapa)
+      if (etapaInfo?.firmado && etapaInfo.firma) {
+        doc.setFontSize(6)
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(30, 30, 30)
+        const lns = doc.splitTextToSize(etapaInfo.firma.usuario_nombre || '', colW - 4)
+        doc.text(lns, x + colW / 2, currentY + 6, { align: 'center' })
+        if (etapaInfo.firma.qr_data_url) {
+          try {
+            const qrSz = 16
+            doc.addImage(etapaInfo.firma.qr_data_url, 'PNG', x + (colW - qrSz) / 2, currentY + 10, qrSz, qrSz)
+          } catch {}
+        }
+        const fecha = `Fecha: ${new Date(etapaInfo.firma.firmado_at).toLocaleDateString('es-EC')}`
+        doc.setFontSize(5.5)
+        doc.setTextColor(80, 80, 80)
+        doc.text(fecha, x + colW / 2, currentY + VSIGN_H - 3, { align: 'center' })
+      } else {
+        doc.setFontSize(6)
+        doc.setFont('helvetica', 'italic')
+        doc.setTextColor(150, 150, 150)
+        doc.text('Pendiente de firma', x + colW / 2, currentY + VSIGN_H / 2 + 3, { align: 'center' })
+      }
+    })
+
     doc.save(`Syllabus_${syllabusData.name || 'Docente'}.pdf`);
   }
 
@@ -1152,6 +1240,17 @@ export default function DocenteEditorSyllabusPage() {
                 </Card>
               )}
             </>
+          )}
+
+          {/* Panel de firmas digitales */}
+          {syllabus_comision_id && (
+            <div className="mt-6">
+              <FirmasPanel
+                tipo="syllabus"
+                documentoId={syllabus_comision_id}
+                documentoNombre={syllabusData?.name || 'Syllabus'}
+              />
+            </div>
           )}
         </main>
 
