@@ -77,8 +77,9 @@ export function FirmasPanel({ tipo, documentoId, documentoNombre, onFirmado }: P
   const [error, setError] = useState<string | null>(null);
   const [observaciones, setObservaciones] = useState('');
   const [mostrarFormFirmar, setMostrarFormFirmar] = useState(false);
+  const [showCelebration, setShowCelebration] = useState(false);
 
-  const cargar = async () => {
+  const cargar = async (): Promise<FirmasResponse | null> => {
     try {
       setLoading(true);
       setError(null);
@@ -91,8 +92,10 @@ export function FirmasPanel({ tipo, documentoId, documentoNombre, onFirmado }: P
         throw new Error(json.message || 'Error al cargar firmas');
       }
       setData(json.data);
+      return json.data;
     } catch (e: any) {
       setError(e.message);
+      return null;
     } finally {
       setLoading(false);
     }
@@ -122,7 +125,10 @@ export function FirmasPanel({ tipo, documentoId, documentoNombre, onFirmado }: P
       }
       setMostrarFormFirmar(false);
       setObservaciones('');
-      await cargar();
+      const updatedData = await cargar();
+      if (updatedData?.completo) {
+        setShowCelebration(true);
+      }
       onFirmado?.();
     } catch (e: any) {
       setError(e.message);
@@ -137,6 +143,7 @@ export function FirmasPanel({ tipo, documentoId, documentoNombre, onFirmado }: P
     !!data && etapaUsuario === data.siguiente_etapa && !data.completo;
 
   return (
+    <>
     <Card className="border-slate-200">
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
@@ -343,5 +350,78 @@ export function FirmasPanel({ tipo, documentoId, documentoNombre, onFirmado }: P
         )}
       </CardContent>
     </Card>
-  );
+
+    {/* ══ CELEBRACIÓN: Todas las firmas completadas ══ */}
+    {showCelebration && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        onClick={() => setShowCelebration(false)}
+      >
+        {/* Confeti decorativo */}
+        {[...Array(24)].map((_, i) => (
+          <span
+            key={i}
+            className="absolute rounded-sm opacity-90 animate-bounce"
+            style={{
+              width:  `${8 + (i * 3) % 10}px`,
+              height: `${8 + (i * 5) % 10}px`,
+              backgroundColor: ['#f43f5e','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ec4899'][i % 6],
+              left:   `${4 + (i * 4.1) % 92}%`,
+              top:    `${2 + (i * 5.7) % 30}%`,
+              animationDelay:    `${(i * 0.13) % 0.9}s`,
+              animationDuration: `${0.5 + (i * 0.09) % 0.7}s`,
+            }}
+          />
+        ))}
+        {[...Array(12)].map((_, i) => (
+          <span
+            key={`b${i}`}
+            className="absolute rounded-sm opacity-90 animate-bounce"
+            style={{
+              width:  `${6 + (i * 4) % 10}px`,
+              height: `${6 + (i * 6) % 10}px`,
+              backgroundColor: ['#f43f5e','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ec4899'][(i + 3) % 6],
+              left:   `${4 + (i * 8.3) % 92}%`,
+              top:    `${65 + (i * 3.1) % 30}%`,
+              animationDelay:    `${(i * 0.17) % 0.9}s`,
+              animationDuration: `${0.6 + (i * 0.11) % 0.8}s`,
+            }}
+          />
+        ))}
+
+        <div
+          className="relative bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4 text-center"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Icono principal animado */}
+          <div className="text-7xl mb-2 animate-bounce">🎉</div>
+          <div className="flex justify-center gap-3 text-4xl mb-4">
+            🏆&nbsp;🎊&nbsp;🏆
+          </div>
+
+          <h2 className="text-2xl font-bold text-green-700 mb-2">
+            ¡Proceso Completado!
+          </h2>
+          <p className="text-gray-700 font-medium mb-1">
+            Todas las firmas han sido registradas.
+          </p>
+          <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+            El documento fue firmado por todos los responsables,
+            incluyendo el{' '}
+            <span className="font-semibold text-green-700">Director de Carrera</span>.
+            El proceso está oficialmente concluido. 🎯
+          </p>
+
+          <button
+            onClick={() => setShowCelebration(false)}
+            className="bg-green-600 hover:bg-green-700 active:scale-95 transition-all text-white font-semibold px-8 py-2.5 rounded-xl shadow-md text-base"
+          >
+            ¡Excelente! 👏
+          </button>
+
+          <p className="text-xs text-gray-400 mt-4">Haz clic fuera para cerrar</p>
+        </div>
+      </div>
+    )}
+  </>);
 }

@@ -347,6 +347,7 @@ export default function LoginPage() {
                 <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center font-semibold">3</span>
                 <span>Panel</span>
               </div>
+              <p className="mt-5 text-center text-xs text-gray-300">by apf</p>
             </div>
           </div>
 

@@ -18,10 +18,32 @@ import * as XLSX from 'xlsx'
 
 import { useAuth } from "@/contexts/auth-context"
 
+// --- Helpers de numeración ---
+const ROMANOS = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+                 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX'];
+const ORDINALES = ['', 'Primero', 'Segundo', 'Tercero', 'Cuarto', 'Quinto',
+                   'Sexto', 'Séptimo', 'Octavo', 'Noveno', 'Décimo',
+                   'Undécimo', 'Duodécimo', 'Decimotercero', 'Decimocuarto', 'Decimoquinto'];
+
+function getNivelLabel(nivel: { nombre: string; codigo: string; romano?: string; ordinal?: string }): string {
+  // Usar romano y ordinal del backend si existen
+  if (nivel.romano && nivel.ordinal) return `${nivel.romano} - ${nivel.ordinal}`;
+  if (nivel.romano) return `${nivel.romano} - ${nivel.nombre}`;
+  // Calcular desde nombre si es numérico
+  const num = parseInt(nivel.nombre, 10);
+  if (!isNaN(num) && num >= 1 && num <= 20) {
+    const romano = ROMANOS[num];
+    const ordinal = ORDINALES[num];
+    return `${romano} - ${ordinal}`;
+  }
+  // Fallback: nombre tal cual
+  return nivel.nombre;
+}
+
 // --- Tipos de Datos que vienen de la API ---
 interface Facultad { id: number; nombre: string }
 interface Carrera { id: number; nombre: string; facultad_id: number }
-interface Nivel { id: number; nombre: string; codigo: string }
+interface Nivel { id: number; nombre: string; codigo: string; ordinal?: string; romano?: string }
 interface Asignatura { id: number; nombre: string; codigo: string; carrera_id: number }
 interface Paralelo { id: number; nombre: string; codigo: string }
 interface Rol { id: number; nombre: string; estado: boolean }
@@ -359,11 +381,20 @@ export default function GestionDocentesPage() {
   }, [token, mounted]);
 
   const asignaturasFiltradas = useMemo(() => {
-    if (!filtros.malla || filtros.malla === "todas") return asignaturas;
-    const mallaSeleccionada = mallas.find(m => m.id === parseInt(filtros.malla, 10));
-    if (!mallaSeleccionada) return asignaturas;
-    return asignaturas.filter(a => a.carrera_id === mallaSeleccionada.carrera_id);
-  }, [filtros.malla, asignaturas, mallas]);
+    let result = asignaturas;
+    // Filtrar por carreras seleccionadas en el formulario
+    if (selectedCarrerasIds.length > 0) {
+      result = result.filter(a => selectedCarrerasIds.includes(a.carrera_id));
+    }
+    // Filtrar además por malla si está seleccionada
+    if (filtros.malla && filtros.malla !== "todas") {
+      const mallaSeleccionada = mallas.find(m => m.id === parseInt(filtros.malla, 10));
+      if (mallaSeleccionada) {
+        result = result.filter(a => a.carrera_id === mallaSeleccionada.carrera_id);
+      }
+    }
+    return result;
+  }, [filtros.malla, asignaturas, mallas, selectedCarrerasIds]);
 
   const carrerasFiltradasPorFiltro = useMemo(() => {
     if (!filtros.facultad) return [];
@@ -927,7 +958,7 @@ export default function GestionDocentesPage() {
                               .filter(n => !selectedNivelesIds.includes(n.id))
                               .map((n) => (
                                 <SelectItem key={n.id} value={n.id.toString()}>
-                                  {n.nombre} {n.codigo ? `(${n.codigo})` : ""}
+                                  {getNivelLabel(n)}
                                 </SelectItem>
                               ))}
                           </SelectContent>
@@ -939,7 +970,7 @@ export default function GestionDocentesPage() {
                             const niv = niveles.find(n => n.id === nid);
                             return (
                               <Badge key={nid} variant="outline" className={`text-sm py-1 px-3 ${idx === 0 ? 'bg-purple-100 text-purple-800 border-purple-300' : 'bg-violet-50 text-violet-700 border-violet-200'}`}>
-                                {niv?.nombre || `Nivel #${nid}`}
+                                {niv ? getNivelLabel(niv) : `Nivel #${nid}`}
                                 {idx === 0 && <span className="ml-1 text-xs">(principal)</span>}
                                 <button type="button" onClick={() => setSelectedNivelesIds(prev => prev.filter(id => id !== nid))} className="ml-2 hover:text-red-600">
                                   <X className="h-3 w-3" />
@@ -1192,7 +1223,7 @@ export default function GestionDocentesPage() {
                                       <div className="flex flex-col gap-1">
                                         {todosNiveles.map((n: any, idx: number) => (
                                           <Badge key={n.id} variant="outline" className={`text-xs ${idx === 0 ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-violet-50 text-violet-600 border-violet-200'}`}>
-                                            {n.nombre}
+                                            {getNivelLabel(n)}
                                           </Badge>
                                         ))}
                                       </div>

@@ -2,12 +2,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import Link from "next/link"
 import Image from "next/image"
+import CalendarioPublico from "@/components/landing/calendario-publico"
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-500 to-green-600">
+    <div className="min-h-screen relative">
       {/* Header */}
-      <header className="bg-emerald-700 text-white px-6 py-4 shadow-lg">
+      <header className="bg-emerald-950/55 backdrop-blur-md text-white px-6 py-4 shadow-lg border-b border-white/20">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-white rounded-full p-1 flex items-center justify-center">
@@ -24,7 +25,12 @@ export default function HomePage() {
               <p className="text-sm opacity-90">Universidad Estatal del Sur de Manabí</p>
             </div>
           </div>
-          <div className="flex gap-4">
+          <div className="flex gap-3 items-center">
+            <a href="#cronograma">
+              <Button variant="ghost" className="text-white hover:bg-emerald-600">
+                📅 Calendario
+              </Button>
+            </a>
             <Link href="/login">
               <Button variant="ghost" className="text-white hover:bg-emerald-600">
                 Iniciar sesión
@@ -66,21 +72,21 @@ export default function HomePage() {
                 Acceder al Sistema
               </Button>
             </Link>
-            <Link href="/register">
+            <a href="#cronograma">
               <Button
                 size="lg"
                 variant="outline"
                 className="border-white text-white hover:bg-white hover:text-emerald-700 font-semibold px-8 py-3 bg-transparent"
               >
-                Crear Cuenta
+                📅 Ver Calendario
               </Button>
-            </Link>
+            </a>
           </div>
         </div>
       </main>
 
       {/* Features Section */}
-      <section className="px-6 py-16 bg-white/10 backdrop-blur-sm">
+      <section className="px-6 py-16 bg-white/12 backdrop-blur-md border-y border-white/15">
         <div className="max-w-6xl mx-auto">
           <h2 className="text-3xl font-bold text-white text-center mb-12">Módulos del Sistema</h2>
           <div className="grid md:grid-cols-3 gap-8">
@@ -122,7 +128,7 @@ export default function HomePage() {
       </section>
 
       {/* Campus Section */}
-      <section className="px-6 py-16 bg-white">
+      <section className="px-6 py-16 bg-white/72 backdrop-blur-md">
         <div className="max-w-6xl mx-auto">
           <div className="grid md:grid-cols-2 gap-12 items-center">
             <div>
@@ -152,8 +158,11 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Calendar Section */}
+      <CalendarioPublico />
+
       {/* Footer */}
-      <footer className="bg-emerald-800 text-white py-8">
+      <footer className="bg-emerald-950/70 backdrop-blur-md text-white py-8 border-t border-white/20">
         <div className="max-w-6xl mx-auto px-6 text-center">
           <div className="flex items-center justify-center gap-3 mb-4">
             <Image
@@ -171,6 +180,7 @@ export default function HomePage() {
           <p className="text-sm opacity-80">
             © 2024 Universidad Estatal del Sur de Manabí. Todos los derechos reservados.
           </p>
+          <p className="text-xs opacity-50 mt-1">by apf</p>
         </div>
       </footer>
     </div>

@@ -57,6 +57,14 @@ interface EstructuraFacultad {
   carreras: Carrera[];
 }
 
+type ConfirmEliminarState = {
+  id: number;
+  nombre: string;
+  asignaturaId: number;
+  tipo: 'syllabus' | 'programa';
+  source?: string;
+};
+
 export default function AsignaturasComisionPage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -66,7 +74,7 @@ export default function AsignaturasComisionPage() {
   const [error, setError] = useState<string | null>(null);
   const [periodos, setPeriodos] = useState<any[]>([]);
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState<string>('');
-  const [confirmEliminar, setConfirmEliminar] = useState<{ id: number; nombre: string; asignaturaId: number; source: string } | null>(null);
+  const [confirmEliminar, setConfirmEliminar] = useState<ConfirmEliminarState | null>(null);
   const [eliminando, setEliminando] = useState(false);
 
   useEffect(() => {
@@ -184,6 +192,34 @@ export default function AsignaturasComisionPage() {
         await cargarEstructura();
       } else {
         throw new Error(data.message || 'Error al eliminar syllabus');
+      }
+    } catch (err: any) {
+      console.error('Error:', err);
+      alert('❌ Error al eliminar: ' + err.message);
+    } finally {
+      setEliminando(false);
+    }
+  };
+
+  const eliminarPrograma = async (programaId: number) => {
+    setEliminando(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/programa-analitico/${programaId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (response.ok && (data.success ?? true)) {
+        setConfirmEliminar(null);
+        await cargarEstructura();
+      } else {
+        throw new Error(data.message || 'Error al eliminar programa analítico');
       }
     } catch (err: any) {
       console.error('Error:', err);
@@ -535,7 +571,7 @@ export default function AsignaturasComisionPage() {
                                 size="sm"
                                 variant="outline"
                                 className="border-red-300 text-red-600 hover:bg-red-50"
-                                onClick={() => setConfirmEliminar({ id: asignatura.syllabus_id!, nombre: asignatura.nombre, asignaturaId: asignatura.id, source: 'comision' })}
+                                onClick={() => setConfirmEliminar({ id: asignatura.syllabus_id!, nombre: asignatura.nombre, asignaturaId: asignatura.id, tipo: 'syllabus', source: 'comision' })}
                               >
                                 <Trash2 className="h-4 w-4 mr-1" />
                                 Eliminar
@@ -554,12 +590,23 @@ export default function AsignaturasComisionPage() {
                           )}
                           
                           {asignatura.tiene_programa ? (
-                            <Link href={`/dashboard/comision/crear-programa-analitico?id=${asignatura.programa_id}&asignatura=${asignatura.id}&periodo=${periodoSeleccionado}`}>
-                              <Button size="sm" variant="outline" className="border-green-300 text-green-700 bg-green-50">
-                                <CheckCircle2 className="h-4 w-4 mr-1" />
-                                Ver Programa
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-red-300 text-red-600 hover:bg-red-50"
+                                onClick={() => setConfirmEliminar({ id: asignatura.programa_id!, nombre: asignatura.nombre, asignaturaId: asignatura.id, tipo: 'programa' })}
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Eliminar Programa
                               </Button>
-                            </Link>
+                              <Link href={`/dashboard/comision/crear-programa-analitico?id=${asignatura.programa_id}&asignatura=${asignatura.id}&periodo=${periodoSeleccionado}`}>
+                                <Button size="sm" variant="outline" className="border-green-300 text-green-700 bg-green-50">
+                                  <CheckCircle2 className="h-4 w-4 mr-1" />
+                                  Ver Programa
+                                </Button>
+                              </Link>
+                            </>
                           ) : (
                             <Link href={`/dashboard/comision/crear-programa-analitico?asignatura=${asignatura.id}&periodo=${periodoSeleccionado}&nueva=true`}>
                               <Button size="sm" variant="default" disabled={!periodoSeleccionado}>
@@ -603,10 +650,12 @@ export default function AsignaturasComisionPage() {
               <div className="bg-red-100 p-2 rounded-full">
                 <Trash2 className="h-6 w-6 text-red-600" />
               </div>
-              <h2 className="text-lg font-semibold text-gray-900">Eliminar Syllabus</h2>
+              <h2 className="text-lg font-semibold text-gray-900">
+                {confirmEliminar.tipo === 'programa' ? 'Eliminar Programa Analítico' : 'Eliminar Syllabus'}
+              </h2>
             </div>
             <p className="text-gray-600 mb-2">
-              ¿Está seguro de que desea eliminar el syllabus de:
+              ¿Está seguro de que desea eliminar {confirmEliminar.tipo === 'programa' ? 'el programa analítico de' : 'el syllabus de'}:
             </p>
             <p className="font-semibold text-gray-900 mb-4">"{confirmEliminar.nombre}"</p>
             <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-6">
@@ -622,7 +671,11 @@ export default function AsignaturasComisionPage() {
               </Button>
               <Button
                 variant="destructive"
-                onClick={() => eliminarSyllabus(confirmEliminar.id, confirmEliminar.asignaturaId, confirmEliminar.source)}
+                onClick={() =>
+                  confirmEliminar.tipo === 'programa'
+                    ? eliminarPrograma(confirmEliminar.id)
+                    : eliminarSyllabus(confirmEliminar.id, confirmEliminar.asignaturaId, confirmEliminar.source!)
+                }
                 disabled={eliminando}
               >
                 {eliminando ? 'Eliminando...' : 'Sí, eliminar'}

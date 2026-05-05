@@ -7,6 +7,7 @@ const ROLE_LABELS = {
   administrador: 'Administrador',
   comision_academica: 'Comisión Académica',
   comision: 'Comisión Académica',
+  coordinador: 'Coordinador/a de Carrera',
   direccion: 'Dirección',
   decano: 'Decano',
   subdecano: 'Subdecano',

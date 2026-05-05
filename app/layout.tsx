@@ -27,7 +27,7 @@ html {
 }
         `}</style>
       </head>
-      <body>
+      <body className="unesum-platform-bg">
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

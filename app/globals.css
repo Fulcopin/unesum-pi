@@ -117,7 +117,48 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
+  html {
+    min-height: 100%;
   }
+  body {
+    @apply text-foreground;
+    min-height: 100vh;
+    position: relative;
+    isolation: isolate;
+    background-color: #edf5ef;
+  }
+}
+
+body.unesum-platform-bg::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image:
+    linear-gradient(135deg, rgba(7, 94, 71, 0.86) 0%, rgba(28, 139, 104, 0.58) 38%, rgba(244, 250, 246, 0.78) 100%),
+    radial-gradient(circle at 16% 18%, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0) 28%),
+    url("/images/unesum-campus-aerial.png"),
+    url("/images/unesum-building.png");
+  background-size: auto, auto, cover, 34vw auto;
+  background-position: center, left top, center center, right bottom;
+  background-repeat: no-repeat;
+  filter: saturate(1.05) contrast(1.02);
+}
+
+body.unesum-platform-bg::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(248, 252, 249, 0.08) 0%, rgba(243, 248, 245, 0.36) 100%),
+    repeating-linear-gradient(120deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 26px);
+}
+
+body.unesum-platform-bg [class*="min-h-screen"][class*="bg-gray-50"],
+body.unesum-platform-bg [class*="min-h-screen"][class*="bg-gradient-to-"] {
+  background: linear-gradient(180deg, rgba(248, 251, 249, 0.76) 0%, rgba(239, 246, 241, 0.84) 100%) !important;
+  backdrop-filter: blur(8px);
 }

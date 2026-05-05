@@ -28,6 +28,7 @@ const ROL_LABELS: Record<string, string> = {
   comision: 'Comisión Académica',
   comision_academica: 'Comisión Académica',
   subdecano: 'Subdecano',
+  coordinador: 'Coordinador/a de Carrera',
   estudiante: 'Estudiante',
 };
 
@@ -40,6 +41,7 @@ const ROL_COLORES: Record<string, string> = {
   comision_academica: 'bg-purple-700',
   administrador: 'bg-slate-700',
   subdecano: 'bg-orange-600',
+  coordinador: 'bg-indigo-600',
   estudiante: 'bg-teal-700',
 };
 
@@ -167,7 +169,7 @@ function UsuariosQRContent() {
   // Agrupar por rol
   const porRol = useMemo(() => {
     const map = new Map<string, UsuarioQR[]>();
-    const orden = ['decano', 'direccion', 'comision_academica', 'comision', 'docente', 'profesor', 'subdecano', 'administrador', 'estudiante'];
+    const orden = ['decano', 'direccion', 'coordinador', 'comision_academica', 'comision', 'docente', 'profesor', 'subdecano', 'administrador', 'estudiante'];
     for (const u of visibles) {
       const key = u.rol;
       if (!map.has(key)) map.set(key, []);
@@ -232,6 +234,7 @@ function UsuariosQRContent() {
                       <SelectItem value="all">Todos los roles</SelectItem>
                       <SelectItem value="decano">Decano</SelectItem>
                       <SelectItem value="direccion">Dirección de Carrera</SelectItem>
+                      <SelectItem value="coordinador">Coordinador/a de Carrera</SelectItem>
                       <SelectItem value="comision_academica">Comisión Académica</SelectItem>
                       <SelectItem value="docente">Docentes</SelectItem>
                       <SelectItem value="administrador">Administrador</SelectItem>

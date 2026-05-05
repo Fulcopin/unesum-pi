@@ -16,6 +16,7 @@ import { useSearchParams } from 'next/navigation'
 import * as mammoth from "mammoth"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { PrintProgramaAnalitico } from "@/components/programa-analitico/print-programa-analitico"
 
 // --- INTERFACES DE DATOS ---
 interface TableCell { 
@@ -948,9 +949,12 @@ export default function EditorProgramaAnaliticoComisionPage() {
                       <Button onClick={handleSaveToDB} disabled={!activePrograma} className="bg-emerald-600 hover:bg-emerald-700">
                         <Save className="h-4 w-4 mr-2" /> Guardar
                       </Button>
-                      <Button onClick={handlePrintToPdf} disabled={!activePrograma} variant="outline">
-                        <Printer className="h-4 w-4 mr-2" /> Imprimir
-                      </Button>
+                      <PrintProgramaAnalitico
+                        programaData={activePrograma || null}
+                        asignaturaNombre={activePrograma?.name || activePrograma?.metadata?.subject || ''}
+                        periodoNombre={selectedPeriod}
+                        buttonLabel="Imprimir"
+                      />
                     </div>
                   </CardTitle>
                 </CardHeader>
@@ -1093,7 +1097,13 @@ export default function EditorProgramaAnaliticoComisionPage() {
                     <div className="flex-shrink-0 flex items-center gap-2">
                        <Button onClick={() => { setActiveProgramaId(null); setProgramas([]); }} variant="outline" size="sm"> <Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
                        <Button onClick={handleSaveToDB} className="bg-emerald-600 hover:bg-emerald-700" size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> Guardar</>}</Button>
-                       <Button onClick={handlePrintToPdf} variant="outline" size="sm" disabled={!activeTab}><Printer className="h-4 w-4 mr-2" /> Imprimir</Button>
+                       <PrintProgramaAnalitico
+                         programaData={activePrograma || null}
+                         asignaturaNombre={activePrograma?.name || activePrograma?.metadata?.subject || ''}
+                         periodoNombre={selectedPeriod}
+                         buttonLabel="Imprimir"
+                         buttonClassName="h-9 text-sm px-3"
+                       />
                     </div>
                   </CardTitle>
                 </CardHeader>

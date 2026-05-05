@@ -33,6 +33,7 @@ const ROLES_DISPONIBLES = [
   { value: "direccion",          label: "Dirección" },
   { value: "decano",             label: "Decano" },
   { value: "subdecano",          label: "Sub Decano" },
+  { value: "coordinador",        label: "Coordinador/a de Carrera" },
   { value: "docente",            label: "Docente" },
   { value: "profesor",           label: "Profesor" },
   { value: "estudiante",         label: "Estudiante" },

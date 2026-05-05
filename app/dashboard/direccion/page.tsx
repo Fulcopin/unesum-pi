@@ -4,11 +4,19 @@ import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { BarChart3, Users, FileText, Calendar, TrendingUp, Settings, ScrollText, ClipboardSignature, Pen } from "lucide-react"
+import { BarChart3, Users, FileText, Calendar, TrendingUp, Settings, ScrollText, ClipboardSignature, Pen, ShieldCheck } from "lucide-react"
 import Link from "next/link"
 
 export default function DireccionDashboard() {
   const direccionModules = [
+    {
+      title: "Documentos Finales — Todos Firmados",
+      description: "Consulta todos los syllabus y programas analíticos que ya tienen las firmas completas: docente, coordinador, decano y director de carrera.",
+      icon: ShieldCheck,
+      href: "/dashboard/direccion/documentos-firmados",
+      color: "bg-green-700",
+      destacado2: true,
+    },
     {
       title: "Mis Documentos para Firmar",
       description: "Ve todos los documentos pendientes de tu firma (syllabus y programas analíticos) y fírmalos de inmediato",
@@ -97,23 +105,24 @@ export default function DireccionDashboard() {
             {direccionModules.map((module) => {
               const IconComponent = module.icon
               const esDestacado = (module as any).destacado
+              const esDestacado2 = (module as any).destacado2
               return (
-                <Card key={module.href} className={`hover:shadow-lg transition-shadow cursor-pointer ${esDestacado ? 'border-indigo-300 bg-indigo-50 md:col-span-2 lg:col-span-3' : ''}`}>
+                <Card key={module.href} className={`hover:shadow-lg transition-shadow cursor-pointer ${esDestacado ? 'border-indigo-300 bg-indigo-50 md:col-span-2 lg:col-span-3' : ''} ${esDestacado2 ? 'border-green-300 bg-green-50 md:col-span-2 lg:col-span-3' : ''}`}>
                   <CardHeader className="pb-3">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${module.color} text-white`}>
-                        <IconComponent className={esDestacado ? "h-8 w-8" : "h-6 w-6"} />
+                        <IconComponent className={(esDestacado || esDestacado2) ? "h-8 w-8" : "h-6 w-6"} />
                       </div>
                       <div>
-                        <CardTitle className={esDestacado ? "text-xl" : "text-lg"}>{module.title}</CardTitle>
+                        <CardTitle className={(esDestacado || esDestacado2) ? "text-xl" : "text-lg"}>{module.title}</CardTitle>
                       </div>
                     </div>
                   </CardHeader>
                   <CardContent>
                     <CardDescription className="mb-4">{module.description}</CardDescription>
                     <Link href={module.href}>
-                      <Button className={`w-full ${esDestacado ? 'bg-indigo-700 hover:bg-indigo-800 text-base py-5' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                        {esDestacado ? 'Ver mis documentos pendientes →' : 'Acceder'}
+                      <Button className={`w-full ${esDestacado ? 'bg-indigo-700 hover:bg-indigo-800 text-base py-5' : esDestacado2 ? 'bg-green-700 hover:bg-green-800 text-base py-5' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                        {esDestacado ? 'Ver mis documentos pendientes →' : esDestacado2 ? 'Ver documentos finales firmados →' : 'Acceder'}
                       </Button>
                     </Link>
                   </CardContent>

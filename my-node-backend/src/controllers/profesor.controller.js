@@ -840,12 +840,22 @@ exports.getDocumentos = async (req, res) => {
 exports.delete = async (req, res) => {
   try {
     const { id } = req.params;
-    const profesor = await Profesor.findByPk(id);
+    const profesor = await Profesor.findByPk(id, { paranoid: false });
     if (!profesor) {
       return res.status(404).json({ success: false, message: `Profesor con ID ${id} no encontrado` });
     }
 
-    await profesor.destroy(); // Usará borrado lógico (soft delete) si está configurado en el modelo
+    // Eliminar registros de tablas intermedias (M2M) antes de borrar el profesor
+    await Promise.all([
+      ProfesorCarrera.destroy({ where: { profesor_id: id } }),
+      ProfesorAsignatura.destroy({ where: { profesor_id: id } }),
+      ProfesorNivel.destroy({ where: { profesor_id: id } }),
+      ProfesorParalelo.destroy({ where: { profesor_id: id } }),
+      ProfesorRol.destroy({ where: { profesor_id: id } }),
+    ]);
+
+    // Borrado físico (force: true ignora el paranoid/soft-delete)
+    await profesor.destroy({ force: true });
     
     return res.status(200).json({ success: true, message: 'Profesor eliminado exitosamente' });
   } catch (error) {

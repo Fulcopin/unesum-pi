@@ -42,6 +42,7 @@ import {
   Filter,
   Loader2,
   PenLine,
+  Printer,
   RefreshCw,
   Search,
 } from 'lucide-react';
@@ -502,7 +503,7 @@ export function DocumentosFirmarVista({ tipo, etapaUsuario, rolDashboard }: Prop
             </DialogTitle>
           </DialogHeader>
           {docSeleccionado && (
-            <div className="space-y-3">
+            <div className="space-y-3" id="print-area-firma">
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <p className="text-xs text-slate-500">Carrera</p>
@@ -535,6 +536,16 @@ export function DocumentosFirmarVista({ tipo, etapaUsuario, rolDashboard }: Prop
                   cargarDocumentos();
                 }}
               />
+              {/* Botón imprimir */}
+              <div className="flex justify-end pt-2 border-t no-print">
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => window.print()}
+                >
+                  <Printer className="h-4 w-4" /> Imprimir / Guardar PDF
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

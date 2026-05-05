@@ -1,19 +1,18 @@
-"use client"
+﻿"use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Save, ArrowLeft, Loader2, FileDown } from "lucide-react"
+import { Save, ArrowLeft, Loader2 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
-import jsPDF from "jspdf"
-import autoTable from "jspdf-autotable"
 import { FirmasPanel } from "@/components/firmas/firmas-panel"
+import { PrintProgramaAnalitico } from "@/components/programa-analitico/print-programa-analitico"
 
 // --- INTERFACES ---
 interface TableCell {
@@ -46,6 +45,8 @@ export default function DocenteEditorProgramaAnaliticoPage() {
   const [hasDocenteVersion, setHasDocenteVersion] = useState(false)
   const [asignaturasDisponibles, setAsignaturasDisponibles] = useState<any[]>([])
   const [selectedAsignaturaId, setSelectedAsignaturaId] = useState<string>('')
+  const [periodoAutoSyncMsg, setPeriodoAutoSyncMsg] = useState<string | null>(null)
+  const isAutoSyncingPeriod = useRef(false)
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'
 
@@ -108,6 +109,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
   useEffect(() => {
     if (!selectedPeriod || !profesorInfo) return
     if (!selectedAsignaturaId && asignaturasDisponibles.length === 0) return
+    if (isAutoSyncingPeriod.current) return  // ignorar re-render causado por auto-sync de periodo
     loadPrograma()
   }, [selectedPeriod, profesorInfo, selectedAsignaturaId])
 
@@ -123,7 +125,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
     }
 
     try {
-      // 1. Primero buscar si el docente ya tiene una versión guardada
+      // 1. Primero buscar si el docente ya tiene una versiÃ³n guardada
       try {
         const docenteRes = await apiRequest(`/docente-editor/programa/mio?asignatura_id=${asignaturaId}&periodo=${selectedPeriod}`)
         if (docenteRes.success && docenteRes.data?.datos_programa) {
@@ -135,9 +137,10 @@ export default function DocenteEditorProgramaAnaliticoPage() {
           setLoading(false)
           return
         }
-      } catch (e) { /* No tiene versión propia, buscar la de comisión */ }
+      } catch (e) { /* No tiene versiÃ³n propia, buscar la de comisiÃ³n */ }
 
-      // 2. Buscar programa de la comisión
+      // 2. Buscar programa de la comisión (el backend busca por asignatura+periodo y si no encuentra,
+      //    retorna el más reciente para esa asignatura — con su período real incluido en la respuesta)
       const comisionRes = await apiRequest(`/docente-editor/programa/comision?asignatura_id=${asignaturaId}&periodo=${selectedPeriod}`)
       if (comisionRes.success && comisionRes.data) {
         let datos = comisionRes.data.datos_programa
@@ -145,11 +148,26 @@ export default function DocenteEditorProgramaAnaliticoPage() {
         processProgramaData(datos)
         setProgramaComisionId(comisionRes.data.id)
         setHasDocenteVersion(false)
+        // Auto-sincronizar el selector de periodo con el periodo real del programa cargado
+        const periodoCargado = comisionRes.data.periodo
+        if (periodoCargado) {
+          const matched = periodos.find((p: any) =>
+            String(p.id) === String(periodoCargado) || p.nombre === periodoCargado
+          )
+          if (matched && String(matched.id) !== selectedPeriod) {
+            isAutoSyncingPeriod.current = true
+            setSelectedPeriod(String(matched.id))
+            setPeriodoAutoSyncMsg(`Periodo ajustado a "${matched.nombre}" (periodo del programa subido para tu asignatura)`)
+            setTimeout(() => { isAutoSyncingPeriod.current = false }, 200)
+          } else {
+            setPeriodoAutoSyncMsg(null)
+          }
+        }
       } else {
-        setError("No se encontró programa analítico para tu asignatura en este periodo.")
+        setError("La comisión académica aún no ha subido un programa analítico para tu asignatura. Contacta a la comisión académica.")
       }
     } catch (e: any) {
-      setError(e.message || "Error al cargar programa analítico")
+      setError(e.message || "Error al cargar programa analÃ­tico")
     } finally {
       setLoading(false)
     }
@@ -165,7 +183,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
         ...datos,
         tabs: datos.secciones.map((sec: any, idx: number) => ({
           id: sec.id || `tab-${idx}`,
-          title: sec.titulo || sec.title || `Sección ${idx + 1}`,
+          title: sec.titulo || sec.title || `SecciÃ³n ${idx + 1}`,
           rows: (sec.filas || sec.rows || []).map((fila: any, fIdx: number) => ({
             id: fila.id || `row-${idx}-${fIdx}`,
             cells: (fila.celdas || fila.cells || []).map((celda: any, cIdx: number) => ({
@@ -204,7 +222,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
         }))
       }
     } else {
-      setError("Formato de programa analítico no reconocido")
+      setError("Formato de programa analÃ­tico no reconocido")
       return
     }
 
@@ -216,6 +234,24 @@ export default function DocenteEditorProgramaAnaliticoPage() {
 
   const activeTab = programaData?.tabs.find(t => t.id === activeTabId)
   const tableData = activeTab?.rows || []
+
+  // Valores para auto-rellenar celdas vacías en el editor (ASIGNATURA, PERIODO, NIVEL, DOCENTE)
+  const asignaturaNombreActual = asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre || ''
+  const periodoNombreActual = periodos.find((p: any) => String(p.id) === selectedPeriod)?.nombre || ''
+  const nivelNombreActual = profesorInfo?.nivel?.nombre || ''
+  const docenteNombreActual = profesorInfo ? `${profesorInfo.nombres || ''} ${profesorInfo.apellidos || ''}`.trim() : ''
+
+  const getDisplayContent = (cells: TableCell[], idx: number): string => {
+    const cell = cells[idx]
+    if (cell.content?.trim()) return cell.content
+    if (idx === 0) return ''
+    const prevLabel = (cells[idx - 1].content || '').toUpperCase().trim()
+    if (prevLabel.includes('ASIGNATURA') && asignaturaNombreActual) return asignaturaNombreActual
+    if ((prevLabel.includes('PERIODO') || prevLabel.includes('PAO')) && periodoNombreActual) return periodoNombreActual
+    if (prevLabel === 'NIVEL' && nivelNombreActual) return nivelNombreActual
+    if (prevLabel === 'DOCENTE' && docenteNombreActual) return docenteNombreActual
+    return ''
+  }
 
   // Edición de celdas - verificar si la comisión lo permite
   const isCellEditable = (cell: TableCell): boolean => {
@@ -300,7 +336,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
         body: JSON.stringify({
           asignatura_id: asignaturaId,
           periodo: selectedPeriod,
-          nombre: programaData.name || 'Programa Analítico Docente',
+          nombre: programaData.name || 'Programa AnalÃ­tico Docente',
           datos_programa: datosParaGuardar,
           programa_comision_id: programa_comision_id
         })
@@ -315,295 +351,6 @@ export default function DocenteEditorProgramaAnaliticoPage() {
     }
   }
 
-  // =====================================================================
-  // GENERACIÓN DE PDF - PROGRAMA ANALÍTICO DE ASIGNATURA
-  // =====================================================================
-  const handlePrintToPdf = async () => {
-    if (!programaData) return
-
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
-    const pageWidth = doc.internal.pageSize.getWidth()   // 297mm
-    const pageHeight = doc.internal.pageSize.getHeight() // 210mm
-    const marginL = 8
-    const marginR = 8
-    const contentWidth = pageWidth - marginL - marginR    // 281mm
-
-    // --- FIRMAS del documento (para sección VISADO al final) ---
-    let firmasData: any = null
-    if (programa_comision_id) {
-      try {
-        const firmasRes = await Promise.race([
-          apiRequest(`/firmas/programa_analitico/${programa_comision_id}`),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
-        ])
-        if ((firmasRes as any).success) firmasData = (firmasRes as any).data
-      } catch { /* firmas no disponibles o timeout */ }
-    }
-
-    // --- LOGO UNESUM ---
-    try {
-      const logoImg = new Image()
-      logoImg.crossOrigin = 'anonymous'
-      await Promise.race([
-        new Promise<void>((resolve, reject) => {
-          logoImg.onload = () => resolve()
-          logoImg.onerror = () => reject()
-          logoImg.src = '/images/unesum-logo-official.png'
-        }),
-        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
-      ])
-      doc.addImage(logoImg, 'PNG', marginL, 3, 11, 11)
-    } catch { /* logo no disponible o timeout */ }
-
-    // --- ENCABEZADO: rectángulo azul de fondo ---
-    doc.setFillColor(25, 50, 95)
-    doc.rect(marginL, 2, contentWidth, 14, 'F')
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'bold')
-    doc.setTextColor(255, 255, 255)
-    doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 7, { align: 'center' })
-    doc.setFontSize(8)
-    doc.text('PROGRAMA ANALÍTICO DE ASIGNATURA', pageWidth / 2, 12, { align: 'center' })
-
-    // --- MATERIA Y PERIODO (banda gris claro) ---
-    const asignaturaName = asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre || programaData.name || ''
-    const periodoName = periodos.find((p: any) => String(p.id) === selectedPeriod)?.nombre || ''
-    doc.setFillColor(240, 244, 250)
-    doc.rect(marginL, 16, contentWidth, 7, 'F')
-    doc.setFontSize(7)
-    doc.setFont('helvetica', 'bold')
-    doc.setTextColor(25, 50, 95)
-    const headerLine = [asignaturaName, periodoName ? `Periodo: ${periodoName}` : ''].filter(Boolean).join('   |   ')
-    if (headerLine) doc.text(headerLine, pageWidth / 2, 20.5, { align: 'center' })
-
-    let currentY = 25
-
-    // --- CONTENIDO POR CADA PESTAÑA ---
-    for (const tab of programaData.tabs) {
-      if (!tab.rows || tab.rows.length === 0) continue
-
-      if (currentY + 15 > pageHeight - 8) {
-        doc.addPage()
-        currentY = 8
-      }
-
-      // Título de sección: barra coloreada
-      const tabTitleH = 5
-      doc.setFillColor(59, 100, 160)
-      doc.rect(marginL, currentY, contentWidth, tabTitleH, 'F')
-      doc.setFontSize(6.5)
-      doc.setFont('helvetica', 'bold')
-      doc.setTextColor(255, 255, 255)
-      doc.text(tab.title.toUpperCase(), marginL + 2, currentY + 3.5)
-      currentY += tabTitleH + 0.5
-
-      // Calcular número máximo de columnas lógicas
-      let maxCols = 0
-      for (const row of tab.rows) {
-        const vis = row.cells.filter(c => c.rowSpan > 0 && c.colSpan > 0)
-        const logCols = vis.reduce((sum, c) => sum + (c.colSpan || 1), 0)
-        if (logCols > maxCols) maxCols = logCols
-      }
-      if (maxCols === 0) continue
-
-      // Detectar columna PERIODO para darle ancho fijo y centrado
-      let periodoColStart = -1
-      let periodoColSpan = 1
-      outer: for (const row of tab.rows) {
-        let logCol = 0
-        for (const cell of row.cells.filter(c => c.rowSpan > 0 && c.colSpan > 0)) {
-          if ((cell.content || '').toUpperCase().includes('PERIODO')) {
-            periodoColStart = logCol
-            periodoColSpan = cell.colSpan || 1
-            break outer
-          }
-          logCol += cell.colSpan || 1
-        }
-      }
-
-      // Calcular columnStyles: columna PERIODO = 22% del ancho, resto proporcional
-      const colStyles: Record<number, any> = {}
-      if (periodoColStart >= 0 && maxCols > 1) {
-        const periodoW = Math.round(contentWidth * 0.22)
-        const restCols = maxCols - periodoColSpan
-        const restW = restCols > 0 ? Math.round((contentWidth - periodoW) / restCols) : contentWidth
-        for (let i = 0; i < maxCols; i++) {
-          if (i >= periodoColStart && i < periodoColStart + periodoColSpan) {
-            colStyles[i] = { cellWidth: periodoW / periodoColSpan, halign: 'center' }
-          } else {
-            colStyles[i] = { cellWidth: restW }
-          }
-        }
-      }
-
-      // Construir cuerpo de la tabla (rowSpan siempre 1 para evitar el warning "row -1" de jspdf-autotable)
-      const body: any[][] = []
-
-      for (const row of tab.rows) {
-        const pdfRow: any[] = []
-        let currentLogCol = 0
-
-        for (const cell of row.cells) {
-          if (currentLogCol >= maxCols) break
-          const isGhost = (cell.rowSpan ?? 1) <= 0 || (cell.colSpan ?? 1) <= 0
-
-          if (isGhost) {
-            // Celda cubierta por span anterior → filler vacío
-            pdfRow.push({
-              content: '',
-              rowSpan: 1,
-              colSpan: 1,
-              styles: {
-                fillColor: [255, 255, 255],
-                textColor: [30, 30, 30],
-                fontSize: 6,
-                cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
-              }
-            })
-            currentLogCol++
-          } else {
-            let cellSpan = cell.colSpan || 1
-            if (currentLogCol + cellSpan > maxCols) cellSpan = Math.max(1, maxCols - currentLogCol)
-
-            const isHeader = cell.isHeader
-            const content = (cell.content || '').replace(/\r\n/g, '\n')
-            const isPeriodoCell = periodoColStart >= 0 && currentLogCol >= periodoColStart && currentLogCol < periodoColStart + periodoColSpan
-
-            pdfRow.push({
-              content,
-              rowSpan: 1,
-              colSpan: cellSpan,
-              styles: {
-                fontStyle: isHeader ? 'bold' as const : 'normal' as const,
-                fillColor: isHeader ? [220, 229, 242] : (cell.backgroundColor || [255, 255, 255]),
-                textColor: isHeader ? [25, 50, 95] : [30, 30, 30],
-                fontSize: isHeader ? 6.5 : 6,
-                cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
-                halign: (isHeader || isPeriodoCell) ? 'center' as const : 'left' as const,
-                valign: 'top' as const,
-                overflow: 'linebreak' as const,
-              }
-            })
-            currentLogCol += cellSpan
-          }
-        }
-
-        if (pdfRow.length > 0) body.push(pdfRow)
-      }
-
-      if (body.length > 0) {
-        autoTable(doc, {
-          body: body as any,
-          startY: currentY,
-          theme: 'grid',
-          styles: {
-            fontSize: 6,
-            cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
-            lineColor: [180, 190, 210],
-            lineWidth: 0.12,
-            overflow: 'linebreak',
-            halign: 'left',
-            valign: 'top',
-            textColor: [30, 30, 30],
-            minCellHeight: 3,
-          },
-          margin: { left: marginL, right: marginR, top: 8 },
-        })
-
-        const finalY = (doc as any).lastAutoTable?.finalY ?? (doc as any).previousAutoTable?.finalY ?? currentY + 8
-        currentY = finalY + 2
-      }
-
-      // Ceder el hilo al navegador entre pestañas para no congelar la UI
-      await new Promise<void>(r => setTimeout(r, 0))
-    }
-
-    // ─── SECCIÓN VISADO ────────────────────────────────────────────────────
-    const VISADO_ETAPAS = [
-      { etapa: 'decano',             label: 'DECANO/A DE FACULTAD' },
-      { etapa: 'director_academico', label: 'DIRECTOR/A ACADÉMICO/A' },
-      { etapa: 'coordinador',        label: 'COORDINADOR/A DE CARRERA' },
-      { etapa: 'docente',            label: 'DOCENTE' },
-    ]
-
-    const VTITLE_H = 5
-    const VHEADER_H = 7
-    const VSIGN_H = 36
-    const VTOTAL = VTITLE_H + VHEADER_H + VSIGN_H + 3
-
-    if (currentY + VTOTAL > pageHeight - 5) { doc.addPage(); currentY = 8 }
-    currentY += 3
-
-    // Title bar
-    doc.setFillColor(25, 50, 95)
-    doc.rect(marginL, currentY, contentWidth, VTITLE_H, 'F')
-    doc.setFontSize(7)
-    doc.setFont('helvetica', 'bold')
-    doc.setTextColor(255, 255, 255)
-    doc.text('VISADO', marginL + 4, currentY + 3.5)
-    currentY += VTITLE_H
-
-    const colW = contentWidth / 4
-
-    // Column header row (light blue)
-    doc.setFillColor(220, 229, 242)
-    doc.rect(marginL, currentY, contentWidth, VHEADER_H, 'F')
-    doc.setDrawColor(180, 190, 210)
-    doc.setLineWidth(0.12)
-    doc.rect(marginL, currentY, contentWidth, VHEADER_H)
-
-    VISADO_ETAPAS.forEach((cfg, i) => {
-      const x = marginL + i * colW
-      if (i > 0) doc.line(x, currentY, x, currentY + VHEADER_H)
-      doc.setFontSize(5.5)
-      doc.setFont('helvetica', 'bold')
-      doc.setTextColor(25, 50, 95)
-      const lns = doc.splitTextToSize(cfg.label, colW - 3)
-      doc.text(lns, x + colW / 2, currentY + 4, { align: 'center' })
-    })
-    currentY += VHEADER_H
-
-    // Signature boxes
-    doc.setDrawColor(180, 190, 210)
-    doc.setLineWidth(0.12)
-    doc.rect(marginL, currentY, contentWidth, VSIGN_H)
-
-    VISADO_ETAPAS.forEach((cfg, i) => {
-      const x = marginL + i * colW
-      if (i > 0) doc.line(x, currentY, x, currentY + VSIGN_H)
-
-      const etapaInfo = firmasData?.etapas?.find((e: any) => e.etapa === cfg.etapa)
-
-      if (etapaInfo?.firmado && etapaInfo.firma) {
-        // Nombre
-        doc.setFontSize(6)
-        doc.setFont('helvetica', 'normal')
-        doc.setTextColor(30, 30, 30)
-        const lns = doc.splitTextToSize(etapaInfo.firma.usuario_nombre || '', colW - 4)
-        doc.text(lns, x + colW / 2, currentY + 6, { align: 'center' })
-        // QR
-        if (etapaInfo.firma.qr_data_url) {
-          try {
-            const qrSz = 16
-            doc.addImage(etapaInfo.firma.qr_data_url, 'PNG', x + (colW - qrSz) / 2, currentY + 10, qrSz, qrSz)
-          } catch {}
-        }
-        // Fecha
-        const fecha = `Fecha: ${new Date(etapaInfo.firma.firmado_at).toLocaleDateString('es-EC')}`
-        doc.setFontSize(5.5)
-        doc.setTextColor(80, 80, 80)
-        doc.text(fecha, x + colW / 2, currentY + VSIGN_H - 3, { align: 'center' })
-      } else {
-        doc.setFontSize(6)
-        doc.setFont('helvetica', 'italic')
-        doc.setTextColor(150, 150, 150)
-        doc.text('Pendiente de firma', x + colW / 2, currentY + VSIGN_H / 2 + 3, { align: 'center' })
-      }
-    })
-
-    const slug = asignaturaName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 40) || 'Programa_Analitico'
-    doc.save(`PA_${slug}.pdf`)
-  }
 
   return (
     <ProtectedRoute allowedRoles={["profesor", "docente"]}>
@@ -622,7 +369,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
                 <p className="text-sm text-gray-500">
                   {profesorInfo ? `${profesorInfo.nombres} ${profesorInfo.apellidos}` : 'Cargando...'}
                   {selectedAsignaturaId && asignaturasDisponibles.length > 0 && (
-                    <> — {asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre || 'Sin asignatura'}</>
+                    <> &mdash; {asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre || 'Sin asignatura'}</>
                   )}
                   {!selectedAsignaturaId && asignaturasDisponibles.length === 0 && profesorInfo && ' — Sin asignatura'}
                 </p>
@@ -650,15 +397,28 @@ export default function DocenteEditorProgramaAnaliticoPage() {
               <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700" disabled={isSaving || !programaData}>
                 {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Guardando...</> : <><Save className="h-4 w-4 mr-2" /> Guardar</>}
               </Button>
-              <Button onClick={handlePrintToPdf} variant="outline" disabled={!programaData}>
-                <FileDown className="h-4 w-4 mr-2" /> Exportar PDF
-              </Button>
+              <PrintProgramaAnalitico
+                programaData={programaData}
+                asignaturaNombre={asignaturaNombreActual}
+                periodoNombre={periodoNombreActual}
+                nivelNombre={nivelNombreActual}
+                docenteNombre={docenteNombreActual}
+                programa_comision_id={programa_comision_id}
+                token={token || ''}
+                buttonLabel="Imprimir / PDF"
+              />
             </div>
           </div>
 
           {hasDocenteVersion && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
               Estás editando tu versión guardada del programa analítico.
+            </div>
+          )}
+
+          {periodoAutoSyncMsg && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-800">
+              ⚠️ {periodoAutoSyncMsg}
             </div>
           )}
 
@@ -669,7 +429,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
           {loading && (
             <div className="flex items-center justify-center py-20">
               <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
-              <span className="ml-3 text-gray-600">Cargando programa analítico...</span>
+              <span className="ml-3 text-gray-600">Cargando programa analÃ­tico...</span>
             </div>
           )}
 
@@ -705,79 +465,106 @@ export default function DocenteEditorProgramaAnaliticoPage() {
                   <CardContent className="p-4">
                     <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white max-h-[75vh] overflow-y-auto">
                       <table className="border-collapse text-xs text-left w-full">
-                        <tbody className="divide-y divide-gray-200">
-                          {tableData.length === 0 ? (
-                            <tr><td className="p-12 text-center text-gray-500">La tabla está vacía.</td></tr>
-                          ) : (
-                            tableData.map((row, rowIndex) => (
-                              <tr key={row.id} className="hover:bg-blue-50/50">
-                                {row.cells.map((cell, cellIndex) => {
-                                  if (cell.rowSpan === 0 || cell.colSpan === 0) return null;
-
-                                  const isVertical = cell.textOrientation === 'vertical'
-                                  const editable = isCellEditable(cell)
-
-                                  return (
-                                    <td
-                                      key={cell.id}
-                                      className={`border relative align-top ${editable ? 'cursor-cell' : 'cursor-not-allowed'} ${
-                                        cell.isHeader
-                                          ? 'border-gray-300 bg-gray-100/80 font-bold text-gray-800 hover:bg-gray-200/80'
-                                          : editable 
-                                            ? 'border-gray-200 bg-white text-gray-700 hover:bg-blue-50/50'
-                                            : 'border-gray-200 bg-gray-50 text-gray-500'
-                                      }`}
-                                      style={{
-                                        backgroundColor: cell.backgroundColor || undefined,
-                                        padding: 0,
-                                        minWidth: isVertical ? '28px' : '40px',
+                        {tableData.length === 0 ? (
+                          <tbody><tr><td className="p-12 text-center text-gray-500">La tabla está vacía.</td></tr></tbody>
+                        ) : (() => {
+                          // Separar filas de encabezado (sticky) y filas de cuerpo
+                          const renderCell = (cell: TableCell, cellIndex: number, row: TableRow) => {
+                            if ((cell.rowSpan ?? 1) <= 0 || (cell.colSpan ?? 1) <= 0) return null;
+                            const isVertical = cell.textOrientation === 'vertical';
+                            const editable = isCellEditable(cell);
+                            return (
+                              <td
+                                key={cell.id}
+                                className={`border relative align-top ${editable ? 'cursor-cell' : 'cursor-not-allowed'} ${
+                                  cell.isHeader
+                                    ? 'border-gray-400 bg-[#e8f0f8] font-bold text-gray-800'
+                                    : editable
+                                      ? 'border-gray-300 bg-white text-gray-700 hover:bg-blue-50/50'
+                                      : 'border-gray-300 bg-gray-50 text-gray-500'
+                                }`}
+                                style={{ backgroundColor: cell.backgroundColor || undefined, padding: 0, minWidth: isVertical ? '28px' : '40px', minHeight: '28px' }}
+                                rowSpan={cell.rowSpan}
+                                colSpan={cell.colSpan}
+                                onDoubleClick={() => {
+                                  if (!editable) return;
+                                  setModalCell({ id: cell.id, content: cell.content || '', isEditable: true });
+                                  setEditContent(cell.content || '');
+                                }}
+                              >
+                                <div
+                                  className="w-full h-full px-1 py-0.5 flex justify-start text-left"
+                                  style={{
+                                    writingMode: isVertical ? 'vertical-rl' : 'horizontal-tb',
+                                    transform: isVertical ? 'rotate(180deg)' : 'none',
+                                    alignItems: 'flex-start',
+                                    maxHeight: isVertical ? '100px' : 'none',
+                                    whiteSpace: isVertical ? 'nowrap' : 'pre-wrap',
+                                    overflow: 'hidden',
+                                    lineHeight: '1.15',
+                                    fontSize: isVertical ? '9px' : '11px',
+                                    minHeight: '24px',
+                                  }}
+                                >
+                                  {editingCell === cell.id ? (
+                                    <Textarea
+                                      value={editContent}
+                                      onChange={(e) => setEditContent(e.target.value)}
+                                      autoFocus
+                                      onBlur={saveEdit}
+                                      className="w-full min-h-[50px] p-1 text-xs resize-y"
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); saveEdit(); }
+                                        if (e.key === "Escape") cancelEdit();
                                       }}
-                                      rowSpan={cell.rowSpan}
-                                      colSpan={cell.colSpan}
-                                      onDoubleClick={() => {
-                                        if (!editable) return;
-                                        setModalCell({ id: cell.id, content: cell.content || '', isEditable: true })
-                                        setEditContent(cell.content || '')
-                                      }}
-                                    >
-                                      <div
-                                        className="w-full h-full px-1 py-0.5 flex justify-start text-left"
-                                        style={{
-                                          writingMode: isVertical ? 'vertical-rl' : 'horizontal-tb',
-                                          transform: isVertical ? 'rotate(180deg)' : 'none',
-                                          alignItems: 'flex-start',
-                                          maxHeight: isVertical ? '100px' : 'none',
-                                          whiteSpace: isVertical ? 'nowrap' : 'pre-wrap',
-                                          overflow: 'hidden',
-                                          lineHeight: '1.15',
-                                          fontSize: isVertical ? '9px' : '11px',
-                                        }}
-                                      >
-                                        {editingCell === cell.id ? (
-                                          <Textarea
-                                            value={editContent}
-                                            onChange={(e) => setEditContent(e.target.value)}
-                                            autoFocus
-                                            onBlur={saveEdit}
-                                            className="w-full min-h-[50px] p-1 text-xs resize-y"
-                                            onKeyDown={(e) => {
-                                              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); saveEdit(); }
-                                              if (e.key === "Escape") cancelEdit();
-                                            }}
-                                          />
-                                        ) : (
-                                          <div className="whitespace-pre-wrap break-words w-full" style={{ wordBreak: 'break-word', lineHeight: '1.15' }}>
-                                            {cell.content || <span className="opacity-0">.</span>}
-                                          </div>
-                                        )}
-                                      </div>
+                                    />
+                                  ) : (
+                                    <div className="whitespace-pre-wrap break-words w-full" style={{ wordBreak: 'break-word', lineHeight: '1.15' }}>
+                                      {getDisplayContent(row.cells, cellIndex) || <span className="opacity-0">.</span>}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          };
+
+                          const isHeaderRow = (row: TableRow) =>
+                            row.cells.some(c => c.isHeader && (c.rowSpan ?? 1) > 0 && (c.colSpan ?? 1) > 0);
+                          const hasVisibleCells = (row: TableRow) =>
+                            row.cells.some(c => (c.rowSpan ?? 1) > 0 && (c.colSpan ?? 1) > 0);
+
+                          const theadRows = tableData.filter(r => isHeaderRow(r) && hasVisibleCells(r));
+                          const tbodyRows = tableData.filter(r => !isHeaderRow(r) && hasVisibleCells(r));
+
+                          return (
+                            <>
+                              {theadRows.length > 0 && (
+                                <thead className="sticky top-0 z-10 shadow-sm">
+                                  {theadRows.map((row) => (
+                                    <tr key={row.id}>
+                                      {row.cells.map((cell, cellIndex) => renderCell(cell, cellIndex, row))}
+                                    </tr>
+                                  ))}
+                                </thead>
+                              )}
+                              <tbody>
+                                {tbodyRows.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={100} className="text-center text-gray-400 italic py-6 border border-gray-200 bg-gray-50">
+                                      Sin filas de datos — la comisión no ha añadido contenido aún
                                     </td>
-                                  )
-                                })}
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
+                                  </tr>
+                                ) : (
+                                  tbodyRows.map((row) => (
+                                    <tr key={row.id} className="hover:bg-blue-50/30">
+                                      {row.cells.map((cell, cellIndex) => renderCell(cell, cellIndex, row))}
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </>
+                          );
+                        })()}
                       </table>
                     </div>
                   </CardContent>
@@ -802,7 +589,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
           )}
         </main>
 
-        {/* Modal de edición */}
+        {/* Modal de ediciÃ³n */}
         {modalCell && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setModalCell(null)}>
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4" onClick={(e) => e.stopPropagation()}>

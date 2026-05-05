@@ -178,6 +178,13 @@ export default function AdminDashboard() {
       color: "bg-purple-500",
     },
     {
+      title: "Cronograma Institucional",
+      description: "Crear y gestionar el calendario de actividades para docentes y personal",
+      icon: Calendar,
+      href: "/dashboard/admin/cronograma",
+      color: "bg-blue-600",
+    },
+    {
       title: "Planificación Académica",
       description: "Gestionar planificación Académica ",
       icon: ClipboardList,

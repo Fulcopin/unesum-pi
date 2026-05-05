@@ -101,15 +101,7 @@ exports.getSyllabusComision = async (req, res) => {
       });
     }
 
-    // 3. Buscar en syllabus_comision_academica por periodo (genérico, cualquier asignatura)
-    if (!syllabus && periodoValues.length > 0) {
-      syllabus = await SyllabusComisionAcademica.findOne({
-        where: { periodo: { [Op.in]: periodoValues } },
-        order: [['created_at', 'DESC']]
-      });
-    }
-
-    // 4. Buscar en tabla general syllabi por asignatura_id + periodo
+    // 3. Buscar en tabla general syllabi por asignatura_id + periodo
     if (!syllabus && periodoValues.length > 0) {
       syllabus = await Syllabus.findOne({
         where: {
@@ -121,7 +113,7 @@ exports.getSyllabusComision = async (req, res) => {
       });
     }
 
-    // 5. Buscar en tabla general syllabi solo por asignatura_id
+    // 4. Buscar en tabla general syllabi solo por asignatura_id
     if (!syllabus) {
       syllabus = await Syllabus.findOne({
         where: { asignatura_id: asignatura_id },
@@ -130,26 +122,10 @@ exports.getSyllabusComision = async (req, res) => {
       });
     }
 
-    // 6. Buscar en tabla general syllabi por periodo (cualquier asignatura)
-    if (!syllabus && periodoValues.length > 0) {
-      syllabus = await Syllabus.findOne({
-        where: { periodo: { [Op.in]: periodoValues } },
-        order: [['createdAt', 'DESC']],
-        paranoid: false
-      });
-    }
-
-    // 7. Último recurso: cualquier syllabus de la comisión que exista
-    if (!syllabus) {
-      syllabus = await SyllabusComisionAcademica.findOne({
-        order: [['created_at', 'DESC']]
-      });
-    }
-
     if (!syllabus) {
       return res.status(404).json({ 
         success: false, 
-        message: 'No se encontró ningún syllabus. La comisión académica debe subir primero un syllabus.',
+        message: 'La comisión académica aún no ha subido un syllabus para tu asignatura. Contacta a la comisión académica.',
         debug: { asignatura_id, periodo, periodoValues }
       });
     }
@@ -262,25 +238,8 @@ exports.getProgramaComision = async (req, res) => {
       } catch (e) { console.error('JSON fallback error:', e.message); }
     }
 
-    // 4. Fallback: buscar por periodo columna (cualquier asignatura)
-    if (!programa && periodoValues.length > 0) {
-      programa = await ProgramasAnaliticos.findOne({
-        where: {
-          periodo: { [Op.in]: periodoValues }
-        },
-        order: [['createdAt', 'DESC']]
-      });
-    }
-
-    // 5. Último recurso: cualquier programa en la BD
     if (!programa) {
-      programa = await ProgramasAnaliticos.findOne({
-        order: [['createdAt', 'DESC']]
-      });
-    }
-
-    if (!programa) {
-      return res.status(404).json({ success: false, message: 'No se encontró programa analítico para esta asignatura/periodo' });
+      return res.status(404).json({ success: false, message: 'La comisión académica aún no ha subido un programa analítico para tu asignatura. Contacta a la comisión académica.' });
     }
 
     // El campo real en la tabla es datos_tabla (JSONB)

@@ -371,6 +371,7 @@ export default function RegisterPage() {
                 </Link>
               </div>
             </form>
+            <p className="mt-4 text-center text-xs text-gray-300">by apf</p>
           </CardContent>
         </Card>
       </div>

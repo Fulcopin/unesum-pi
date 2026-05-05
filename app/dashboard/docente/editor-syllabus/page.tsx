@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -81,6 +81,8 @@ export default function DocenteEditorSyllabusPage() {
   const [hasDocenteVersion, setHasDocenteVersion] = useState(false)
   const [asignaturasDisponibles, setAsignaturasDisponibles] = useState<any[]>([])
   const [selectedAsignaturaId, setSelectedAsignaturaId] = useState<string>('')
+  const [periodoAutoSyncMsg, setPeriodoAutoSyncMsg] = useState<string | null>(null)
+  const isAutoSyncingPeriod = useRef(false)
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'
 
@@ -144,6 +146,7 @@ export default function DocenteEditorSyllabusPage() {
   // Cargar syllabus cuando cambia el periodo o la asignatura seleccionada
   useEffect(() => {
     if (!selectedPeriod || !profesorInfo) return
+    if (isAutoSyncingPeriod.current) return  // ignorar re-render causado por auto-sync de periodo
     loadSyllabus()
   }, [selectedPeriod, profesorInfo, selectedAsignaturaId])
 
@@ -177,7 +180,8 @@ export default function DocenteEditorSyllabusPage() {
         console.log('No hay versión propia del docente, buscando la de comisión...') 
       }
 
-      // 2. Buscar syllabus de la comisión
+      // 2. Buscar syllabus de la comisión (el backend buscará por asignatura+periodo y si no encuentra,
+      //    retorna el más reciente para esa asignatura — con su período real incluido en la respuesta)
       try {
         const comisionRes = await apiRequest(`/docente-editor/syllabus/comision?asignatura_id=${asignaturaId}&periodo=${selectedPeriod}`)
         if (comisionRes.success && comisionRes.data?.datos_syllabus) {
@@ -186,6 +190,21 @@ export default function DocenteEditorSyllabusPage() {
           processSyllabusData(datos)
           setSyllabusComisionId(comisionRes.data.id)
           setHasDocenteVersion(false)
+          // Auto-sincronizar el selector de periodo con el periodo real del syllabus cargado
+          const periodoCargado = comisionRes.data.periodo
+          if (periodoCargado) {
+            const matched = periodos.find((p: any) =>
+              String(p.id) === String(periodoCargado) || p.nombre === periodoCargado
+            )
+            if (matched && String(matched.id) !== selectedPeriod) {
+              isAutoSyncingPeriod.current = true
+              setSelectedPeriod(String(matched.id))
+              setPeriodoAutoSyncMsg(`Periodo ajustado a "${matched.nombre}" (periodo del syllabus subido para tu asignatura)`)
+              setTimeout(() => { isAutoSyncingPeriod.current = false }, 200)
+            } else {
+              setPeriodoAutoSyncMsg(null)
+            }
+          }
           setLoading(false)
           return
         }
@@ -193,23 +212,7 @@ export default function DocenteEditorSyllabusPage() {
         console.log('No se encontró syllabus de comisión:', e.message)
       }
 
-      // 3. Buscar en la tabla general de syllabi sin filtrar periodo
-      try {
-        const generalRes = await apiRequest(`/docente-editor/syllabus/comision?asignatura_id=${asignaturaId}&periodo=`)
-        if (generalRes.success && generalRes.data?.datos_syllabus) {
-          let datos = generalRes.data.datos_syllabus
-          if (typeof datos === 'string') datos = JSON.parse(datos)
-          processSyllabusData(datos)
-          setSyllabusComisionId(generalRes.data.id)
-          setHasDocenteVersion(false)
-          setLoading(false)
-          return
-        }
-      } catch (e: any) {
-        console.log('No se encontró syllabus general:', e.message)
-      }
-
-      setError("No se encontró syllabus para tu asignatura. La comisión académica debe subir el syllabus primero desde el Editor de Syllabus.")
+      setError("La comisión académica aún no ha subido un syllabus para tu asignatura. Contacta a la comisión académica.")
     } catch (e: any) {
       setError(e.message || "Error al cargar syllabus")
     } finally {
@@ -508,28 +511,53 @@ export default function DocenteEditorSyllabusPage() {
         }),
         new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
       ]);
-      doc.addImage(logoImg, 'PNG', marginL, 3, 12, 12);
+      doc.addImage(logoImg, 'PNG', marginL, 2, 16, 16);
     } catch { /* logo no disponible */ }
 
     // --- ENCABEZADO ---
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 6, { align: 'center' });
-    doc.setFontSize(8);
-    doc.text('SYLLABUS DE ASIGNATURA', pageWidth / 2, 11, { align: 'center' });
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    doc.text(syllabusData.name || '', pageWidth / 2, 15, { align: 'center' });
+    doc.setTextColor(17, 17, 17);
+    doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 8, { align: 'center' });
 
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(60, 60, 60);
+    doc.text('Creada mediante registro Oficial 261 del 7 de febrero del 2001', pageWidth / 2, 12.5, { align: 'center' });
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(17, 17, 17);
+    doc.text('SYLLABUS DE LA ASIGNATURA', pageWidth / 2, 17, { align: 'center' });
+
+    // Línea divisoria
+    doc.setDrawColor(25, 50, 95);
+    doc.setLineWidth(0.6);
+    doc.line(marginL, 19.5, marginL + contentWidth, 19.5);
+
+    // Sublinea: asignatura • Periodo • Docente
+    const asignaturaNombreHeader = asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre || syllabusData.name || '';
     const periodoObj = periodos.find((p: any) => String(p.id) === String(selectedPeriod));
     const periodoNombre = periodoObj?.nombre || '';
-    if (periodoNombre) {
-      doc.setFont('helvetica', 'italic');
-      doc.text(`Periodo Académico: ${periodoNombre}`, pageWidth / 2, 19, { align: 'center' });
-      doc.setFont('helvetica', 'normal');
+    const docenteNombreHeader = profesorInfo ? `${profesorInfo.nombres || ''} ${profesorInfo.apellidos || ''}`.trim() : '';
+    const subParts = [asignaturaNombreHeader, periodoNombre ? `Periodo: ${periodoNombre}` : '', docenteNombreHeader].filter(Boolean);
+    const subLineTxt = subParts.join('  •  ');
+
+    if (subLineTxt) {
+      doc.setFillColor(237, 242, 250);
+      doc.rect(marginL, 20, contentWidth, 6, 'F');
+      doc.setDrawColor(25, 50, 95);
+      doc.setLineWidth(0.3);
+      doc.rect(marginL, 20, contentWidth, 6, 'D');
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(25, 50, 95);
+      doc.text(subLineTxt, pageWidth / 2, 23.5, { align: 'center', maxWidth: contentWidth - 4 });
     }
 
-    let currentY = periodoNombre ? 23 : 19;
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    let currentY = subLineTxt ? 28 : 23;
 
     const isFirstSectionTab = (title: string) => {
       const t = title.toUpperCase();
@@ -538,10 +566,11 @@ export default function DocenteEditorSyllabusPage() {
 
     for (const tab of syllabusData.tabs) {
       if (!tab.rows || tab.rows.length === 0) continue;
+      // Omitir el tab VISADO del template — el VISADO se genera al final con los QR reales
+      if (tab.title.trim().toUpperCase() === 'VISADO') continue;
 
       const isEstructuraSectionPreCheck = tab.title.toUpperCase().includes('ESTRUCTURA') || tab.title.toUpperCase().includes('ASIGNATURA');
       const minSpace = isEstructuraSectionPreCheck ? 80 : 25;
-      if (currentY + minSpace > pageHeight - 10) { doc.addPage(); currentY = 10; }
 
       const titleStartY = currentY;
 
@@ -1000,6 +1029,12 @@ export default function DocenteEditorSyllabusPage() {
           {hasDocenteVersion && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
               Estás editando tu versión guardada del syllabus.
+            </div>
+          )}
+
+          {periodoAutoSyncMsg && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-800">
+              ⚠️ {periodoAutoSyncMsg}
             </div>
           )}
 

@@ -673,6 +673,8 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
       const todasLasFilas = Array.from(htmlDoc.querySelectorAll("tr"));
       console.log("Filas HTML encontradas:", todasLasFilas.length);
 
+      let lastKey = ''; // Para acumular filas de continuación (rowspan)
+
       todasLasFilas.forEach((tr, idx) => {
         const celdas = Array.from(tr.querySelectorAll("td, th"));
         const textos = celdas.map(td => (td.textContent || "").trim());
@@ -697,17 +699,28 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
           const c2 = textos[2].toUpperCase();
           if (c0.length >= 2 && c0.length < 80 && textos[1].length > 0) {
             if (!wordData[c0]) wordData[c0] = textos[1];
+            lastKey = c0;
           }
           if (c2.length >= 2 && c2.length < 80 && textos[3].length > 0) {
             if (!wordData[c2]) wordData[c2] = textos[3];
           }
         }
         // Fila con 2 celdas: clave | valor
-        else if (textos.length === 2 && textos[0].length >= 2 && textos[0].length < 80) {
-          const clave = textos[0].toUpperCase();
-          if (textos[1].length > 0 && !wordData[clave]) {
-            wordData[clave] = textos[1];
+        else if (textos.length === 2) {
+          if (textos[0].length >= 2 && textos[0].length < 80) {
+            const clave = textos[0].toUpperCase();
+            if (textos[1].length > 0 && !wordData[clave]) {
+              wordData[clave] = textos[1];
+            }
+            if (textos[1].length > 0) lastKey = clave;
+          } else if (textos[0].trim().length === 0 && textos[1].trim().length > 0 && lastKey) {
+            // Fila de continuación (primera celda vacía por rowspan) — acumular en la clave anterior
+            wordData[lastKey] = (wordData[lastKey] || '') + '\n' + textos[1].trim();
           }
+        }
+        // Fila con 1 celda: continuación de rowspan de la clave anterior
+        else if (textos.length === 1 && textos[0].trim().length > 0 && lastKey) {
+          wordData[lastKey] = (wordData[lastKey] || '') + '\n' + textos[0].trim();
         }
         // Fila con 3 celdas: puede ser seccion | sub-header | valor
         // Ejemplo: BIBLIOGRAFÍA - FUENTES DE CONSULTA | BIBLIOGRAFÍA BÁSICA | B.B.1 Nederr...
@@ -715,8 +728,13 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
         else if (textos.length === 3) {
           const c0 = textos[0].toUpperCase();
           const c1 = textos[1].toUpperCase();
-          if (c0.length >= 2 && c0.length < 80 && !wordData[c0]) {
-            wordData[c0] = textos.slice(1).filter(t => t.length > 0).join(" | ");
+          if (c0.length >= 2 && c0.length < 80) {
+            if (!wordData[c0]) wordData[c0] = textos.slice(1).filter(t => t.length > 0).join(" | ");
+            if (textos.slice(1).some(t => t.length > 0)) lastKey = c0;
+          } else if (c0.trim().length === 0 && lastKey) {
+            // Fila de continuación con 3 celdas (primera vacía por rowspan)
+            const cont = textos.slice(1).filter(t => t.length > 0).join(" | ");
+            if (cont) wordData[lastKey] = (wordData[lastKey] || '') + '\n' + cont;
           }
           // Si la segunda celda parece un sub-header (texto corto, < 60 chars) y la tercera es contenido
           // guardar tambien la sub-clave con su valor directo
@@ -972,6 +990,44 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
               }
             }
             continue; // Ya procesamos los resultados, pasar a la siguiente etiqueta
+          }
+
+          // =============================================
+          // CASO ESPECIAL: COMPETENCIAS con rowSpan > 1 o múltiples líneas
+          // =============================================
+          const esCompetencias = etqNorm.includes("COMPETENCIA");
+          if (esCompetencias && celda.rowSpan > 1) {
+            const datoOriginal = String(dato);
+            // Separar por saltos de línea o por marcadores de tipo "competencia N:"
+            let partesComp = datoOriginal.split(/\n/).map(l => l.trim()).filter(l => l.length > 3);
+            if (partesComp.length <= 1) {
+              partesComp = datoOriginal.split(/(?=(?:Genéricas?|Específicas?|General|Instrumental|Sistémica)\s*:)/i).map(p => p.trim()).filter(p => p.length > 3);
+            }
+            if (partesComp.length > 0) {
+              for (let j = i + 1; j < fila.cells.length; j++) {
+                const celdaDest = fila.cells[j];
+                if (celdaDest.isEditable && (!celdaDest.content || celdaDest.content.trim().length === 0) && celdaDest.rowSpan !== 0) {
+                  processedRows[rowIdx].cells[j] = { ...celdaDest, content: partesComp[0].trim() };
+                  celdasLlenadas++;
+                  matchesOk.push(etiqueta + " (comp 1)");
+                  break;
+                }
+              }
+              for (let ri = 1; ri < partesComp.length && ri < celda.rowSpan; ri++) {
+                const filaAbajo = processedRows[rowIdx + ri];
+                if (!filaAbajo) break;
+                for (let j = 0; j < filaAbajo.cells.length; j++) {
+                  const celdaDest = filaAbajo.cells[j];
+                  if (celdaDest.isEditable && (!celdaDest.content || celdaDest.content.trim().length === 0) && celdaDest.rowSpan !== 0) {
+                    processedRows[rowIdx + ri].cells[j] = { ...celdaDest, content: partesComp[ri].trim() };
+                    celdasLlenadas++;
+                    matchesOk.push(etiqueta + " (comp " + (ri + 1) + ")");
+                    break;
+                  }
+                }
+              }
+            }
+            continue;
           }
 
           // Buscar celda vacia a la DERECHA en la misma fila SOLAMENTE

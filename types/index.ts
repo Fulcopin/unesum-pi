@@ -1,5 +1,5 @@
 // User roles in the academic system
-export type UserRole = "administrador" | "comision" | "direccion" | "decano" | "subdecano" | "docente" | "estudiante"| "profesor"| "comision_academica"
+export type UserRole = "administrador" | "comision" | "coordinador" | "direccion" | "decano" | "subdecano" | "docente" | "estudiante"| "profesor"| "comision_academica"
 
 // User interface
 export interface User {

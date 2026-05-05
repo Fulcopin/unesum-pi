@@ -38,6 +38,7 @@ const ROL_A_ETAPA = {
   profesor:            'docente',
   comision:            'coordinador',
   comision_academica:  'coordinador',
+  coordinador:         'coordinador',
   decano:              'decano',
   subdecano:           'decano',
   direccion:           'director_academico',
@@ -412,6 +413,23 @@ exports.pendientes = async (req, res) => {
     const tiposABuscar = tipo ? [tipo] : Array.from(TIPOS_VALIDOS);
     const { periodo, carrera_id, nivel_id } = req.query;
 
+    // Filtrado automático por scope del rol:
+    // coordinador -> solo su carrera; decano/subdecano -> solo su facultad
+    let scopeCarreraId = carrera_id || null;
+    let scopeFacultadId = null;
+    if (!scopeCarreraId && (rolActivo === 'coordinador' || rolActivo === 'comision' || rolActivo === 'comision_academica')) {
+      scopeCarreraId = req.user?.carrera_id ? String(req.user.carrera_id) : null;
+    }
+    if (rolActivo === 'decano' || rolActivo === 'subdecano') {
+      if (req.user?.facultad_id) {
+        scopeFacultadId = String(req.user.facultad_id);
+      } else if (req.user?.carrera_id) {
+        // Buscar facultad_id a través de la carrera del usuario
+        const carreraUser = await Carrera.findByPk(req.user.carrera_id, { include: [{ model: Facultad, as: 'facultad' }] });
+        if (carreraUser?.facultad_id) scopeFacultadId = String(carreraUser.facultad_id);
+      }
+    }
+
     const resultados = [];
 
     for (const t of tiposABuscar) {
@@ -446,7 +464,13 @@ exports.pendientes = async (req, res) => {
       }
 
       for (const d of docs) {
-        if (carrera_id && d.asignatura?.carrera_id?.toString() !== carrera_id.toString()) continue;
+        // Scope: filtrar por carrera del coordinador
+        if (scopeCarreraId && d.asignatura?.carrera_id?.toString() !== scopeCarreraId.toString()) continue;
+        // Scope: filtrar por facultad del decano
+        if (scopeFacultadId) {
+          const facId = d.asignatura?.carrera?.facultad?.id;
+          if (!facId || String(facId) !== scopeFacultadId) continue;
+        }
         if (nivel_id && d.asignatura?.nivel_id?.toString() !== nivel_id.toString()) continue;
 
         const { porEtapa } = await firmasDeDocumento(t, d.id);
@@ -517,8 +541,24 @@ exports.listar = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Tipo inválido' });
     }
 
+    const rolActivo = req.user?.rol;
     const tiposABuscar = tipo ? [tipo] : Array.from(TIPOS_VALIDOS);
     const { periodo, carrera_id, nivel_id } = req.query;
+
+    // Filtrado automático por scope del rol
+    let scopeCarreraId = carrera_id || null;
+    let scopeFacultadId = null;
+    if (!scopeCarreraId && (rolActivo === 'coordinador' || rolActivo === 'comision' || rolActivo === 'comision_academica')) {
+      scopeCarreraId = req.user?.carrera_id ? String(req.user.carrera_id) : null;
+    }
+    if (rolActivo === 'decano' || rolActivo === 'subdecano') {
+      if (req.user?.facultad_id) {
+        scopeFacultadId = String(req.user.facultad_id);
+      } else if (req.user?.carrera_id) {
+        const carreraUser = await Carrera.findByPk(req.user.carrera_id, { include: [{ model: Facultad, as: 'facultad' }] });
+        if (carreraUser?.facultad_id) scopeFacultadId = String(carreraUser.facultad_id);
+      }
+    }
 
     const resultados = [];
 
@@ -553,7 +593,13 @@ exports.listar = async (req, res) => {
       }
 
       for (const d of docs) {
-        if (carrera_id && d.asignatura?.carrera_id?.toString() !== carrera_id.toString()) continue;
+        // Scope: coordinador solo ve su carrera
+        if (scopeCarreraId && d.asignatura?.carrera_id?.toString() !== scopeCarreraId.toString()) continue;
+        // Scope: decano solo ve su facultad
+        if (scopeFacultadId) {
+          const facId = d.asignatura?.carrera?.facultad?.id;
+          if (!facId || String(facId) !== scopeFacultadId) continue;
+        }
         if (nivel_id && d.asignatura?.nivel_id?.toString() !== nivel_id.toString()) continue;
 
         const { porEtapa } = await firmasDeDocumento(t, d.id);

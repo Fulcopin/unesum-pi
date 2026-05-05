@@ -42,6 +42,7 @@ const ADMIN_TABLE_ROLES = new Set([
   'administrador',
   'comision_academica',
   'comision',
+  'coordinador',
   'direccion',
   'decano',
   'subdecano',
