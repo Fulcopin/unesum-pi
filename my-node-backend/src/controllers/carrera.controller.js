@@ -10,28 +10,19 @@ exports.getAll = async (req, res) => {
     const user = req.user;
     let whereClause = {};
     
-    // Si es comision_academica o comision, filtrar por su facultad
+    // Si es comision_academica o comision, filtrar por su facultad (si tiene)
     if (user.rol === 'comision_academica' || user.rol === 'comision') {
-      if (!user.facultad) {
-        return res.status(400).json({
-          success: false,
-          message: 'El usuario no tiene una facultad asignada'
+      if (user.facultad) {
+        // Buscar el ID de la facultad por nombre
+        const facultad = await Facultad.findOne({
+          where: { nombre: user.facultad }
         });
+        if (facultad) {
+          whereClause.facultad_id = facultad.id;
+        }
+        // Si no se encuentra la facultad, devolver todas igualmente
       }
-      
-      // Buscar el ID de la facultad por nombre
-      const facultad = await Facultad.findOne({
-        where: { nombre: user.facultad }
-      });
-      
-      if (!facultad) {
-        return res.status(404).json({
-          success: false,
-          message: 'Facultad no encontrada'
-        });
-      }
-      
-      whereClause.facultad_id = facultad.id;
+      // Si no tiene facultad asignada, se devuelven todas las carreras
     }
     
     const carreras = await Carrera.findAll({

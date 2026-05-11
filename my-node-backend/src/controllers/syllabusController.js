@@ -387,12 +387,27 @@ exports.update = async (req, res) => {
       return res.status(404).json({ success: false, message: `Syllabus con ID ${id} no encontrado` });
     }
 
-    // ¡VERIFICACIÓN DE PERMISOS! Solo el creador o un admin puede editar.
-    if (syllabus.usuario_id !== userId && userRol !== 'administrador') {
+    // ¡VERIFICACIÓN DE PERMISOS!
+    const isAdmin = ['administrador', 'admin'].includes(userRol);
+    const isProfesor = ['profesor', 'docente'].includes(userRol);
+    const isCreator = String(syllabus.usuario_id) === String(userId);
+    // Professors can edit unclaimed templates (profesor_id IS NULL) or their own
+    const isProfesorAllowed = isProfesor && (syllabus.profesor_id === null || String(syllabus.profesor_id) === String(userId));
+
+    if (!isAdmin && !isCreator && !isProfesorAllowed) {
         return res.status(403).json({ success: false, message: 'No tienes permiso para editar este syllabus.' });
     }
-    
-    await syllabus.update(req.body);
+
+    // When a professor saves for the first time, stamp their id and asignatura
+    const updateData = { ...req.body };
+    if (isProfesor && !syllabus.profesor_id) {
+      updateData.profesor_id = userId;
+      if (!syllabus.asignatura_id && req.user && req.user.asignatura_id) {
+        updateData.asignatura_id = req.user.asignatura_id;
+      }
+    }
+
+    await syllabus.update(updateData);
     
     return res.status(200).json({
       success: true,

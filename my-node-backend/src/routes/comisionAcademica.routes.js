@@ -25,6 +25,27 @@ router.get('/carreras/:carrera_id/asignaturas',
   comisionAcademicaController.obtenerAsignaturasCarrera
 );
 
+// 👨‍🏫 DOCENTES POR ASIGNATURA CON ESTADO DE ENTREGA (GET /api/comision-academica/docentes-por-asignatura?periodo=X)
+router.get('/docentes-por-asignatura',
+  authenticate,
+  authorize(['administrador', 'comision_academica', 'comision']),
+  comisionAcademicaController.obtenerDocentesPorAsignatura
+);
+
+// 📄 VER SYLLABUS DE UN DOCENTE (solo lectura para comisión)
+router.get('/syllabus-docente/:id',
+  authenticate,
+  authorize(['administrador', 'comision_academica', 'comision']),
+  comisionAcademicaController.verSyllabusDocente
+);
+
+// 📄 VER PROGRAMA ANALÍTICO DE UN DOCENTE (solo lectura para comisión)
+router.get('/programa-docente/:id',
+  authenticate,
+  authorize(['administrador', 'comision_academica', 'comision']),
+  comisionAcademicaController.verProgramaDocente
+);
+
 // =========================================================================
 // CRUD SYLLABUS COMISIÓN ACADÉMICA
 // =========================================================================

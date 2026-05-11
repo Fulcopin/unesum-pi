@@ -60,7 +60,7 @@ export function MainHeader() {
 
   if (!mounted) {
     return (
-      <header className="bg-emerald-700 text-white px-6 py-3 shadow-lg">
+      <header className="sticky top-0 z-50 bg-gradient-to-r from-emerald-950 via-emerald-800 to-emerald-700 text-white px-6 py-3 shadow-lg border-b border-emerald-600/20">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/dashboard" className="flex items-center gap-3">
@@ -83,7 +83,7 @@ export function MainHeader() {
   const tieneVariosRoles = rolesDelUsuario.length > 1
 
   return (
-    <header className="bg-emerald-700 text-white px-6 py-3 shadow-lg">
+    <header className="sticky top-0 z-50 bg-gradient-to-r from-emerald-950 via-emerald-800 to-emerald-700 text-white px-6 py-3 shadow-lg border-b border-emerald-600/20">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/dashboard" className="flex items-center gap-3">

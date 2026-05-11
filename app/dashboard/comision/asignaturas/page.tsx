@@ -11,19 +11,22 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   BookOpen, 
-  FileText, 
-  Upload, 
   CheckCircle2, 
   XCircle, 
   School,
   GraduationCap,
-  List,
   AlertCircle,
   Plus,
   Calendar,
   Trash2,
   Pencil,
-  ArrowLeft
+  ArrowLeft,
+  Users,
+  ChevronDown,
+  ChevronRight as ChevronRightIcon,
+  ClipboardCheck,
+  ClipboardList,
+  Eye,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -65,6 +68,40 @@ type ConfirmEliminarState = {
   source?: string;
 };
 
+// ── Tipos para seguimiento de docentes ──────────────────────────────────────
+interface DocenteEstado {
+  profesor_id: number;
+  nombres: string;
+  apellidos: string;
+  email: string;
+  tiene_syllabus: boolean;
+  syllabus_id: number | null;
+  estado_syllabus: string | null;
+  tiene_programa: boolean;
+  programa_id: number | null;
+  estado_programa: string | null;
+}
+
+interface AsignaturaConDocentes {
+  id: number;
+  nombre: string;
+  codigo: string;
+  nivel: string;
+  docentes: DocenteEstado[];
+  stats: {
+    total_docentes: number;
+    con_syllabus: number;
+    con_programa: number;
+  };
+}
+
+interface SeguimientoData {
+  facultad: { id: number; nombre: string };
+  carrera: { id: number; nombre: string };
+  periodo: { id: string | number; nombre: string };
+  asignaturas: AsignaturaConDocentes[];
+}
+
 export default function AsignaturasComisionPage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -76,6 +113,12 @@ export default function AsignaturasComisionPage() {
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState<string>('');
   const [confirmEliminar, setConfirmEliminar] = useState<ConfirmEliminarState | null>(null);
   const [eliminando, setEliminando] = useState(false);
+  const [tabActivo, setTabActivo] = useState<'documentos' | 'seguimiento'>('documentos');
+
+  // Estado para seguimiento por docente
+  const [seguimiento, setSeguimiento] = useState<SeguimientoData | null>(null);
+  const [loadingSeguimiento, setLoadingSeguimiento] = useState(false);
+  const [expandedAsignaturas, setExpandedAsignaturas] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     cargarPeriodos();
@@ -85,6 +128,13 @@ export default function AsignaturasComisionPage() {
   useEffect(() => {
     cargarEstructura();
   }, [periodoSeleccionado]);
+
+  // Recargar seguimiento cuando cambia el periodo o el tab activo
+  useEffect(() => {
+    if (tabActivo === 'seguimiento' && periodoSeleccionado) {
+      cargarSeguimiento();
+    }
+  }, [tabActivo, periodoSeleccionado]);
 
   const cargarPeriodos = async () => {
     try {
@@ -227,6 +277,34 @@ export default function AsignaturasComisionPage() {
     } finally {
       setEliminando(false);
     }
+  };
+
+  const cargarSeguimiento = async () => {
+    if (!periodoSeleccionado) return;
+    setLoadingSeguimiento(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(
+        `${API_URL}/comision-academica/docentes-por-asignatura?periodo=${periodoSeleccionado}`,
+        { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+      );
+      if (!res.ok) throw new Error('Error al cargar seguimiento');
+      const data = await res.json();
+      setSeguimiento(data.data);
+    } catch (err: any) {
+      console.error('Error seguimiento:', err);
+    } finally {
+      setLoadingSeguimiento(false);
+    }
+  };
+
+  const toggleExpandAsignatura = (asigId: number) => {
+    setExpandedAsignaturas(prev => {
+      const next = new Set(prev);
+      if (next.has(asigId)) next.delete(asigId);
+      else next.add(asigId);
+      return next;
+    });
   };
 
   const cargarEstructura = async () => {
@@ -508,7 +586,21 @@ export default function AsignaturasComisionPage() {
       )}
 
       {/* Lista de Asignaturas Agrupadas por Nivel */}
-      {carreraActual && (
+      <Tabs value={tabActivo} onValueChange={(v) => setTabActivo(v as 'documentos' | 'seguimiento')}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="documentos" className="flex items-center gap-2">
+            <ClipboardList className="h-4 w-4" />
+            Plantillas Comisión
+          </TabsTrigger>
+          <TabsTrigger value="seguimiento" className="flex items-center gap-2">
+            <Users className="h-4 w-4" />
+            Seguimiento por Docente
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ── TAB 1: Gestión de documentos comisión ── */}
+        <TabsContent value="documentos">
+          {carreraActual && (
         <div className="space-y-4">
           {agruparPorNivel(carreraActual.asignaturas).map((grupo) => (
             <Card key={grupo.nivel}>
@@ -640,7 +732,221 @@ export default function AsignaturasComisionPage() {
             </Card>
           )}
         </div>
-      )}
+          )}
+        </TabsContent>
+
+        {/* ── TAB 2: Seguimiento por docente ── */}
+        <TabsContent value="seguimiento">
+          {!periodoSeleccionado ? (
+            <Card className="border-orange-200 bg-orange-50">
+              <CardContent className="flex items-center gap-3 py-6 text-orange-700">
+                <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                Seleccione un periodo académico para ver el seguimiento.
+              </CardContent>
+            </Card>
+          ) : loadingSeguimiento ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600 mx-auto mb-3" />
+                <p className="text-gray-500">Cargando seguimiento de docentes...</p>
+              </div>
+            </div>
+          ) : !seguimiento ? (
+            <Card>
+              <CardContent className="flex flex-col items-center gap-3 py-12 text-gray-500">
+                <Users className="h-12 w-12 text-gray-400" />
+                <p>No se pudo cargar el seguimiento.</p>
+                <Button onClick={cargarSeguimiento} variant="outline">Reintentar</Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {/* Resumen global */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                {(() => {
+                  const totalDocentes = seguimiento.asignaturas.reduce((s, a) => s + a.stats.total_docentes, 0);
+                  const docUnicos = new Set(seguimiento.asignaturas.flatMap(a => a.docentes.map(d => d.profesor_id))).size;
+                  const conSyllabus = seguimiento.asignaturas.reduce((s, a) => s + a.stats.con_syllabus, 0);
+                  const conPrograma = seguimiento.asignaturas.reduce((s, a) => s + a.stats.con_programa, 0);
+                  return (
+                    <>
+                      <Card className="border-blue-200 bg-blue-50">
+                        <CardContent className="pt-4 pb-3">
+                          <p className="text-xs text-blue-600 font-medium mb-1">Docentes (únicos)</p>
+                          <p className="text-3xl font-bold text-blue-700">{docUnicos}</p>
+                        </CardContent>
+                      </Card>
+                      <Card className="border-gray-200">
+                        <CardContent className="pt-4 pb-3">
+                          <p className="text-xs text-gray-500 font-medium mb-1">Asignaciones totales</p>
+                          <p className="text-3xl font-bold text-gray-700">{totalDocentes}</p>
+                        </CardContent>
+                      </Card>
+                      <Card className="border-emerald-200 bg-emerald-50">
+                        <CardContent className="pt-4 pb-3">
+                          <p className="text-xs text-emerald-600 font-medium mb-1">Syllabus entregados</p>
+                          <p className="text-3xl font-bold text-emerald-700">{conSyllabus}<span className="text-base font-normal text-emerald-500">/{totalDocentes}</span></p>
+                        </CardContent>
+                      </Card>
+                      <Card className="border-purple-200 bg-purple-50">
+                        <CardContent className="pt-4 pb-3">
+                          <p className="text-xs text-purple-600 font-medium mb-1">Programas entregados</p>
+                          <p className="text-3xl font-bold text-purple-700">{conPrograma}<span className="text-base font-normal text-purple-500">/{totalDocentes}</span></p>
+                        </CardContent>
+                      </Card>
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Asignaturas agrupadas por nivel */}
+              {(() => {
+                // Agrupar asignaturas del seguimiento por nivel
+                const grupos: Record<string, AsignaturaConDocentes[]> = {};
+                for (const asig of seguimiento.asignaturas) {
+                  const k = asig.nivel || 'Sin nivel';
+                  if (!grupos[k]) grupos[k] = [];
+                  grupos[k].push(asig);
+                }
+                const nivelesOrdenados = Object.keys(grupos).sort((a, b) => {
+                  if (a === 'Sin nivel') return 1;
+                  if (b === 'Sin nivel') return -1;
+                  const romanos: Record<string, number> = { I:1, II:2, III:3, IV:4, V:5, VI:6, VII:7, VIII:8, IX:9, X:10 };
+                  const num = (s: string) => { const m = s.match(/(\d+|[IVX]+)/i); if (!m) return 0; const v = m[1].toUpperCase(); return romanos[v] || parseInt(v) || 0; };
+                  return num(a) - num(b);
+                });
+
+                return nivelesOrdenados.map(nivel => (
+                  <Card key={nivel} className="overflow-hidden">
+                    <CardHeader className="bg-gradient-to-r from-emerald-50 to-teal-50 py-3">
+                      <CardTitle className="flex items-center gap-2 text-emerald-900 text-base">
+                        <GraduationCap className="h-4 w-4" />
+                        {nivel}
+                        <Badge variant="secondary" className="ml-1">{grupos[nivel].length} asignaturas</Badge>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      {grupos[nivel].map((asig) => {
+                        const expanded = expandedAsignaturas.has(asig.id);
+                        const todosListo = asig.stats.con_syllabus === asig.stats.total_docentes && asig.stats.con_programa === asig.stats.total_docentes;
+                        const ningunoDio = asig.stats.con_syllabus === 0 && asig.stats.con_programa === 0;
+                        const headerBg = todosListo ? 'bg-emerald-50' : ningunoDio && asig.stats.total_docentes > 0 ? 'bg-red-50' : 'bg-amber-50';
+
+                        return (
+                          <div key={asig.id} className="border-t first:border-t-0">
+                            {/* Fila-resumen de materia (clickeable para expandir) */}
+                            <button
+                              onClick={() => toggleExpandAsignatura(asig.id)}
+                              className={`w-full text-left px-5 py-4 flex items-center gap-4 hover:brightness-95 transition-all ${headerBg}`}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-semibold text-gray-900">{asig.nombre}</span>
+                                  <Badge variant="outline" className="text-xs">{asig.codigo}</Badge>
+                                </div>
+                                <div className="flex items-center gap-5 mt-2 text-sm">
+                                  <span className="flex items-center gap-1 text-blue-700">
+                                    <Users className="h-3.5 w-3.5" />
+                                    {asig.stats.total_docentes} docente{asig.stats.total_docentes !== 1 ? 's' : ''}
+                                  </span>
+                                  <span className={`flex items-center gap-1 ${asig.stats.con_syllabus === asig.stats.total_docentes && asig.stats.total_docentes > 0 ? 'text-emerald-700' : 'text-orange-600'}`}>
+                                    <ClipboardCheck className="h-3.5 w-3.5" />
+                                    Syllabus: {asig.stats.con_syllabus}/{asig.stats.total_docentes}
+                                  </span>
+                                  <span className={`flex items-center gap-1 ${asig.stats.con_programa === asig.stats.total_docentes && asig.stats.total_docentes > 0 ? 'text-purple-700' : 'text-orange-600'}`}>
+                                    <ClipboardList className="h-3.5 w-3.5" />
+                                    Programa: {asig.stats.con_programa}/{asig.stats.total_docentes}
+                                  </span>
+                                </div>
+                              </div>
+                              {/* Barra de progreso compacta */}
+                              {asig.stats.total_docentes > 0 && (
+                                <div className="hidden sm:flex flex-col gap-1 w-28 flex-shrink-0">
+                                  <div className="flex items-center gap-1 text-[10px] text-gray-500">
+                                    <span>S</span>
+                                    <div className="flex-1 h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                                      <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${(asig.stats.con_syllabus / asig.stats.total_docentes) * 100}%` }} />
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-[10px] text-gray-500">
+                                    <span>P</span>
+                                    <div className="flex-1 h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                                      <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${(asig.stats.con_programa / asig.stats.total_docentes) * 100}%` }} />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                              {expanded ? <ChevronDown className="h-4 w-4 text-gray-500 flex-shrink-0" /> : <ChevronRightIcon className="h-4 w-4 text-gray-500 flex-shrink-0" />}
+                            </button>
+
+                            {/* Panel expandido: lista de docentes */}
+                            {expanded && (
+                              <div className="bg-white border-t divide-y divide-gray-100">
+                                {asig.stats.total_docentes === 0 ? (
+                                  <div className="flex items-center gap-2 px-8 py-4 text-sm text-gray-400">
+                                    <Users className="h-4 w-4" />
+                                    No hay docentes asignados a esta materia
+                                  </div>
+                                ) : (
+                                  asig.docentes.map((doc) => (
+                                    <div key={doc.profesor_id} className="flex items-center gap-4 px-8 py-3">
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-medium text-gray-900 text-sm">{doc.nombres} {doc.apellidos}</p>
+                                        <p className="text-xs text-gray-400">{doc.email}</p>
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-wrap justify-end">
+                                        {/* Syllabus */}
+                                        {doc.tiene_syllabus ? (
+                                          <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-300 gap-1">
+                                            <CheckCircle2 className="h-3 w-3" /> Syllabus
+                                          </Badge>
+                                        ) : (
+                                          <Badge variant="outline" className="text-gray-400 gap-1">
+                                            <XCircle className="h-3 w-3" /> Sin syllabus
+                                          </Badge>
+                                        )}
+                                        {/* Programa */}
+                                        {doc.tiene_programa ? (
+                                          <Badge className="bg-purple-100 text-purple-800 border border-purple-300 gap-1">
+                                            <CheckCircle2 className="h-3 w-3" /> Programa
+                                          </Badge>
+                                        ) : (
+                                          <Badge variant="outline" className="text-gray-400 gap-1">
+                                            <XCircle className="h-3 w-3" /> Sin programa
+                                          </Badge>
+                                        )}
+                                        {/* Link para ver el syllabus del docente si existe */}
+                                        {doc.tiene_syllabus && doc.syllabus_id && (
+                                          <Link href={`/dashboard/comision/ver-syllabus-docente?id=${doc.syllabus_id}&profesor=${doc.profesor_id}`}>
+                                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-blue-600 hover:text-blue-800">
+                                              <Eye className="h-3 w-3 mr-1" /> Ver syllabus
+                                            </Button>
+                                          </Link>
+                                        )}
+                                        {doc.tiene_programa && doc.programa_id && (
+                                          <Link href={`/dashboard/comision/ver-programa-docente?id=${doc.programa_id}&profesor=${doc.profesor_id}`}>
+                                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-purple-600 hover:text-purple-800">
+                                              <Eye className="h-3 w-3 mr-1" /> Ver programa
+                                            </Button>
+                                          </Link>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                ));
+              })()}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Modal de confirmación de eliminación */}
       {confirmEliminar && (

@@ -52,6 +52,7 @@ const initProfesorAsignatura = require('./profesor_asignaturas');
 const initProfesorNivel = require('./profesor_niveles');
 const initProfesorParalelo = require('./profesor_paralelos');
 const initProfesorRol = require('./profesor_roles');
+const initComentarioDocumento = require('./ComentarioDocumento');
 
 
 // Inicializa el modelo Usuario
@@ -103,6 +104,7 @@ const ProfesorAsignatura = initProfesorAsignatura(sequelize, Sequelize.DataTypes
 const ProfesorNivel = initProfesorNivel(sequelize, Sequelize.DataTypes);
 const ProfesorParalelo = initProfesorParalelo(sequelize, Sequelize.DataTypes);
 const ProfesorRol = initProfesorRol(sequelize, Sequelize.DataTypes);
+const ComentarioDocumento = initComentarioDocumento(sequelize, Sequelize.DataTypes);
 
 
 // Definir relaciones
@@ -281,7 +283,10 @@ SyllabusDocente.belongsTo(Asignatura, { foreignKey: 'asignatura_id', as: 'asigna
 // Asociaciones ProgramaAnaliticoDocente
 ProgramaAnaliticoDocente.belongsTo(Profesor, { foreignKey: 'profesor_id', as: 'profesor' });
 Profesor.hasMany(ProgramaAnaliticoDocente, { foreignKey: 'profesor_id', as: 'programasDocente' });
+ProgramaAnaliticoDocente.belongsTo(Asignatura, { foreignKey: 'asignatura_id', as: 'asignatura' });
 
+// No hay FK reference en ComentarioDocumento (polimórfico), solo índices
+// ComentarioDocumento no necesita associations de Sequelize
 
 module.exports = {
   sequelize,
@@ -307,6 +312,7 @@ module.exports = {
   Malla,
   Rol,
   FirmaDocumento,
+  ComentarioDocumento,
   // Modelos de Programa Analítico
   PlantillaPrograma,
   SeccionPlantilla,

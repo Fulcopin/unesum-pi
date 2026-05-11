@@ -2070,6 +2070,8 @@ exports.getProgramasAsignados = async (req, res) => {
       return {
         id: programa.id,
         nombre: programa.nombre,
+        asignatura_id: programa.asignatura_id || null,
+        periodo: programa.periodo || null,
         plantilla: programa.plantilla ? {
           id: programa.plantilla.id,
           nombre: programa.plantilla.nombre

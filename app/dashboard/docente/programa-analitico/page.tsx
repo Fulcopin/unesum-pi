@@ -13,6 +13,8 @@ import { FormularioDinamico } from "@/components/programa-analitico/formulario-d
 interface ProgramaAnalitico {
   id: number
   nombre: string
+  asignatura_id?: number | null
+  periodo?: string | null
   datos_tabla: {
     datos_generales?: {
       carrera?: string
@@ -104,20 +106,22 @@ export default function DocenteProgramaAnaliticoPage() {
       setSaving(true)
       setError(null)
       const currentToken = token || getToken()
-      const profesorId = (user as any)?.profesor_id || user?.id
       
-      console.log('💾 Guardando contenido:', contenido)
+      console.log('💾 Guardando contenido en programa_analitico_docente:', contenido)
       
-      // Usar el nuevo endpoint que guarda en las tablas relacionales
-      const response = await fetch(`http://localhost:4000/api/programa-analitico/${programaId}/guardar-contenido`, {
+      // Guardar en programa_analitico_docente para que comisión lo vea
+      const response = await fetch('http://localhost:4000/api/docente-editor/programa/guardar', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${currentToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
-          contenido,
-          profesor_id: profesorId
+          asignatura_id: selectedPrograma?.asignatura_id ?? null,
+          periodo: selectedPrograma?.periodo ?? null,
+          nombre: selectedPrograma?.nombre || 'Programa Analítico',
+          datos_programa: contenido,
+          programa_comision_id: programaId
         })
       })
 

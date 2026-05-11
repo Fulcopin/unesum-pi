@@ -4,7 +4,7 @@ import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { FileCheck, Upload, Sparkles, GitCompare, FileText, BookOpen, School, Bot, Pen, QrCode } from "lucide-react"
+import { FileCheck, Upload, Sparkles, GitCompare, FileText, BookOpen, School, Bot, Pen, QrCode, Users } from "lucide-react"
 import Link from "next/link"
 
 export default function ComisionDashboard() {
@@ -48,6 +48,14 @@ export default function ComisionDashboard() {
       icon: School,
       href: "/dashboard/comision/asignaturas",
       color: "bg-indigo-500",
+      featured: true,
+    },
+    {
+      title: "Documentos de Docentes",
+      description: "Ve todos los syllabus y programas analíticos subidos por los docentes, organizados por materia y nivel",
+      icon: Users,
+      href: "/dashboard/comision/documentos-docentes",
+      color: "bg-teal-600",
       featured: true,
     },
     /*{

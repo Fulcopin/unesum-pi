@@ -26,6 +26,7 @@ const usuariosRoutes = require('./usuarios.routes');
 const rolRoutes = require('./rol.routes');
 const firmasRoutes = require('./firmas.routes');
 const cronogramaRoutes = require('./cronograma.routes');
+const comentariosRoutes = require('./comentarios.routes');
 const router = express.Router();
 
 module.exports = (app) => {
@@ -62,4 +63,5 @@ module.exports = (app) => {
   router.use('/roles', rolRoutes);
   router.use('/firmas', firmasRoutes);
   router.use('/cronograma', cronogramaRoutes);
+  router.use('/comentarios-documento', comentariosRoutes);
 };

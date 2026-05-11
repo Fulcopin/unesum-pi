@@ -5,7 +5,7 @@ import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { BookOpen, User, Calendar, FileText, FileSpreadsheet, FileCheck, Bot, Pen, QrCode, Printer, Eye } from "lucide-react"
+import { BookOpen, User, Calendar, FileText, FileSpreadsheet, FileCheck, Bot, Pen, QrCode, Printer, Eye, MessageSquare } from "lucide-react"
 import Link from "next/link"
 
 export default function DocenteDashboard() {
@@ -47,6 +47,19 @@ export default function DocenteDashboard() {
                   <div>
                     <p className="font-bold text-lg leading-tight">Ver e Imprimir mis documentos</p>
                     <p className="text-blue-200 text-sm mt-0.5">Lista de todos mis syllabus y programas analíticos con sus firmas QR — listos para imprimir</p>
+                  </div>
+                </div>
+              </Link>
+
+              {/* Mis Revisiones */}
+              <Link href="/dashboard/docente/mis-revisiones" className="sm:col-span-3">
+                <div className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white p-4 cursor-pointer transition-all shadow-md hover:shadow-lg flex items-center gap-4 group">
+                  <div className="bg-white/20 rounded-xl p-3 flex-shrink-0 group-hover:bg-white/30 transition-colors">
+                    <MessageSquare className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-base leading-tight">Revisiones y Comentarios de la Comisión</p>
+                    <p className="text-indigo-200 text-sm mt-0.5">Consulta los comentarios sobre tus syllabus y programas analíticos — y responde directamente</p>
                   </div>
                 </div>
               </Link>
