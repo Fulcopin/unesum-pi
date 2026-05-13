@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import type React from "react"
 import { useState, useEffect, useRef } from "react"
@@ -12,13 +12,11 @@ import { Save, ArrowLeft, Loader2, Lock, Unlock, FileDown } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
 import { FirmasPanel } from "@/components/firmas/firmas-panel"
-import jsPDF from "jspdf"
-import autoTable from "jspdf-autotable"
 
 // --- INTERFACES ---
 interface TableCell {
   id: string; content: string; isHeader: boolean; rowSpan: number; colSpan: number;
-  isEditable: boolean; backgroundColor?: string; textColor?: string; fontSize?: string;
+  isEditable: boolean; isLocked?: boolean; backgroundColor?: string; textColor?: string; fontSize?: string;
   fontWeight?: string; textAlign?: string; textOrientation?: 'horizontal' | 'vertical';
 }
 interface TableRow { id: string; cells: TableCell[]; }
@@ -83,6 +81,8 @@ export default function DocenteEditorSyllabusPage() {
   const [selectedAsignaturaId, setSelectedAsignaturaId] = useState<string>('')
   const [periodoAutoSyncMsg, setPeriodoAutoSyncMsg] = useState<string | null>(null)
   const isAutoSyncingPeriod = useRef(false)
+  // Mapa de celdas bloqueadas por la comisión (cellId → true)
+  const [lockedCells, setLockedCells] = useState<Record<string, boolean>>({})
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'
 
@@ -95,6 +95,75 @@ export default function DocenteEditorSyllabusPage() {
     const data = await res.json()
     if (!res.ok) throw new Error(data.message || `Error ${res.status}`)
     return data
+  }
+
+  const getCellPositionKey = (tabIndex: number, rowIndex: number, cellIndex: number) =>
+    `${tabIndex}:${rowIndex}:${cellIndex}`
+
+  const buildComisionLockState = (datos: any) => {
+    const lockById: Record<string, boolean> = {}
+    const lockByPosition: Record<string, boolean> = {}
+    const tabs = Array.isArray(datos?.tabs)
+      ? datos.tabs
+      : Array.isArray(datos?.rows)
+        ? [{ rows: datos.rows }]
+        : []
+
+    tabs.forEach((tab: any, tabIndex: number) => {
+      ;(tab.rows || []).forEach((row: any, rowIndex: number) => {
+        ;(row.cells || []).forEach((cell: any, cellIndex: number) => {
+          const locked = !!cell.isLocked
+          if (cell.id) lockById[cell.id] = locked
+          lockByPosition[getCellPositionKey(tabIndex, rowIndex, cellIndex)] = locked
+        })
+      })
+    })
+
+    return { lockById, lockByPosition }
+  }
+
+  const applyComisionLocks = (
+    datos: any,
+    lockState: { lockById: Record<string, boolean>; lockByPosition: Record<string, boolean> }
+  ) => {
+    if (Array.isArray(datos?.tabs)) {
+      return {
+        ...datos,
+        tabs: datos.tabs.map((tab: any, tabIndex: number) => ({
+          ...tab,
+          rows: (tab.rows || []).map((row: any, rowIndex: number) => ({
+            ...row,
+            cells: (row.cells || []).map((cell: any, cellIndex: number) => {
+              const positionKey = getCellPositionKey(tabIndex, rowIndex, cellIndex)
+              const locked = cell.id in lockState.lockById
+                ? lockState.lockById[cell.id]
+                : (lockState.lockByPosition[positionKey] ?? false)
+
+              return { ...cell, isLocked: locked }
+            })
+          }))
+        }))
+      }
+    }
+
+    if (Array.isArray(datos?.rows)) {
+      return {
+        ...datos,
+        rows: (datos.rows || []).map((row: any, rowIndex: number) => ({
+          ...row,
+          cells: (row.cells || []).map((cell: any, cellIndex: number) => {
+            const positionKey = getCellPositionKey(0, rowIndex, cellIndex)
+            const locked = cell.id in lockState.lockById
+              ? lockState.lockById[cell.id]
+              : (lockState.lockByPosition[positionKey] ?? false)
+
+            return { ...cell, isLocked: locked }
+          })
+        }))
+      }
+    }
+
+    return datos
   }
 
   // Cargar periodos
@@ -155,6 +224,7 @@ export default function DocenteEditorSyllabusPage() {
     setError(null)
     setSyllabusData(null)
     setActiveTabId(null)
+    setLockedCells({})
 
     const asignaturaId = selectedAsignaturaId || profesorInfo?.asignatura_id || profesorInfo?.asignatura?.id
     if (!asignaturaId) {
@@ -170,9 +240,30 @@ export default function DocenteEditorSyllabusPage() {
         if (docenteRes.success && docenteRes.data?.datos_syllabus) {
           let datos = docenteRes.data.datos_syllabus
           if (typeof datos === 'string') datos = JSON.parse(datos)
-          processSyllabusData(datos)
-          setSyllabusComisionId(docenteRes.data.syllabus_comision_id)
+
+          let mergedDatos = datos
+          let resolvedComisionId = docenteRes.data.syllabus_comision_id
+
+          // La comisión es la fuente de verdad para bloquear y desbloquear.
+          try {
+            const comisionRes = await apiRequest(`/docente-editor/syllabus/comision?asignatura_id=${asignaturaId}&periodo=${selectedPeriod}`)
+            if (comisionRes.success && comisionRes.data?.datos_syllabus) {
+              let comisionDatos = comisionRes.data.datos_syllabus
+              if (typeof comisionDatos === 'string') comisionDatos = JSON.parse(comisionDatos)
+
+              const lockState = buildComisionLockState(comisionDatos)
+              mergedDatos = applyComisionLocks(datos, lockState)
+              setLockedCells(lockState.lockById)
+              resolvedComisionId = resolvedComisionId || comisionRes.data.id
+            }
+          } catch (e) {
+            setLockedCells({})
+          }
+
+          processSyllabusData(mergedDatos)
+          setSyllabusComisionId(resolvedComisionId)
           setHasDocenteVersion(true)
+
           setLoading(false)
           return
         }
@@ -180,14 +271,16 @@ export default function DocenteEditorSyllabusPage() {
         console.log('No hay versión propia del docente, buscando la de comisión...') 
       }
 
-      // 2. Buscar syllabus de la comisión (el backend buscará por asignatura+periodo y si no encuentra,
-      //    retorna el más reciente para esa asignatura — con su período real incluido en la respuesta)
+      // 2. Buscar syllabus de la comisión
       try {
         const comisionRes = await apiRequest(`/docente-editor/syllabus/comision?asignatura_id=${asignaturaId}&periodo=${selectedPeriod}`)
         if (comisionRes.success && comisionRes.data?.datos_syllabus) {
           let datos = comisionRes.data.datos_syllabus
           if (typeof datos === 'string') datos = JSON.parse(datos)
-          processSyllabusData(datos)
+
+          const lockState = buildComisionLockState(datos)
+          processSyllabusData(applyComisionLocks(datos, lockState))
+          setLockedCells(lockState.lockById)
           setSyllabusComisionId(comisionRes.data.id)
           setHasDocenteVersion(false)
           // Auto-sincronizar el selector de periodo con el periodo real del syllabus cargado
@@ -322,7 +415,8 @@ export default function DocenteEditorSyllabusPage() {
   // Determinar si una celda es editable para el docente
   const isDocenteEditable = (cell: TableCell, rowIndex: number, cellIndex: number, allRows: TableRow[]): boolean => {
     if (!allRows || allRows.length === 0) return false
-    
+    // Si el admin bloqueó la celda (en la versión propia o en el mapa de bloqueos de comisión), no puede editar
+    if (cell.isLocked || lockedCells[cell.id]) return false
     // Si la comisión configuró explícitamente el permiso, respetar esa configuración
     if ((cell as any).docenteEditable === true) return true
     if ((cell as any).docenteEditable === false) return false
@@ -476,11 +570,11 @@ export default function DocenteEditorSyllabusPage() {
     }
   }
 
-  // Generar PDF con el mismo formato que la comisión académica
+  // Generar PDF — abre ventana de impresión del navegador (preserva merges y columnas)
   const handlePrintToPdf = async () => {
     if (!syllabusData) return;
 
-    // --- FIRMAS del documento (para sección VISADO al final) ---
+    // --- FIRMAS ---
     let firmasData: any = null
     if (syllabus_comision_id) {
       try {
@@ -489,473 +583,135 @@ export default function DocenteEditorSyllabusPage() {
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
         ])
         if ((fr as any).success) firmasData = (fr as any).data
-      } catch { /* firmas no disponibles o timeout */ }
+      } catch { /* sin firmas */ }
     }
 
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const marginL = 10;
-    const marginR = 10;
-    const contentWidth = pageWidth - marginL - marginR;
+    const escHtml = (v: string) =>
+      String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
 
-    // --- LOGO ---
-    try {
-      const logoImg = new Image();
-      logoImg.crossOrigin = 'anonymous';
-      await Promise.race([
-        new Promise<void>((resolve, reject) => {
-          logoImg.onload = () => resolve();
-          logoImg.onerror = () => reject();
-          logoImg.src = '/images/unesum-logo-official.png';
-        }),
-        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
-      ]);
-      doc.addImage(logoImg, 'PNG', marginL, 2, 16, 16);
-    } catch { /* logo no disponible */ }
+    const asignaturaNombre = asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre || syllabusData.name || ''
+    const periodoObj = periodos.find((p: any) => String(p.id) === String(selectedPeriod))
+    const periodoNombre = periodoObj?.nombre || ''
+    const docenteNombre = profesorInfo ? `${profesorInfo.nombres || ''} ${profesorInfo.apellidos || ''}`.trim() : ''
+    const headerLine = [asignaturaNombre, periodoNombre ? `Periodo: ${periodoNombre}` : '', docenteNombre].filter(Boolean).join(' | ')
+    const logoUrl = `${window.location.origin}/images/unesum-logo-official.png`
 
-    // --- ENCABEZADO ---
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(17, 17, 17);
-    doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 8, { align: 'center' });
-
-    doc.setFontSize(7.5);
-    doc.setFont('helvetica', 'italic');
-    doc.setTextColor(60, 60, 60);
-    doc.text('Creada mediante registro Oficial 261 del 7 de febrero del 2001', pageWidth / 2, 12.5, { align: 'center' });
-
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(17, 17, 17);
-    doc.text('SYLLABUS DE LA ASIGNATURA', pageWidth / 2, 17, { align: 'center' });
-
-    // Línea divisoria
-    doc.setDrawColor(25, 50, 95);
-    doc.setLineWidth(0.6);
-    doc.line(marginL, 19.5, marginL + contentWidth, 19.5);
-
-    // Sublinea: asignatura • Periodo • Docente
-    const asignaturaNombreHeader = asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre || syllabusData.name || '';
-    const periodoObj = periodos.find((p: any) => String(p.id) === String(selectedPeriod));
-    const periodoNombre = periodoObj?.nombre || '';
-    const docenteNombreHeader = profesorInfo ? `${profesorInfo.nombres || ''} ${profesorInfo.apellidos || ''}`.trim() : '';
-    const subParts = [asignaturaNombreHeader, periodoNombre ? `Periodo: ${periodoNombre}` : '', docenteNombreHeader].filter(Boolean);
-    const subLineTxt = subParts.join('  •  ');
-
-    if (subLineTxt) {
-      doc.setFillColor(237, 242, 250);
-      doc.rect(marginL, 20, contentWidth, 6, 'F');
-      doc.setDrawColor(25, 50, 95);
-      doc.setLineWidth(0.3);
-      doc.rect(marginL, 20, contentWidth, 6, 'D');
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(25, 50, 95);
-      doc.text(subLineTxt, pageWidth / 2, 23.5, { align: 'center', maxWidth: contentWidth - 4 });
+    const buildTabHtml = (tab: TabData) => {
+      const rowsHtml = tab.rows.map((row) => {
+        const cellsHtml = row.cells.map((cell) => {
+          if ((cell.rowSpan ?? 1) <= 0 || (cell.colSpan ?? 1) <= 0) return ''
+          const bg = cell.backgroundColor || (cell.isHeader ? '#f8fafc' : '#ffffff')
+          const fw = cell.fontWeight || (cell.isHeader ? '700' : 'normal')
+          const ta = cell.isHeader ? 'center' : 'left'
+          const tdStyle = `background-color:${bg};font-weight:${fw};text-align:${ta};writing-mode:horizontal-tb;word-break:break-word;overflow-wrap:break-word;white-space:normal;`
+          return `<td rowspan="${cell.rowSpan ?? 1}" colspan="${cell.colSpan ?? 1}" style="${tdStyle}">${escHtml(cell.content || '')}</td>`
+        }).join('')
+        return `<tr>${cellsHtml}</tr>`
+      }).join('')
+      return `
+        <section class="print-section">
+          <div class="section-title">${escHtml(tab.title || '')}</div>
+          <div class="table-shell"><table><tbody>${rowsHtml}</tbody></table></div>
+        </section>`
     }
 
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0, 0, 0);
-    let currentY = subLineTxt ? 28 : 23;
+    const tabsHtml = syllabusData.tabs
+      .filter(t => t.rows?.length && t.title?.trim().toUpperCase() !== 'VISADO')
+      .map(t => buildTabHtml(t))
+      .join('')
 
-    const isFirstSectionTab = (title: string) => {
-      const t = title.toUpperCase();
-      return t.includes('GENERAL') || t.includes('INFORMACIÓN') || t.includes('DATOS') || t.includes('INFORMACION');
-    };
-
-    for (const tab of syllabusData.tabs) {
-      if (!tab.rows || tab.rows.length === 0) continue;
-      // Omitir el tab VISADO del template — el VISADO se genera al final con los QR reales
-      if (tab.title.trim().toUpperCase() === 'VISADO') continue;
-
-      const isEstructuraSectionPreCheck = tab.title.toUpperCase().includes('ESTRUCTURA') || tab.title.toUpperCase().includes('ASIGNATURA');
-      const minSpace = isEstructuraSectionPreCheck ? 80 : 25;
-
-      const titleStartY = currentY;
-
-      currentY += 1.5;
-      doc.setFontSize(8.5);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(25, 50, 95);
-      doc.text(tab.title.toUpperCase(), marginL, currentY);
-      currentY += 1;
-      doc.setDrawColor(25, 50, 95);
-      doc.setLineWidth(0.4);
-      doc.line(marginL, currentY, marginL + contentWidth, currentY);
-      currentY += 2;
-
-      const sectionTitle = tab.title.toUpperCase();
-      const titlePageNum = doc.getNumberOfPages();
-
-      const isFirstSection = isFirstSectionTab(tab.title);
-      const isVisadoSection = tab.title.toUpperCase().includes('VISADO') || tab.title.toUpperCase().includes('LEGALIZACIÓN') || tab.title.toUpperCase().includes('LEGALIZACION');
-      const isEstructuraSection = tab.title.toUpperCase().includes('ESTRUCTURA') || tab.title.toUpperCase().includes('ASIGNATURA');
-
-      if (isFirstSection) {
-        const cleanRows: any[][] = [];
-        for (const row of tab.rows) {
-          const visible = row.cells.filter(c => c.rowSpan > 0 && c.colSpan > 0);
-          if (visible.length === 0) continue;
-          if (visible.length === 1) {
-            const txt = (visible[0].content || '').trim();
-            if (!txt) continue;
-            cleanRows.push([{ content: txt, colSpan: 3, styles: { fontStyle: 'bold' as const, fillColor: '#E5E7EB', halign: 'left' as const, fontSize: 8 } }]);
-          } else {
-            let label = '', sep = '', values: string[] = [];
-            for (let ci = 0; ci < visible.length; ci++) {
-              const txt = (visible[ci].content || '').trim();
-              const isSep = txt === ':' || (txt.length <= 2 && txt.length > 0 && !/[a-zA-Z0-9]/.test(txt));
-              if (ci === 0) { label = txt; }
-              else if (isSep && !sep) { sep = txt; }
-              else { values.push(txt); }
-            }
-            const valueTxt = values.join(' ').trim();
-            cleanRows.push([
-              { content: label, styles: { fontStyle: 'bold' as const, fillColor: '#F9FAFB', halign: 'left' as const } },
-              { content: sep || ':', styles: { halign: 'center' as const, fillColor: '#FFFFFF' } },
-              { content: valueTxt, styles: { fontStyle: 'normal' as const, fillColor: '#FFFFFF', halign: 'left' as const } },
-            ]);
-          }
-        }
-        if (cleanRows.length > 0) {
-          const labelW = contentWidth * 0.30;
-          const sepW = contentWidth * 0.02;
-          const valW = contentWidth * 0.68;
-          autoTable(doc, {
-            body: cleanRows as any,
-            startY: currentY,
-            theme: 'grid',
-            columnStyles: { 0: { cellWidth: labelW }, 1: { cellWidth: sepW }, 2: { cellWidth: valW } },
-            styles: { fontSize: 8, cellPadding: { top: 0.5, right: 1, bottom: 0.5, left: 1 }, lineColor: '#9CA3AF', lineWidth: 0.15, overflow: 'linebreak', halign: 'left', valign: 'top', textColor: '#1F2937' },
-            margin: { left: marginL, right: marginR },
-            tableWidth: contentWidth,
-          });
-          currentY = (doc as any).lastAutoTable?.finalY || (doc as any).previousAutoTable?.finalY || currentY + 10;
-          const pagesAfter1 = doc.getNumberOfPages();
-          if (pagesAfter1 > titlePageNum) {
-            doc.setPage(titlePageNum);
-            doc.setFillColor(255, 255, 255);
-            doc.rect(marginL - 1, titleStartY - 1, contentWidth + 2, 8, 'F');
-            doc.setPage(pagesAfter1);
-          }
-          currentY += 2;
-        }
-      } else {
-        // SECCIONES NORMALES
-        let headerRowIdx = -1;
-        for (let ri = 0; ri < tab.rows.length; ri++) {
-          const vis = tab.rows[ri].cells.filter(c => c.rowSpan > 0 && c.colSpan > 0);
-          if (vis.length < 3) continue;
-          const allAreHeader = vis.every(c => c.isHeader);
-          const avgLen = vis.reduce((sum, c) => sum + (c.content || '').trim().length, 0) / vis.length;
-          if (allAreHeader && avgLen <= 40) { headerRowIdx = ri; break; }
-        }
-        if (headerRowIdx === -1) {
-          for (let ri = 0; ri < tab.rows.length; ri++) {
-            const vis = tab.rows[ri].cells.filter(c => c.rowSpan > 0 && c.colSpan > 0);
-            if (vis.length >= 3) { headerRowIdx = ri; break; }
-          }
-        }
-
-        const colCounts: number[] = [];
-        for (let ri = 0; ri < tab.rows.length; ri++) {
-          if (ri === headerRowIdx) continue;
-          const vis = tab.rows[ri].cells.filter(c => c.rowSpan > 0 && c.colSpan > 0);
-          if (vis.length === 0) continue;
-          const logCols = vis.reduce((sum, c) => sum + (c.colSpan || 1), 0);
-          colCounts.push(logCols);
-        }
-        let maxLogCols = 0;
-        if (colCounts.length > 0) {
-          const freq: Record<number, number> = {};
-          for (const n of colCounts) freq[n] = (freq[n] || 0) + 1;
-          let bestCount = 0;
-          for (const [cols, count] of Object.entries(freq)) {
-            if (count > bestCount) { bestCount = count; maxLogCols = Number(cols); }
-          }
-        }
-        if (maxLogCols === 0 && headerRowIdx >= 0) {
-          const hdrVis = tab.rows[headerRowIdx].cells.filter(c => c.rowSpan > 0 && c.colSpan > 0);
-          maxLogCols = hdrVis.reduce((sum, c) => sum + (c.colSpan || 1), 0);
-        }
-
-        type ColType = 'unidad' | 'contenido' | 'horas' | 'pfae' | 'metodologia' | 'recursos' | 'escenario' | 'biblio' | 'fecha' | 'separator' | 'resultado' | 'criterio' | 'instrumento' | 'other';
-        const colTypeMap: Record<number, ColType> = {};
-        if (headerRowIdx >= 0) {
-          const hdrCells = tab.rows[headerRowIdx].cells.filter(c => c.rowSpan > 0 && c.colSpan > 0);
-          let colIdx = 0;
-          for (const hc of hdrCells) {
-            const txt = (hc.content || '').trim().toUpperCase();
-            const isSepH = txt === ':' || (txt.length <= 2 && txt.length > 0 && !/[A-Z0-9]/.test(txt));
-            const span = hc.colSpan || 1;
-            let type: ColType = 'other';
-            if (isSepH) type = 'separator';
-            else if (txt.includes('UNIDAD') || txt.includes('TEMÁT') || txt.includes('TEMAT')) type = 'unidad';
-            else if (txt.includes('CONTENIDO')) type = 'contenido';
-            else if (txt.includes('PRESENCIAL') || txt.includes('SINCRÓNIC') || txt.includes('SINCRONIC')) type = 'horas';
-            else if (txt === 'PFAE' || txt === 'TA') type = 'pfae';
-            else if (txt.includes('METODOLOG') || txt.includes('ENSEÑANZA')) type = 'metodologia';
-            else if (txt.includes('RECURSO') || txt.includes('DIDÁCTICO') || txt.includes('DIDACTICO')) type = 'recursos';
-            else if (txt.includes('ESCENARIO')) type = 'escenario';
-            else if (txt.includes('BIBLIOGRAF') || txt.includes('FUENTE') || txt.includes('CONSULTA')) type = 'biblio';
-            else if (txt.includes('FECHA') || txt.includes('PARALELO')) type = 'fecha';
-            else if (txt.includes('RESULTADO') || txt.includes('APRENDIZAJE')) type = 'resultado';
-            else if (txt.includes('CRITERIO')) type = 'criterio';
-            else if (txt.includes('INSTRUMENTO')) type = 'instrumento';
-            for (let s = 0; s < span && (colIdx + s) < maxLogCols; s++) { colTypeMap[colIdx + s] = type; }
-            colIdx += span;
-          }
-        }
-
-        const widthByType: Record<ColType, number> = {
-          unidad: 24, contenido: 50, horas: 13, pfae: 9, metodologia: 24, recursos: 55,
-          escenario: 20, biblio: 38, fecha: 26, separator: 3, resultado: 42, criterio: 36, instrumento: 32, other: 28,
-        };
-        const colWidthMap: Record<number, number> = {};
-        let totalAssigned = 0;
-        for (let i = 0; i < maxLogCols; i++) { totalAssigned += widthByType[colTypeMap[i] || 'other']; }
-        if (totalAssigned > 0) {
-          const scaleF = contentWidth / totalAssigned;
-          for (let i = 0; i < maxLogCols; i++) { colWidthMap[i] = Math.round(widthByType[colTypeMap[i] || 'other'] * scaleF * 10) / 10; }
-        }
-
-        const body: any[][] = [];
-        let headerOriginalSpan = 1;
-        if (headerRowIdx >= 0) {
-          const hdrCells = tab.rows[headerRowIdx].cells.filter(c => c.rowSpan > 0 && c.colSpan > 0);
-          headerOriginalSpan = Math.max(1, ...hdrCells.map(c => c.rowSpan || 1));
-        }
-
-        for (let ri = 0; ri < tab.rows.length; ri++) {
-          const row = tab.rows[ri];
-          const pdfRow: any[] = [];
-          const visibleCells = row.cells.filter(c => c.rowSpan > 0 && c.colSpan > 0);
-          if (visibleCells.length === 0) continue;
-          if (headerRowIdx >= 0 && ri > headerRowIdx && ri < headerRowIdx + headerOriginalSpan) continue;
-          const isRealHeader = (ri === headerRowIdx);
-          let currentLogCol = 0;
-          for (const cell of visibleCells) {
-            let content = (cell.content || '').replace(/\r\n/g, '\n');
-            const contentUp = content.trim().toUpperCase();
-            const isVert = cell.textOrientation === 'vertical';
-            if (!isVert && !isRealHeader && content.includes('B.') && !content.includes('\n')) {
-              content = content.replace(/\s+(B\.)/g, '\n$1');
-            }
-            let displayContentPdf = content;
-            if (isVert && isRealHeader) {
-              if (contentUp.includes('METODOLOG')) displayContentPdf = 'Metodología';
-              else if (contentUp.includes('ESCENARIO')) displayContentPdf = 'Escenario';
-              else if (contentUp.includes('PRESENCIAL')) displayContentPdf = 'HD.\nPresencial';
-              else if (contentUp.includes('SINCRÓNIC') || contentUp.includes('SINCRONIC')) displayContentPdf = 'HD.\nSincrónica';
-            }
-            let cellSpan = cell.colSpan || 1;
-            if (currentLogCol + cellSpan > maxLogCols) { cellSpan = Math.max(1, maxLogCols - currentLogCol); }
-            const safeRowSpan = isRealHeader ? 1 : (cell.rowSpan || 1);
-            const isVisadoDataRow = isVisadoSection && !isRealHeader;
-            const isVisadoFechaRow = isVisadoDataRow && content.trim().toLowerCase().startsWith('fecha');
-            pdfRow.push({
-              content: displayContentPdf, rowSpan: safeRowSpan, colSpan: cellSpan,
-              styles: {
-                fontStyle: isRealHeader ? 'bold' as const : 'normal' as const,
-                fillColor: isRealHeader ? '#E8EDF2' : (cell.backgroundColor || '#FFFFFF'),
-                textColor: isRealHeader ? '#1E3A5F' : '#1F2937',
-                fontSize: isVisadoSection ? 10 : isRealHeader ? 7.5 : 8,
-                cellPadding: isVisadoFechaRow ? { top: 2, right: 3, bottom: 2, left: 3 } : isVisadoDataRow ? { top: 20, right: 3, bottom: 3, left: 3 } : isRealHeader ? { top: 1.5, right: 1, bottom: 1.5, left: 1 } : { top: 0.8, right: 0.8, bottom: 0.8, left: 0.8 },
-                halign: isVisadoSection ? 'center' as const : isEstructuraSection ? 'center' as const : isRealHeader ? 'center' as const : 'left' as const,
-                valign: isVisadoDataRow ? 'bottom' as const : 'middle' as const,
-                minCellHeight: isVisadoFechaRow ? 8 : isVisadoDataRow ? 30 : isRealHeader ? 6 : 3,
-                overflow: 'linebreak' as const,
-              }
-            });
-            currentLogCol += cellSpan;
-          }
-          if (pdfRow.length > 0) body.push(pdfRow);
-        }
-
-        if (body.length > 0) {
-          const colStyles: Record<number, { cellWidth: number }> = {};
-          for (let i = 0; i < maxLogCols; i++) { if (colWidthMap[i]) colStyles[i] = { cellWidth: colWidthMap[i] }; }
-
-          // Rastrear celdas combinadas (rowSpan>1) para limpiar bordes internos
-          const mergedCellsOnPage: Array<{x: number, y: number, w: number, h: number, bg: any, rawContent: string, text: string[], styles: any, page: number}> = [];
-
-          autoTable(doc, {
-            body: body as any, startY: currentY, theme: 'grid',
-            styles: {
-              fontSize: isVisadoSection ? 10 : 8,
-              cellPadding: isVisadoSection ? { top: 6, right: 3, bottom: 6, left: 3 } : isEstructuraSection ? { top: 1.2, right: 1, bottom: 1.2, left: 1 } : { top: 0.8, right: 0.8, bottom: 0.8, left: 0.8 },
-              lineColor: '#9CA3AF', lineWidth: 0.15, overflow: 'linebreak',
-              halign: isEstructuraSection ? 'center' : 'left', valign: 'middle',
-              minCellHeight: isVisadoSection ? 20 : 3,
-            },
-            columnStyles: colStyles,
-            margin: { left: marginL, right: marginR, top: 15 },
-            tableWidth: contentWidth,
-            didDrawCell: (data: any) => {
-              if (isEstructuraSection && data.cell.rowSpan > 1) {
-                const rawContent = typeof data.cell.raw === 'object' ? (data.cell.raw?.content || '') : (data.cell.raw || '');
-                mergedCellsOnPage.push({
-                  x: data.cell.x,
-                  y: data.cell.y,
-                  w: data.cell.width,
-                  h: data.cell.height,
-                  bg: data.cell.styles.fillColor,
-                  rawContent: String(rawContent),
-                  text: data.cell.text || [],
-                  styles: { ...data.cell.styles },
-                  page: doc.getNumberOfPages()
-                });
-              }
-            },
-            didDrawPage: (data: any) => {
-              if (isEstructuraSection && mergedCellsOnPage.length > 0) {
-                const currentPage = doc.getNumberOfPages();
-                for (const mc of mergedCellsOnPage) {
-                  if (mc.page !== currentPage) continue;
-                  const bg = mc.bg;
-                  if (bg) {
-                    if (typeof bg === 'string') doc.setFillColor(bg);
-                    else if (Array.isArray(bg)) doc.setFillColor(bg[0] || 255, bg[1] || 255, bg[2] || 255);
-                    else doc.setFillColor(255, 255, 255);
-                  } else {
-                    doc.setFillColor(255, 255, 255);
-                  }
-                  const lw = 0.15;
-                  doc.rect(mc.x + lw, mc.y + lw, mc.w - 2 * lw, mc.h - 2 * lw, 'F');
-
-                  const textLines = mc.text && mc.text.length > 0 ? mc.text : (mc.rawContent ? mc.rawContent.split('\n') : []);
-                  if (textLines.length > 0 && textLines.some((t: string) => t.trim().length > 0)) {
-                    const tc = mc.styles.textColor;
-                    if (tc) {
-                      if (typeof tc === 'string') doc.setTextColor(tc);
-                      else if (Array.isArray(tc)) doc.setTextColor(tc[0], tc[1], tc[2]);
-                      else doc.setTextColor(31, 41, 55);
-                    }
-                    const fs = mc.styles.fontSize || 8;
-                    doc.setFontSize(fs);
-                    doc.setFont('helvetica', mc.styles.fontStyle || 'normal');
-                    const pad = 1.2;
-                    const cellInnerW = mc.w - 2 * pad;
-                    const halign = mc.styles.halign || 'center';
-                    let textX: number;
-                    if (halign === 'center') textX = mc.x + mc.w / 2;
-                    else if (halign === 'right') textX = mc.x + mc.w - pad;
-                    else textX = mc.x + pad;
-                    const lineH = fs * 0.4;
-                    const totalTextH = textLines.length * lineH;
-                    const textY = mc.y + (mc.h - totalTextH) / 2 + lineH * 0.7;
-                    for (let li = 0; li < textLines.length; li++) {
-                      const line = textLines[li];
-                      if (line.trim().length === 0) continue;
-                      doc.text(line, textX, textY + li * lineH, { align: halign, maxWidth: cellInnerW });
-                    }
-                  }
-
-                  doc.setDrawColor('#9CA3AF');
-                  doc.setLineWidth(lw);
-                  doc.rect(mc.x, mc.y, mc.w, mc.h, 'S');
-                }
-                mergedCellsOnPage.length = 0;
-              }
-              if (data.pageNumber > 1 || data.pageCount > 1) {
-                doc.setFontSize(8.5);
-                doc.setFont('helvetica', 'bold');
-                doc.setTextColor(25, 50, 95);
-                doc.text(sectionTitle + ' (cont.)', marginL, 10);
-                doc.setDrawColor(25, 50, 95);
-                doc.setLineWidth(0.4);
-                doc.line(marginL, 11, marginL + contentWidth, 11);
-              }
-            },
-          });
-          currentY = (doc as any).lastAutoTable?.finalY || (doc as any).previousAutoTable?.finalY || currentY + 10;
-          const pagesAfter2 = doc.getNumberOfPages();
-          if (pagesAfter2 > titlePageNum) {
-            doc.setPage(titlePageNum);
-            doc.setFillColor(255, 255, 255);
-            doc.rect(marginL - 1, titleStartY - 1, contentWidth + 2, 8, 'F');
-            doc.setPage(pagesAfter2);
-          }
-          currentY += 2;
-        }
-      }
-    }
-
-    // ─── SECCIÓN VISADO ────────────────────────────────────────────────────
     const VISADO_ETAPAS = [
-      { etapa: 'decano',             label: 'DECANO/A DE FACULTAD' },
+      { etapa: 'decano', label: 'DECANO/A DE FACULTAD' },
       { etapa: 'director_academico', label: 'DIRECTOR/A ACADÉMICO/A' },
-      { etapa: 'coordinador',        label: 'COORDINADOR/A DE CARRERA' },
-      { etapa: 'docente',            label: 'DOCENTE' },
+      { etapa: 'coordinador', label: 'COORDINADOR/A DE CARRERA' },
+      { etapa: 'docente', label: 'DOCENTE' },
     ]
-    const VTITLE_H = 5
-    const VHEADER_H = 7
-    const VSIGN_H = 36
-    const VTOTAL = VTITLE_H + VHEADER_H + VSIGN_H + 3
+    const visadoCols = VISADO_ETAPAS.map(cfg => {
+      const info = firmasData?.etapas?.find((e: any) => e.etapa === cfg.etapa)
+      const fecha = info?.firma?.firmado_at ? new Date(info.firma.firmado_at).toLocaleDateString('es-EC') : ''
+      const qrHtml = info?.firma?.qr_data_url
+        ? `<img src="${escHtml(info.firma.qr_data_url)}" alt="QR" class="firma-qr" />`
+        : '<span class="firma-pendiente">Pendiente de firma</span>'
+      return `<td class="visado-cell">
+        <div class="visado-label">${escHtml(cfg.label)}</div>
+        <div class="visado-content">
+          <div class="visado-nombre">${escHtml(info?.firma?.usuario_nombre || '')}</div>
+          ${qrHtml}
+          <div class="visado-fecha">${fecha ? `Fecha: ${escHtml(fecha)}` : ''}</div>
+        </div></td>`
+    }).join('')
+    const visadoHtml = `
+      <section class="print-section visado-section">
+        <div class="section-title">VISADO</div>
+        <div class="table-shell"><table class="visado-table"><tbody><tr>${visadoCols}</tr></tbody></table></div>
+      </section>`
 
-    if (currentY + VTOTAL > pageHeight - 5) { doc.addPage(); currentY = 8 }
-    currentY += 3
-
-    doc.setFillColor(25, 50, 95)
-    doc.rect(marginL, currentY, contentWidth, VTITLE_H, 'F')
-    doc.setFontSize(7)
-    doc.setFont('helvetica', 'bold')
-    doc.setTextColor(255, 255, 255)
-    doc.text('VISADO', marginL + 4, currentY + 3.5)
-    currentY += VTITLE_H
-
-    const colW = contentWidth / 4
-
-    doc.setFillColor(220, 229, 242)
-    doc.rect(marginL, currentY, contentWidth, VHEADER_H, 'F')
-    doc.setDrawColor(180, 190, 210)
-    doc.setLineWidth(0.12)
-    doc.rect(marginL, currentY, contentWidth, VHEADER_H)
-    VISADO_ETAPAS.forEach((cfg, i) => {
-      const x = marginL + i * colW
-      if (i > 0) doc.line(x, currentY, x, currentY + VHEADER_H)
-      doc.setFontSize(5.5)
-      doc.setFont('helvetica', 'bold')
-      doc.setTextColor(25, 50, 95)
-      const lns = doc.splitTextToSize(cfg.label, colW - 3)
-      doc.text(lns, x + colW / 2, currentY + 4, { align: 'center' })
-    })
-    currentY += VHEADER_H
-
-    doc.setDrawColor(180, 190, 210)
-    doc.setLineWidth(0.12)
-    doc.rect(marginL, currentY, contentWidth, VSIGN_H)
-    VISADO_ETAPAS.forEach((cfg, i) => {
-      const x = marginL + i * colW
-      if (i > 0) doc.line(x, currentY, x, currentY + VSIGN_H)
-      const etapaInfo = firmasData?.etapas?.find((e: any) => e.etapa === cfg.etapa)
-      if (etapaInfo?.firmado && etapaInfo.firma) {
-        doc.setFontSize(6)
-        doc.setFont('helvetica', 'normal')
-        doc.setTextColor(30, 30, 30)
-        const lns = doc.splitTextToSize(etapaInfo.firma.usuario_nombre || '', colW - 4)
-        doc.text(lns, x + colW / 2, currentY + 6, { align: 'center' })
-        if (etapaInfo.firma.qr_data_url) {
-          try {
-            const qrSz = 16
-            doc.addImage(etapaInfo.firma.qr_data_url, 'PNG', x + (colW - qrSz) / 2, currentY + 10, qrSz, qrSz)
-          } catch {}
-        }
-        const fecha = `Fecha: ${new Date(etapaInfo.firma.firmado_at).toLocaleDateString('es-EC')}`
-        doc.setFontSize(5.5)
-        doc.setTextColor(80, 80, 80)
-        doc.text(fecha, x + colW / 2, currentY + VSIGN_H - 3, { align: 'center' })
-      } else {
-        doc.setFontSize(6)
-        doc.setFont('helvetica', 'italic')
-        doc.setTextColor(150, 150, 150)
-        doc.text('Pendiente de firma', x + colW / 2, currentY + VSIGN_H / 2 + 3, { align: 'center' })
-      }
-    })
-
-    doc.save(`Syllabus_${syllabusData.name || 'Docente'}.pdf`);
+    const fullHtml = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Syllabus - ${escHtml(asignaturaNombre)}</title>
+<style>
+  @page { size: A4 landscape; margin: 8mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-size: 7pt; font-family: Arial, Helvetica, sans-serif; }
+  body { color: #1f2937; background: #fff; }
+  .export-header { margin-bottom: 6pt; border: 0.5pt solid #c7cdd6; border-radius: 4pt; overflow: hidden; }
+  .page-header { display: flex; align-items: center; gap: 8pt; background: #19325f; color: white; padding: 6pt 10pt; }
+  .page-header img { width: 36pt; height: 36pt; object-fit: contain; }
+  .page-header-text { flex: 1; text-align: center; }
+  .page-header-text h1 { font-size: 12pt; font-weight: 700; color: white; }
+  .page-header-text h2 { font-size: 9pt; font-weight: 700; margin-top: 2pt; color: white; }
+  .page-subheader { background: #f0f4fa; color: #19325f; padding: 4pt 10pt; text-align: center; font-size: 8pt; font-weight: 700; border-top: 0.5pt solid #c7cdd6; }
+  .print-section { margin-top: 6pt; }
+  .section-title { background: #3b64a0; color: white; padding: 4pt 6pt; font-size: 8pt; font-weight: 700; border-radius: 2pt 2pt 0 0; }
+  .table-shell { border: 0.5pt solid #c7cdd6; border-top: none; }
+  table { width: 100%; border-collapse: collapse; table-layout: auto; background: white; }
+  td { border: 0.5pt solid #c7cdd6; vertical-align: middle; padding: 2pt 3pt; word-break: break-word; overflow-wrap: break-word; white-space: normal; writing-mode: horizontal-tb !important; }
+  .visado-section { margin-top: 10pt; }
+  .visado-table { table-layout: fixed; }
+  .visado-cell { vertical-align: top; padding: 0 !important; }
+  .visado-label { background: #dce5f2; color: #19325f; text-align: center; font-size: 8pt; font-weight: 700; padding: 5pt; display: block; }
+  .visado-content { min-height: 80pt; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5pt; padding: 6pt; text-align: center; }
+  .visado-nombre { font-size: 7pt; }
+  .visado-fecha { font-size: 7pt; color: #4b5563; }
+  .firma-qr { width: 54pt; height: 54pt; object-fit: contain; }
+  .firma-pendiente { font-size: 7pt; color: #9ca3af; font-style: italic; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    tr { page-break-inside: avoid; }
+    .visado-section { page-break-before: auto; }
   }
+</style>
+</head>
+<body>
+  <div class="export-header">
+    <header class="page-header">
+      <img src="${logoUrl}" alt="UNESUM" />
+      <div class="page-header-text">
+        <h1>UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ</h1>
+        <h2>SYLLABUS DE LA ASIGNATURA</h2>
+      </div>
+    </header>
+    <div class="page-subheader">${escHtml(headerLine)}</div>
+  </div>
+  ${tabsHtml}
+  ${visadoHtml}
+</body>
+</html>`
+
+    const win = window.open('', '_blank', 'width=1280,height=900')
+    if (!win) { alert('Permita las ventanas emergentes para exportar el PDF.'); return }
+    win.document.open()
+    win.document.write(fullHtml)
+    win.document.close()
+    const tryPrint = () => { try { win.focus(); win.print() } catch { /* ignore */ } }
+    if (win.document.readyState === 'complete') {
+      setTimeout(tryPrint, 700)
+    } else {
+      win.addEventListener('load', () => setTimeout(tryPrint, 700), { once: true })
+    }
+  }
+
 
   // Auto-fill content for profesor info
   const getAutoFilledContent = (cell: TableCell, rowIndex: number, cellIndex: number): string => {
@@ -1040,9 +796,10 @@ export default function DocenteEditorSyllabusPage() {
 
           {/* Legend */}
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 flex-wrap">
               <span className="flex items-center gap-1"><Unlock className="h-4 w-4 text-green-600" /> Campos editables (verde)</span>
-              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-gray-400" /> Campos de solo lectura (gris)</span>
+              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-gray-400" /> Campos de solo lectura</span>
+              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-amber-400" /> Bloqueado por comisión académica</span>
             </div>
             <p className="mt-1 text-amber-700 text-xs">
               Puedes editar: Paralelo, Horario, Perfil del profesor, Contenidos (HD, PFAE, TA), Metodologías, Recursos, Escenario, Bibliografía, Fecha, Criterios e Instrumentos de evaluación.
@@ -1102,6 +859,7 @@ export default function DocenteEditorSyllabusPage() {
                                   if (cell.rowSpan === 0 || cell.colSpan === 0) return null;
 
                                   const editable = isDocenteEditable(cell, rowIndex, cellIndex, tableData)
+                                  const isAdminLocked = cell.isLocked || !!lockedCells[cell.id]
                                   const displayContent = getAutoFilledContent(cell, rowIndex, cellIndex)
                                   const contentTrimmed = (cell.content || '').trim();
 
@@ -1195,7 +953,9 @@ export default function DocenteEditorSyllabusPage() {
                                     <td
                                       key={cell.id}
                                       className={`border relative ${vertAlign} ${
-                                        editable
+                                        isAdminLocked
+                                          ? 'border-amber-300 bg-amber-50/70 text-amber-900'
+                                          : editable
                                           ? 'border-green-300 bg-green-50/50 cursor-cell hover:bg-green-100/50'
                                           : isFirstSectionLabel
                                             ? 'border-gray-200 bg-gradient-to-r from-slate-50 to-gray-50 font-semibold text-gray-700'
@@ -1206,7 +966,9 @@ export default function DocenteEditorSyllabusPage() {
                                                 : 'border-gray-300 bg-white text-gray-700'
                                       }`}
                                       style={{
-                                        backgroundColor: cell.backgroundColor || (isFirstSectionLabel ? undefined : cell.isHeader ? '#f8fafc' : undefined),
+                                        backgroundColor: isAdminLocked
+                                          ? '#fffbeb'
+                                          : cell.backgroundColor || (isFirstSectionLabel ? undefined : cell.isHeader ? '#f8fafc' : undefined),
                                         width: cellWidth,
                                         minWidth: cellMinW,
                                         maxWidth: cellMaxW,
@@ -1260,7 +1022,7 @@ export default function DocenteEditorSyllabusPage() {
                                       </div>
                                       {!editable && (
                                         <div className="absolute top-0 right-0 p-0.5">
-                                          <Lock className="h-2.5 w-2.5 text-gray-300" />
+                                          <Lock className={`h-2.5 w-2.5 ${isAdminLocked ? 'text-amber-400' : 'text-gray-300'}`} />
                                         </div>
                                       )}
                                     </td>

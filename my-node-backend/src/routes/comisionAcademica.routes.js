@@ -32,6 +32,13 @@ router.get('/docentes-por-asignatura',
   comisionAcademicaController.obtenerDocentesPorAsignatura
 );
 
+// ✅ HABILITAR FIRMA QR para documentos de docentes (POST /api/comision-academica/habilitar-firma)
+router.post('/habilitar-firma',
+  authenticate,
+  authorize(['administrador', 'comision_academica', 'comision']),
+  comisionAcademicaController.habilitarFirma
+);
+
 // 📄 VER SYLLABUS DE UN DOCENTE (solo lectura para comisión)
 router.get('/syllabus-docente/:id',
   authenticate,

@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ComentariosPanel } from "@/components/comision/ComentariosPanel";
 import { ArrowLeft, AlertCircle, User, GraduationCap, Calendar, RefreshCw, PanelRight, PanelRightClose } from "lucide-react";
 import Link from "next/link";
+import { FirmasPanel } from "@/components/firmas/firmas-panel";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
 
@@ -20,6 +21,17 @@ interface TabCell {
   rowSpan?: number;
   colSpan?: number;
   backgroundColor?: string;
+  textColor?: string;
+  textAlign?: string;
+  textOrientation?: string;
+  fontWeight?: string;
+  fontSize?: string;
+  styles?: {
+    backgroundColor?: string;
+    textColor?: string;
+    textAlign?: string;
+    textOrientation?: string;
+  };
 }
 interface TabRow { id: string; cells: TabCell[] }
 interface Tab { id: string; title: string; rows: TabRow[] }
@@ -35,33 +47,114 @@ interface SyllabusData {
   updated_at: string;
 }
 
-function ReadOnlyTable({ rows }: { rows: TabRow[] }) {
+function ReadOnlyTable({
+  rows,
+  onCellClick,
+  selectedCellId,
+  isFirstSection = false,
+}: {
+  rows: TabRow[];
+  onCellClick?: (cell: TabCell) => void;
+  selectedCellId?: string | null;
+  isFirstSection?: boolean;
+}) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-sm">
-        <tbody>
-          {rows.map(row => (
-            <tr key={row.id}>
-              {row.cells.map(cell => {
-                const Tag = cell.isHeader ? "th" : "td";
-                return (
-                  <Tag
-                    key={cell.id}
-                    rowSpan={cell.rowSpan || 1}
-                    colSpan={cell.colSpan || 1}
-                    style={{ backgroundColor: cell.backgroundColor || undefined }}
-                    className={`border border-gray-300 px-3 py-2 align-top whitespace-pre-wrap ${
-                      cell.isHeader
-                        ? "font-semibold bg-opacity-90 text-center"
-                        : "text-gray-800"
-                    }`}
-                  >
-                    {cell.content || ""}
-                  </Tag>
-                );
-              })}
-            </tr>
-          ))}
+    <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white">
+      <table
+        className="border-collapse text-xs text-left w-full"
+        style={{ tableLayout: isFirstSection ? 'fixed' : 'auto' }}
+      >
+        <tbody className="divide-y divide-gray-200">
+          {rows.map((row, rowIndex) => {
+            const visibleCells = row.cells.filter(c => (c.rowSpan ?? 1) > 0 && (c.colSpan ?? 1) > 0);
+            const isSimpleRow = visibleCells.length <= 4;
+            return (
+              <tr key={row.id} className="hover:bg-blue-50/30 transition-colors">
+                {row.cells.map((cell, cellIndex) => {
+                  // Skip ghost cells (cells covered by a rowSpan/colSpan from another cell)
+                  if ((cell.rowSpan ?? 1) === 0 || (cell.colSpan ?? 1) === 0) return null;
+
+                  const bg = cell.styles?.backgroundColor || cell.backgroundColor;
+                  const color = cell.styles?.textColor || cell.textColor;
+                  const orientation = cell.styles?.textOrientation || cell.textOrientation;
+                  const trimmed = (cell.content || '').trim();
+                  const isVertical = orientation === 'vertical' && !isFirstSection && !trimmed.includes('-') && trimmed.length <= 14;
+                  const isSeparator = trimmed === ':' || (trimmed.length <= 2 && !/[a-zA-Z0-9]/.test(trimmed) && trimmed.length > 0);
+                  const isSelected = selectedCellId === cell.id;
+
+                  const shouldCenterV = cell.isHeader || (cell.rowSpan && cell.rowSpan > 1) || visibleCells.length >= 3;
+
+                  // Smart column widths matching docente widths
+                  const colWidth = (() => {
+                    if (isFirstSection && isSimpleRow) {
+                      if (isSeparator) return { width: '18px', minWidth: '18px', maxWidth: '18px' };
+                      if (cellIndex === 0) return { minWidth: '200px', maxWidth: '300px' };
+                      return {};
+                    }
+                    if (isVertical) return { width: '28px', minWidth: '28px', maxWidth: '28px' };
+                    if (isSeparator) return { width: '20px', minWidth: '20px', maxWidth: '20px' };
+                    if (trimmed.length <= 4 && cellIndex > 1 && !cell.isHeader) return { width: '35px', minWidth: '35px', maxWidth: '45px' };
+                    return {};
+                  })();
+
+                  return (
+                    <td
+                      key={cell.id}
+                      rowSpan={cell.rowSpan ?? 1}
+                      colSpan={cell.colSpan ?? 1}
+                      onClick={() => onCellClick?.(cell)}
+                      style={{
+                        backgroundColor: bg || (cell.isHeader ? '#f8fafc' : undefined),
+                        padding: 0,
+                        ...colWidth,
+                        ...(isFirstSection && isSimpleRow ? { borderBottom: '1px solid #e2e8f0' } : {}),
+                      }}
+                      className={`border relative transition-colors ${
+                        isSelected
+                          ? 'ring-2 ring-inset ring-indigo-500 border-indigo-300'
+                          : onCellClick
+                          ? 'border-gray-300 cursor-pointer hover:bg-indigo-50/40'
+                          : 'border-gray-300'
+                      } ${
+                        cell.isHeader
+                          ? 'bg-gray-100/80 font-bold text-gray-800'
+                          : isFirstSection && isSimpleRow && cellIndex === 0
+                          ? 'bg-gradient-to-r from-slate-50 to-gray-50 font-semibold text-gray-700'
+                          : 'bg-white text-gray-700'
+                      }`}
+                    >
+                      <div
+                        className={`w-full h-full flex ${
+                          cell.isHeader
+                            ? 'justify-center text-center items-center'
+                            : shouldCenterV
+                            ? 'justify-start text-left items-center'
+                            : 'justify-start text-left items-start'
+                        } ${
+                          isFirstSection && isSimpleRow ? 'px-2 py-1' : 'px-1 py-0.5'
+                        }`}
+                        style={{
+                          writingMode: isVertical ? 'vertical-rl' : 'horizontal-tb',
+                          transform: isVertical ? 'rotate(180deg)' : 'none',
+                          maxHeight: isVertical ? '100px' : 'none',
+                          whiteSpace: isVertical ? 'nowrap' : 'pre-wrap',
+                          overflow: 'hidden',
+                          lineHeight: isFirstSection ? '1.4' : '1.3',
+                          fontSize: isFirstSection && isSimpleRow && cellIndex === 0 ? '13px' : isVertical ? '9px' : '12px',
+                          color: color || undefined,
+                          fontWeight: cell.fontWeight || (cell.isHeader ? '700' : undefined),
+                        }}
+                      >
+                        <div className="whitespace-pre-wrap break-words w-full" style={{ wordBreak: 'break-word', lineHeight: '1.3' }}>
+                          {cell.content || ''}
+                        </div>
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -86,6 +179,7 @@ function VisorContent() {
   const [error, setError] = useState<string | null>(null);
   const [tabActivo, setTabActivo] = useState(0);
   const [showComentarios, setShowComentarios] = useState(true);
+  const [selectedCell, setSelectedCell] = useState<{ id: string; content: string } | null>(null);
 
   const cargar = async () => {
     if (!id) return;
@@ -139,6 +233,7 @@ function VisorContent() {
   const tabActual = tabs[tabActivo];
 
   return (
+    <div className="flex flex-col gap-4">
     <div className="flex gap-4 h-[calc(100vh-11rem)]">
       {/* ── Panel del documento ── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -162,7 +257,7 @@ function VisorContent() {
         <div className="flex-1 bg-white rounded-xl border border-gray-200 overflow-auto flex flex-col">
           <div className="flex overflow-x-auto border-b border-gray-200 bg-gray-50 flex-shrink-0 items-center">
             {tabs.map((tab, idx) => (
-              <button key={tab.id} onClick={() => setTabActivo(idx)}
+              <button key={tab.id} onClick={() => { setTabActivo(idx); setSelectedCell(null); }}
                 className={`px-5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${idx === tabActivo ? "border-emerald-600 text-emerald-700 bg-white" : "border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100"}`}>
                 {tab.title || `Pestaña ${idx + 1}`}
               </button>
@@ -175,7 +270,14 @@ function VisorContent() {
           </div>
           <div className="p-4 overflow-auto flex-1">
             {tabs.length === 0 ? <p className="text-center text-gray-400 py-8">Este syllabus no tiene contenido.</p>
-              : tabActual?.rows?.length ? <ReadOnlyTable rows={tabActual.rows} />
+              : tabActual?.rows?.length ? <ReadOnlyTable
+                    rows={tabActual.rows}
+                    selectedCellId={selectedCell?.id}
+                    isFirstSection={/GENERAL|INFORMACIÓN|INFORMACION|DATOS/i.test(tabActual.title || '')}
+                    onCellClick={cell => setSelectedCell(
+                      selectedCell?.id === cell.id ? null : { id: cell.id, content: cell.content }
+                    )}
+                  />
                 : <p className="text-center text-gray-400 py-8">Esta pestaña está vacía.</p>}
           </div>
         </div>
@@ -190,16 +292,29 @@ function VisorContent() {
             usuarioId={user?.id}
             usuarioRol={user?.rol}
             marcarLeido={false}
+            celdaRef={selectedCell ? selectedCell.content : null}
+            onClearCeldaRef={() => setSelectedCell(null)}
           />
         </div>
       )}
+    </div>
+
+    {/* ── Panel de firmas digitales ── */}
+    <div className="max-w-2xl">
+      <FirmasPanel
+        tipo="syllabus"
+        documentoId={Number((data as any).syllabus_comision_id || parseInt(id!))}
+        documentoNombre={data?.asignatura?.nombre || 'Syllabus'}
+        onFirmado={cargar}
+      />
+    </div>
     </div>
   );
 }
 
 export default function VerSyllabusDocentePage() {
   return (
-    <ProtectedRoute allowedRoles={["comision", "comision_academica", "administrador"]}>
+    <ProtectedRoute allowedRoles={["coordinador", "comision", "comision_academica", "administrador"]}>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
         <main className="max-w-full px-4 py-5 space-y-4">

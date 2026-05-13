@@ -54,12 +54,34 @@ export default function CalendarioPublico() {
   const daysInMonth = new Date(year, month + 1, 0).getDate()
 
   const eventosDelMes = eventos.filter(ev => {
-    const d = new Date(ev.fecha_inicio)
-    return d.getUTCFullYear() === year && d.getUTCMonth() === month
+    const inicio = new Date(ev.fecha_inicio)
+    const fin = new Date(ev.fecha_fin)
+    const mesInicio = new Date(year, month, 1)
+    const mesFin = new Date(year, month + 1, 0, 23, 59, 59)
+    // Incluir si el evento se superpone con este mes
+    return inicio <= mesFin && fin >= mesInicio
   })
 
-  const eventosEnDia = (day: number) =>
-    eventosDelMes.filter(ev => new Date(ev.fecha_inicio).getUTCDate() === day)
+  const eventosEnDia = (day: number) => {
+    const fecha = new Date(year, month, day)
+    return eventosDelMes.filter(ev => {
+      const inicio = new Date(ev.fecha_inicio)
+      const fin = new Date(ev.fecha_fin)
+      const diaInicio = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate())
+      const diaFin = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate())
+      return fecha >= diaInicio && fecha <= diaFin
+    })
+  }
+
+  const esInicioEvento = (ev: Evento, day: number) => {
+    const d = new Date(ev.fecha_inicio)
+    return d.getFullYear() === year && d.getMonth() === month && d.getDate() === day
+  }
+
+  const esFinEvento = (ev: Evento, day: number) => {
+    const d = new Date(ev.fecha_fin)
+    return d.getFullYear() === year && d.getMonth() === month && d.getDate() === day
+  }
 
   const hace30Dias = new Date()
   hace30Dias.setDate(hace30Dias.getDate() - 30)
@@ -135,23 +157,34 @@ export default function CalendarioPublico() {
                         {day}
                       </div>
                       <div className="space-y-0.5">
-                        {evs.slice(0, 2).map(ev => (
-                          <button
-                            key={ev.id}
-                            onClick={() => setSelectedEvento(ev)}
-                            className="w-full text-left text-[9px] px-1 py-0.5 rounded text-white font-medium truncate hover:opacity-80 transition-opacity leading-tight"
-                            style={{ backgroundColor: ev.color }}
-                          >
-                            {ev.titulo}
-                          </button>
-                        ))}
+                        {evs.slice(0, 2).map(ev => {
+                          const isStart = esInicioEvento(ev, day)
+                          const isEnd = esFinEvento(ev, day)
+                          let roundedClass = ''
+                          if (isStart && isEnd) { roundedClass = 'rounded' }
+                          else if (isStart) { roundedClass = 'rounded-l' }
+                          else if (isEnd) { roundedClass = 'rounded-r' }
+                          const label = isStart ? ev.titulo : '\u00a0'
+                          return (
+                            <button
+                              key={ev.id}
+                              onClick={() => setSelectedEvento(ev)}
+                              className={`w-full text-left text-[9px] px-1 py-0.5 text-white font-medium truncate hover:opacity-80 transition-opacity leading-tight ${roundedClass}`}
+                              style={{ backgroundColor: ev.color }}
+                              title={ev.titulo}
+                            >
+                              {label}
+                            </button>
+                          )
+                        })}
                         {evs.length > 2 && (
-                          <div
+                          <button
+                            type="button"
                             className="text-[9px] text-emerald-600 pl-0.5 cursor-pointer font-medium"
                             onClick={() => setSelectedEvento(evs[2])}
                           >
                             +{evs.length - 2} más
-                          </div>
+                          </button>
                         )}
                       </div>
                     </div>

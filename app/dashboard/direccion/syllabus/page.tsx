@@ -8,7 +8,7 @@ export default function DireccionSyllabusPage() {
     <ProtectedRoute allowedRoles={['direccion', 'administrador']}>
       <DocumentosFirmarVista
         tipo="syllabus"
-        etapaUsuario="direccion"
+        etapaUsuario="director_academico"
         rolDashboard="direccion"
       />
     </ProtectedRoute>

@@ -185,7 +185,7 @@ const extraerTablasNativasWord = async (file: File): Promise<ExtractedCell[][][]
 };
 
 /** Comisión: estructura de tabla definida por administración; solo edición de contenido. */
-const HERRAMIENTAS_TABLA_BLOQUEADAS = true
+const HERRAMIENTAS_TABLA_BLOQUEADAS = false
 
 export default function EditorSyllabusComisionPage() {
   const { token, getToken, user } = useAuth()
@@ -205,6 +205,8 @@ export default function EditorSyllabusComisionPage() {
   const [isListLoading, setIsListLoading] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [tempName, setTempName] = useState("")
   const searchParams = useSearchParams()
   const [selectedCells, setSelectedCells] = useState<string[]>([])
   const [editingCell, setEditingCell] = useState<string | null>(null)
@@ -841,7 +843,8 @@ export default function EditorSyllabusComisionPage() {
       const savedUIData = savedRecord.datos_syllabus;
       if (savedUIData) {
         savedUIData.id = savedRecord.id;
-        
+        savedUIData.name = savedRecord.nombre || activeSyllabus.name;
+
         if (savedUIData.tabs) {
             savedUIData.tabs = savedUIData.tabs.map((t: any) => ({
                 ...t, rows: t.rows.map((r: any) => ({
@@ -1897,7 +1900,26 @@ export default function EditorSyllabusComisionPage() {
               <Card className="mb-6 border-t-4 border-t-emerald-600">
                 <CardHeader>
                   <CardTitle className="flex flex-wrap items-center justify-between gap-4 text-emerald-800">
-                    <span className="truncate">{activeSyllabus.name}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {editingName ? (
+                        <>
+                          <Input
+                            value={tempName}
+                            onChange={e => setTempName(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { setSyllabi(p => p.map(s => s.id === activeSyllabusId ? { ...s, name: tempName } : s)); setEditingName(false); } if (e.key === 'Escape') setEditingName(false); }}
+                            className="h-8 text-sm font-semibold"
+                            autoFocus
+                          />
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => { setSyllabi(p => p.map(s => s.id === activeSyllabusId ? { ...s, name: tempName } : s)); setEditingName(false); }}><Check className="h-4 w-4 text-green-600" /></Button>
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => setEditingName(false)}><X className="h-4 w-4 text-red-500" /></Button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="truncate">{activeSyllabus.name}</span>
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7 flex-shrink-0" title="Renombrar" onClick={() => { setTempName(activeSyllabus.name); setEditingName(true); }}><Pencil className="h-4 w-4" /></Button>
+                        </>
+                      )}
+                    </div>
                     <div className="flex gap-2 flex-wrap">
                        <Button onClick={() => { setActiveSyllabusId(null); setSyllabi([]); }} variant="outline" size="sm"><Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
                        <Button onClick={handleSaveToDB} className="bg-blue-600 hover:bg-blue-700" size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2"/> Guardar</>}</Button>

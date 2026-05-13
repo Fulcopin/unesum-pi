@@ -4,6 +4,139 @@
 const { SyllabusDocente, ProgramaAnaliticoDocente, SyllabusComisionAcademica, ProgramasAnaliticos, Profesor, Asignatura, Nivel, Paralelo, Carrera, Syllabus, Facultad, Periodo, sequelize: dbSequelize } = require('../models');
 const { Op } = require('sequelize');
 
+const getCellPositionKey = (tabIndex, rowIndex, cellIndex) => `${tabIndex}:${rowIndex}:${cellIndex}`;
+
+const buildComisionLockState = (datos) => {
+  const lockById = {};
+  const lockByPosition = {};
+  const tabs = Array.isArray(datos?.tabs)
+    ? datos.tabs
+    : Array.isArray(datos?.rows)
+      ? [{ rows: datos.rows }]
+      : [];
+
+  tabs.forEach((tab, tabIndex) => {
+    (tab.rows || []).forEach((row, rowIndex) => {
+      (row.cells || []).forEach((cell, cellIndex) => {
+        const locked = !!cell?.isLocked;
+        if (cell?.id) lockById[cell.id] = locked;
+        lockByPosition[getCellPositionKey(tabIndex, rowIndex, cellIndex)] = locked;
+      });
+    });
+  });
+
+  return { lockById, lockByPosition };
+};
+
+const applyComisionLocksToDocente = (datos, lockState) => {
+  if (Array.isArray(datos?.tabs)) {
+    return {
+      ...datos,
+      tabs: datos.tabs.map((tab, tabIndex) => ({
+        ...tab,
+        rows: (tab.rows || []).map((row, rowIndex) => ({
+          ...row,
+          cells: (row.cells || []).map((cell, cellIndex) => {
+            const positionKey = getCellPositionKey(tabIndex, rowIndex, cellIndex);
+            const locked = Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)
+              ? lockState.lockById[cell.id]
+              : (lockState.lockByPosition[positionKey] ?? false);
+
+            return { ...cell, isLocked: locked };
+          })
+        }))
+      }))
+    };
+  }
+
+  if (Array.isArray(datos?.rows)) {
+    return {
+      ...datos,
+      rows: (datos.rows || []).map((row, rowIndex) => ({
+        ...row,
+        cells: (row.cells || []).map((cell, cellIndex) => {
+          const positionKey = getCellPositionKey(0, rowIndex, cellIndex);
+          const locked = Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)
+            ? lockState.lockById[cell.id]
+            : (lockState.lockByPosition[positionKey] ?? false);
+
+          return { ...cell, isLocked: locked };
+        })
+      }))
+    };
+  }
+
+  return datos;
+};
+
+const resolvePeriodoValues = async (periodo) => {
+  const values = [];
+  if (!periodo) return values;
+
+  values.push(String(periodo));
+  try {
+    const periodoRecord = await Periodo.findByPk(parseInt(periodo, 10));
+    if (periodoRecord?.nombre) values.push(periodoRecord.nombre);
+  } catch (e) {}
+
+  if (values.length === 1) {
+    try {
+      const periodoByName = await Periodo.findOne({ where: { nombre: periodo } });
+      if (periodoByName) values.push(String(periodoByName.id));
+    } catch (e) {}
+  }
+
+  return Array.from(new Set(values));
+};
+
+const findSyllabusComisionForDocente = async ({ syllabusComisionId, asignaturaId, periodo }) => {
+  if (syllabusComisionId) {
+    const byId = await SyllabusComisionAcademica.findByPk(syllabusComisionId);
+    if (byId) return byId;
+  }
+
+  if (!asignaturaId) return null;
+
+  const periodoValues = await resolvePeriodoValues(periodo);
+  if (periodoValues.length > 0) {
+    const byPeriodo = await SyllabusComisionAcademica.findOne({
+      where: {
+        asignatura_id: asignaturaId,
+        periodo: { [Op.in]: periodoValues }
+      },
+      order: [['updated_at', 'DESC']]
+    });
+    if (byPeriodo) return byPeriodo;
+  }
+
+  const byLatestComision = await SyllabusComisionAcademica.findOne({
+    where: { asignatura_id: asignaturaId },
+    order: [['updated_at', 'DESC']]
+  });
+  if (byLatestComision) return byLatestComision;
+
+  // Fallback: buscar en tabla general syllabi (admin puede bloquear el template general)
+  if (periodoValues.length > 0) {
+    const byGeneralPeriodo = await Syllabus.findOne({
+      where: { asignatura_id: asignaturaId, periodo: { [Op.in]: periodoValues } },
+      order: [['updatedAt', 'DESC']]
+    });
+    if (byGeneralPeriodo) return byGeneralPeriodo;
+  }
+
+  const byGeneralAsignatura = await Syllabus.findOne({
+    where: { asignatura_id: asignaturaId },
+    order: [['updatedAt', 'DESC']]
+  });
+  if (byGeneralAsignatura) return byGeneralAsignatura;
+
+  // Último fallback: plantilla de referencia global
+  return Syllabus.findOne({
+    where: { es_plantilla_referencia: true },
+    order: [['updatedAt', 'DESC']]
+  });
+};
+
 // =========================================================================
 // PERFIL DEL DOCENTE (obtener info del profesor logueado)
 // =========================================================================
@@ -134,6 +267,66 @@ exports.getSyllabusComision = async (req, res) => {
     let datos = syllabus.datos_syllabus;
     if (typeof datos === 'string') {
       try { datos = JSON.parse(datos); } catch (e) { /* keep as is */ }
+    }
+
+    // === MERGE LOCKS FROM GENERAL TEMPLATE ===
+    // The main syllabus may be a commission record (no locks).
+    // Look for the admin's general locked template and apply its locks positionally.
+    try {
+      let lockTemplate = null;
+
+      // 1. Try matching period + asignatura_id IS NULL (the admin "blank" template)
+      const allPeriodoValues = [...periodoValues];
+      // Also try resolving the period of the found syllabus (may differ from request)
+      if (syllabus.periodo && !allPeriodoValues.includes(String(syllabus.periodo))) {
+        allPeriodoValues.push(String(syllabus.periodo));
+        // Try to resolve by name too
+        try {
+          const pRec = await Periodo.findOne({ where: { nombre: syllabus.periodo } });
+          if (pRec) allPeriodoValues.push(String(pRec.id));
+          const pById = await Periodo.findByPk(parseInt(syllabus.periodo));
+          if (pById?.nombre) allPeriodoValues.push(pById.nombre);
+        } catch(e) { /* ignore */ }
+      }
+
+      if (allPeriodoValues.length > 0) {
+        lockTemplate = await Syllabus.findOne({
+          where: { asignatura_id: null, periodo: { [Op.in]: allPeriodoValues } },
+          order: [['updatedAt', 'DESC']]
+        });
+      }
+
+      // 2. Fallback: any general template (asignatura_id IS NULL, most recent)
+      if (!lockTemplate) {
+        lockTemplate = await Syllabus.findOne({
+          where: { asignatura_id: null },
+          order: [['updatedAt', 'DESC']]
+        });
+      }
+
+      // 3. Fallback: es_plantilla_referencia
+      if (!lockTemplate) {
+        lockTemplate = await Syllabus.findOne({
+          where: { es_plantilla_referencia: true },
+          order: [['updatedAt', 'DESC']]
+        });
+      }
+
+      // Apply locks if we found a DIFFERENT template with locked cells
+      if (lockTemplate && String(lockTemplate.id) !== String(syllabus.id)) {
+        let lockDatos = lockTemplate.datos_syllabus;
+        if (typeof lockDatos === 'string') { try { lockDatos = JSON.parse(lockDatos); } catch(e) {} }
+        const lockState = buildComisionLockState(lockDatos);
+        // Only merge if template actually has some locks
+        const hasLocks = Object.values(lockState.lockById).some(v => v) ||
+                         Object.values(lockState.lockByPosition).some(v => v);
+        if (hasLocks) {
+          datos = applyComisionLocksToDocente(datos, lockState);
+          console.log(`✅ Applied ${Object.values(lockState.lockById).filter(Boolean).length} locks from general template ID ${lockTemplate.id} to commission/docente data`);
+        }
+      }
+    } catch (lockErr) {
+      console.warn('Could not merge template locks:', lockErr.message);
     }
 
     res.json({
@@ -340,10 +533,68 @@ exports.getSyllabusDocente = async (req, res) => {
       try { datos = JSON.parse(datos); } catch (e) {}
     }
 
+    let resolvedSyllabusComisionId = syllabus.syllabus_comision_id;
+    const syllabusComision = await findSyllabusComisionForDocente({
+      syllabusComisionId: syllabus.syllabus_comision_id,
+      asignaturaId: syllabus.asignatura_id || asignatura_id,
+      periodo: syllabus.periodo || periodo
+    });
+
+    if (syllabusComision) {
+      let datosComision = syllabusComision.datos_syllabus;
+      if (typeof datosComision === 'string') {
+        try { datosComision = JSON.parse(datosComision); } catch (e) {}
+      }
+
+      const lockState = buildComisionLockState(datosComision);
+      datos = applyComisionLocksToDocente(datos, lockState);
+      resolvedSyllabusComisionId = syllabusComision.id;
+    }
+
+    // === ALSO MERGE LOCKS FROM GENERAL TEMPLATE ===
+    try {
+      const periodoValuesForLock = await resolvePeriodoValues(syllabus.periodo || periodo);
+      let lockTemplate = null;
+
+      if (periodoValuesForLock.length > 0) {
+        lockTemplate = await Syllabus.findOne({
+          where: { asignatura_id: null, periodo: { [Op.in]: periodoValuesForLock } },
+          order: [['updatedAt', 'DESC']]
+        });
+      }
+      if (!lockTemplate) {
+        lockTemplate = await Syllabus.findOne({
+          where: { asignatura_id: null },
+          order: [['updatedAt', 'DESC']]
+        });
+      }
+      if (!lockTemplate) {
+        lockTemplate = await Syllabus.findOne({
+          where: { es_plantilla_referencia: true },
+          order: [['updatedAt', 'DESC']]
+        });
+      }
+
+      // Only apply if different from the commission record already applied
+      if (lockTemplate && String(lockTemplate.id) !== String(syllabusComision?.id)) {
+        let lockDatos = lockTemplate.datos_syllabus;
+        if (typeof lockDatos === 'string') { try { lockDatos = JSON.parse(lockDatos); } catch(e) {} }
+        const lockState = buildComisionLockState(lockDatos);
+        const hasLocks = Object.values(lockState.lockById).some(v => v) ||
+                         Object.values(lockState.lockByPosition).some(v => v);
+        if (hasLocks) {
+          datos = applyComisionLocksToDocente(datos, lockState);
+        }
+      }
+    } catch (lockErr) {
+      console.warn('Could not merge template locks in getSyllabusDocente:', lockErr.message);
+    }
+
     res.json({
       success: true,
       data: {
         ...syllabus.toJSON(),
+        syllabus_comision_id: resolvedSyllabusComisionId,
         datos_syllabus: datos
       }
     });

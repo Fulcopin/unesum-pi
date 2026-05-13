@@ -30,6 +30,7 @@ const ETAPA_LABELS: Record<string, string> = {
 const ROL_A_ETAPA: Record<string, string> = {
   docente: 'docente',
   profesor: 'docente',
+  coordinador: 'coordinador',
   comision: 'coordinador',
   comision_academica: 'coordinador',
   decano: 'decano',
@@ -139,8 +140,14 @@ export function FirmasPanel({ tipo, documentoId, documentoNombre, onFirmado }: P
 
   const rolUsuario = user?.rol || '';
   const etapaUsuario = ROL_A_ETAPA[rolUsuario] || null;
+  // Solo administrador puede firmar sin respetar el orden secuencial
+  const ROLES_SIN_ORDEN = ['administrador'];
+  const puedeFirmarSinOrden = ROLES_SIN_ORDEN.includes(rolUsuario);
+  const yaFirmoSuEtapa = !!data?.etapas?.find(e => e.etapa === etapaUsuario && e.firmado);
   const meTocaFirmar =
-    !!data && etapaUsuario === data.siguiente_etapa && !data.completo;
+    !!data && !data.completo && etapaUsuario &&
+    !yaFirmoSuEtapa &&
+    (etapaUsuario === data.siguiente_etapa || puedeFirmarSinOrden);
 
   return (
     <>

@@ -5,10 +5,10 @@ import { DocumentosFirmarVista } from '@/components/firmas/documentos-firmar-vis
 
 export default function ComisionFirmarSyllabusPage() {
   return (
-    <ProtectedRoute allowedRoles={['comision', 'comision_academica', 'administrador']}>
+    <ProtectedRoute allowedRoles={['coordinador', 'comision', 'comision_academica', 'administrador']}>
       <DocumentosFirmarVista
         tipo="syllabus"
-        etapaUsuario="comision_academica"
+        etapaUsuario="coordinador"
         rolDashboard="comision"
       />
     </ProtectedRoute>

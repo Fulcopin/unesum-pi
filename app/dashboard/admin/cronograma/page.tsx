@@ -96,6 +96,8 @@ export default function AdminCronogramaPage() {
   const [saving, setSaving] = useState(false)
   const [currentDate, setCurrentDate] = useState(new Date())
   const [view, setView] = useState<"calendar" | "list">("list")
+  const [rangeStart, setRangeStart] = useState<number | null>(null)
+  const [rangeEnd, setRangeEnd] = useState<number | null>(null)
 
   const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api"
 
@@ -186,6 +188,30 @@ export default function AdminCronogramaPage() {
 
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1))
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1))
+
+  const handleDayClick = (day: number) => {
+    if (rangeStart === null) {
+      // Primer clic: inicio del rango
+      setRangeStart(day)
+      setRangeEnd(null)
+    } else if (rangeEnd === null && day !== rangeStart) {
+      // Segundo clic: fin del rango → abrir formulario con fechas pre-rellenadas
+      const start = Math.min(rangeStart, day)
+      const end = Math.max(rangeStart, day)
+      const pad = (n: number) => String(n).padStart(2, "0")
+      const startStr = `${year}-${pad(month + 1)}-${pad(start)}T08:00`
+      const endStr   = `${year}-${pad(month + 1)}-${pad(end)}T17:00`
+      setForm(f => ({ ...f, fecha_inicio: startStr, fecha_fin: endStr }))
+      setEditingId(null)
+      setShowForm(true)
+      setRangeStart(null)
+      setRangeEnd(null)
+    } else {
+      // Clic en el mismo día o reinicio
+      setRangeStart(day)
+      setRangeEnd(null)
+    }
+  }
 
   return (
     <ProtectedRoute allowedRoles={["administrador"]}>
@@ -329,7 +355,16 @@ export default function AdminCronogramaPage() {
                   <Button variant="ghost" size="sm" className="text-white hover:bg-white/20" onClick={prevMonth}>
                     <ChevronLeft className="h-5 w-5" />
                   </Button>
-                  <h2 className="text-xl font-bold">{MONTHS[month]} {year}</h2>
+                  <div className="text-center">
+                    <h2 className="text-xl font-bold">{MONTHS[month]} {year}</h2>
+                    {rangeStart !== null ? (
+                      <p className="text-xs text-blue-200 mt-0.5">
+                        Desde día {rangeStart} seleccionado — haz clic en el día final del rango
+                      </p>
+                    ) : (
+                      <p className="text-xs text-blue-200 mt-0.5">Clic en un día para iniciar un rango</p>
+                    )}
+                  </div>
                   <Button variant="ghost" size="sm" className="text-white hover:bg-white/20" onClick={nextMonth}>
                     <ChevronRight className="h-5 w-5" />
                   </Button>
@@ -351,9 +386,18 @@ export default function AdminCronogramaPage() {
                     const day = i + 1
                     const evs = eventosEnDia(day)
                     const isToday = new Date().getDate() === day && new Date().getMonth() === month && new Date().getFullYear() === year
+                    const isRangeStart = rangeStart === day
+                    const isInRange = rangeStart !== null && day >= Math.min(rangeStart, rangeEnd ?? rangeStart) && day <= Math.max(rangeStart, rangeEnd ?? rangeStart)
                     return (
-                      <div key={day} className={`min-h-[90px] border-r border-b p-1 ${isToday ? "bg-blue-50" : "bg-white hover:bg-gray-50"}`}>
-                        <div className={`text-sm font-medium mb-1 w-7 h-7 flex items-center justify-center rounded-full ${isToday ? "bg-blue-600 text-white" : "text-gray-700"}`}>
+                      <div
+                        key={day}
+                        className={`min-h-[90px] border-r border-b p-1 cursor-pointer transition-colors
+                          ${isRangeStart ? "ring-2 ring-inset ring-blue-500" : ""}
+                          ${isInRange && !isRangeStart ? "bg-blue-100" : isToday ? "bg-blue-50" : "bg-white hover:bg-gray-50"}`}
+                        onClick={() => handleDayClick(day)}
+                        onMouseEnter={() => rangeStart !== null && rangeEnd === null && setRangeEnd(day)}
+                      >
+                        <div className={`text-sm font-medium mb-1 w-7 h-7 flex items-center justify-center rounded-full ${isRangeStart ? "bg-blue-600 text-white" : isToday ? "bg-blue-400 text-white" : "text-gray-700"}`}>
                           {day}
                         </div>
                         <div className="space-y-0.5">
@@ -363,7 +407,7 @@ export default function AdminCronogramaPage() {
                               className="text-[10px] px-1.5 py-0.5 rounded text-white font-medium truncate cursor-pointer hover:opacity-80"
                               style={{ backgroundColor: ev.color }}
                               title={ev.titulo}
-                              onClick={() => handleEdit(ev)}
+                              onClick={e => { e.stopPropagation(); handleEdit(ev) }}
                             >
                               {ev.titulo}
                             </div>

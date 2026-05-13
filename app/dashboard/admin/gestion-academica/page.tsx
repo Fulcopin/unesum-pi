@@ -274,7 +274,9 @@ export default function GestionAcademicaPage() {
                         <Table>
                             <TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Nombre Carrera</TableHead><TableHead>Facultad</TableHead><TableHead>Acciones</TableHead></TableRow></TableHeader>
                             <TableBody>
-                                {carreras.map(c => (
+                                {carreras
+                                  .filter(c => !selectedFacultadId || Number(c.facultad_id) === Number(selectedFacultadId))
+                                  .map(c => (
                                     <TableRow key={c.id}>
                                         <TableCell>{c.id}</TableCell>
                                         <TableCell className="font-medium">{c.nombre}</TableCell>

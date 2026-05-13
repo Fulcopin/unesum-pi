@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
-  MessageSquare, Send, Trash2, AlertCircle, RefreshCw, CheckCheck,
+  MessageSquare, Send, Trash2, AlertCircle, RefreshCw, CheckCheck, Pin, X,
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
@@ -29,6 +29,10 @@ interface Props {
   usuarioRol?: string;
   /** Si true, muestra un badge de "no leídos" y marca al abrir */
   marcarLeido?: boolean;
+  /** Referencia de celda seleccionada (se antepone al comentario) */
+  celdaRef?: string | null;
+  /** Callback para deseleccionar la celda */
+  onClearCeldaRef?: () => void;
 }
 
 const ROL_LABELS: Record<string, { label: string; color: string }> = {
@@ -51,7 +55,7 @@ function formatFecha(iso: string) {
   } catch { return iso; }
 }
 
-export function ComentariosPanel({ tipo, documentoId, usuarioId, usuarioRol, marcarLeido = true }: Props) {
+export function ComentariosPanel({ tipo, documentoId, usuarioId, usuarioRol, marcarLeido = true, celdaRef, onClearCeldaRef }: Props) {
   const [comentarios, setComentarios] = useState<Comentario[]>([]);
   const [texto, setTexto] = useState("");
   const [loading, setLoading] = useState(true);
@@ -97,15 +101,18 @@ export function ComentariosPanel({ tipo, documentoId, usuarioId, usuarioRol, mar
   const enviar = async () => {
     if (!texto.trim()) return;
     setEnviando(true);
+    const preview = celdaRef ? celdaRef.trim().slice(0, 60) + (celdaRef.trim().length > 60 ? "…" : "") : null;
+    const mensajeFinal = preview ? `📌 Celda: "${preview}"\n${texto.trim()}` : texto.trim();
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/comentarios-documento`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ documento_tipo: tipo, documento_id: documentoId, comentario: texto.trim() }),
+        body: JSON.stringify({ documento_tipo: tipo, documento_id: documentoId, comentario: mensajeFinal }),
       });
       if (!res.ok) throw new Error("Error al enviar comentario");
       setTexto("");
+      onClearCeldaRef?.();
       await cargar();
     } catch (e: any) {
       setError(e.message);
@@ -205,6 +212,18 @@ export function ComentariosPanel({ tipo, documentoId, usuarioId, usuarioRol, mar
 
       {/* Caja de texto */}
       <div className="border-t border-gray-200 p-3 bg-gray-50">
+        {celdaRef && (
+          <div className="flex items-start gap-1.5 mb-2 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1.5 text-xs text-indigo-700">
+            <Pin className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 text-indigo-500" />
+            <span className="flex-1 line-clamp-2 leading-snug">
+              <span className="font-semibold">Comentando sobre:</span>{" "}
+              {celdaRef.trim().slice(0, 80)}{celdaRef.trim().length > 80 ? "…" : ""}
+            </span>
+            <button onClick={onClearCeldaRef} className="flex-shrink-0 hover:text-indigo-900 transition-colors" title="Quitar referencia">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
         <div className="flex gap-2 items-end">
           <Textarea
             value={texto}

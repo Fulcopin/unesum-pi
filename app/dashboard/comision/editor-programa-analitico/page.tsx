@@ -41,7 +41,7 @@ interface ProgramaAnaliticoData { id: string | number; name: string; description
 interface SavedProgramaAnaliticoRecord { id: number; nombre: string; periodo: string; materias: string; datos_tabla: ProgramaAnaliticoData; created_at: string; updated_at: string; }
 
 /** Comisión: estructura de tabla definida por administración; solo edición de contenido. */
-const HERRAMIENTAS_TABLA_BLOQUEADAS = true
+const HERRAMIENTAS_TABLA_BLOQUEADAS = false
 
 export default function EditorProgramaAnaliticoComisionPage() {
   const { token, getToken } = useAuth()
@@ -64,6 +64,8 @@ export default function EditorProgramaAnaliticoComisionPage() {
   const [isListLoading, setIsListLoading] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [tempName, setTempName] = useState("")
   
   const [selectedCells, setSelectedCells] = useState<string[]>([])
   const [editingCell, setEditingCell] = useState<string | null>(null)
@@ -203,7 +205,8 @@ export default function EditorProgramaAnaliticoComisionPage() {
       // Incluir asignatura_id si viene de la URL
       if (asignaturaParam) payload.asignatura_id = parseInt(asignaturaParam, 10);
       
-      const isUpdate = typeof activePrograma.id === "number"
+      // Considerar IDs numéricos Y strings que sean números (PostgreSQL BIGINT viene como string)
+      const isUpdate = activePrograma.id !== null && activePrograma.id !== undefined && !String(activePrograma.id).startsWith('programa-')
       const endpoint = isUpdate ? `/api/programas-analiticos/${activePrograma.id}` : "/api/programas-analiticos"
       const method = isUpdate ? "PUT" : "POST"
 
@@ -212,6 +215,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
       
       const savedUIData = savedRecord.datos_tabla || (savedRecord as any).datos_programa;
       savedUIData.id = savedRecord.id;
+      savedUIData.name = savedRecord.nombre || activePrograma.name;
       
       if (savedUIData.tabs) {
           savedUIData.tabs = savedUIData.tabs.map((t: any) => ({
@@ -1009,9 +1013,14 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                   <p className="font-medium">{s.nombre}</p>
                                   <p className="text-sm text-gray-500">{s.periodo} - {s.materias}</p>
                                 </div>
-                                <Button onClick={() => { handleLoadPrograma(s.id.toString()); setShowProgramaSelector(false); }} className="bg-blue-600 hover:bg-blue-700">
-                                  Seleccionar
-                                </Button>
+                                <div className="flex gap-2">
+                                  <Button onClick={() => { handleLoadPrograma(s.id.toString()); setShowProgramaSelector(false); }} className="bg-blue-600 hover:bg-blue-700">
+                                    Seleccionar
+                                  </Button>
+                                  <Button variant="outline" onClick={() => handleDeletePrograma(s.id)} className="text-red-600 hover:text-red-700 border-red-200">
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -1093,7 +1102,26 @@ export default function EditorProgramaAnaliticoComisionPage() {
               <Card className="mb-6 border-t-4 border-t-blue-600">
                 <CardHeader>
                   <CardTitle className="flex flex-wrap items-center justify-between gap-4 text-blue-800">
-                    <span className="truncate">{activePrograma.name}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {editingName ? (
+                        <>
+                          <Input
+                            value={tempName}
+                            onChange={e => setTempName(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { setProgramas(p => p.map(s => s.id === activeProgramaId ? { ...s, name: tempName } : s)); setEditingName(false); } if (e.key === 'Escape') setEditingName(false); }}
+                            className="h-8 text-sm font-semibold"
+                            autoFocus
+                          />
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => { setProgramas(p => p.map(s => s.id === activeProgramaId ? { ...s, name: tempName } : s)); setEditingName(false); }}><Check className="h-4 w-4 text-green-600" /></Button>
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => setEditingName(false)}><X className="h-4 w-4 text-red-500" /></Button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="truncate">{activePrograma.name}</span>
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7 flex-shrink-0" title="Renombrar" onClick={() => { setTempName(activePrograma.name); setEditingName(true); }}><Pencil className="h-4 w-4" /></Button>
+                        </>
+                      )}
+                    </div>
                     <div className="flex-shrink-0 flex items-center gap-2">
                        <Button onClick={() => { setActiveProgramaId(null); setProgramas([]); }} variant="outline" size="sm"> <Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
                        <Button onClick={handleSaveToDB} className="bg-emerald-600 hover:bg-emerald-700" size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> Guardar</>}</Button>

@@ -44,7 +44,7 @@ function getNivelLabel(nivel: { nombre: string; codigo: string; romano?: string;
 interface Facultad { id: number; nombre: string }
 interface Carrera { id: number; nombre: string; facultad_id: number }
 interface Nivel { id: number; nombre: string; codigo: string; ordinal?: string; romano?: string }
-interface Asignatura { id: number; nombre: string; codigo: string; carrera_id: number }
+interface Asignatura { id: number; nombre: string; codigo: string; carrera_id: number; nivel_id?: number }
 interface Paralelo { id: number; nombre: string; codigo: string }
 interface Rol { id: number; nombre: string; estado: boolean }
 interface Profesor {
@@ -384,17 +384,21 @@ export default function GestionDocentesPage() {
     let result = asignaturas;
     // Filtrar por carreras seleccionadas en el formulario
     if (selectedCarrerasIds.length > 0) {
-      result = result.filter(a => selectedCarrerasIds.includes(a.carrera_id));
+      result = result.filter(a => selectedCarrerasIds.includes(Number(a.carrera_id)));
     }
     // Filtrar además por malla si está seleccionada
     if (filtros.malla && filtros.malla !== "todas") {
-      const mallaSeleccionada = mallas.find(m => m.id === parseInt(filtros.malla, 10));
+      const mallaSeleccionada = mallas.find(m => Number(m.id) === parseInt(filtros.malla, 10));
       if (mallaSeleccionada) {
-        result = result.filter(a => a.carrera_id === mallaSeleccionada.carrera_id);
+        result = result.filter(a => Number(a.carrera_id) === Number(mallaSeleccionada.carrera_id));
       }
     }
+    // Filtrar por niveles seleccionados en el formulario
+    if (selectedNivelesIds.length > 0) {
+      result = result.filter(a => a.nivel_id != null && selectedNivelesIds.includes(Number(a.nivel_id)));
+    }
     return result;
-  }, [filtros.malla, asignaturas, mallas, selectedCarrerasIds]);
+  }, [filtros.malla, asignaturas, mallas, selectedCarrerasIds, selectedNivelesIds]);
 
   const carrerasFiltradasPorFiltro = useMemo(() => {
     if (!filtros.facultad) return [];
@@ -465,23 +469,23 @@ export default function GestionDocentesPage() {
     }
     setSelectedCarrerasIds(carrerasProf);
     // Cargar las asignaturas asociadas
-    const asignaturasProf = profesor.asignaturas?.map(a => a.id) || [];
+    const asignaturasProf = profesor.asignaturas?.map(a => Number(a.id)) || [];
     if (asignaturasProf.length === 0 && profesor.asignatura_id) {
-      asignaturasProf.push(profesor.asignatura_id);
+      asignaturasProf.push(Number(profesor.asignatura_id));
     }
     setSelectedAsignaturasIds(asignaturasProf);
     // Cargar los roles asociados
-    const rolesProf = profesor.roles?.map(r => r.id) || [];
+    const rolesProf = profesor.roles?.map(r => Number(r.id)) || [];
     if (rolesProf.length === 0 && profesor.rol_id) {
-      rolesProf.push(profesor.rol_id);
+      rolesProf.push(Number(profesor.rol_id));
     }
     setSelectedRolesIds(rolesProf);
     // Cargar niveles M2M (si existen) o el nivel_id individual
-    const nivelesProf: number[] = (profesor as any).niveles?.map((n: any) => n.id) || [];
+    const nivelesProf: number[] = (profesor as any).niveles?.map((n: any) => Number(n.id)) || [];
     if (nivelesProf.length === 0 && profesor.nivel_id) nivelesProf.push(Number(profesor.nivel_id));
     setSelectedNivelesIds(nivelesProf);
     // Cargar paralelos M2M (si existen) o el paralelo_id individual
-    const paralelosProf: number[] = (profesor as any).paralelos?.map((p: any) => p.id) || [];
+    const paralelosProf: number[] = (profesor as any).paralelos?.map((p: any) => Number(p.id)) || [];
     if (paralelosProf.length === 0 && profesor.paralelo_id) paralelosProf.push(Number(profesor.paralelo_id));
     setSelectedParalelosIds(paralelosProf);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -528,14 +532,14 @@ export default function GestionDocentesPage() {
       activo: formData.activo,
       carrera: carreraId,
       carreras_ids: selectedCarrerasIds.length > 0 ? selectedCarrerasIds : [carreraId],
-      asignatura_id: selectedAsignaturasIds.length > 0 ? selectedAsignaturasIds[0] : (formData.asignatura ? parseInt(formData.asignatura, 10) : null),
-      asignaturas_ids: selectedAsignaturasIds.length > 0 ? selectedAsignaturasIds : (formData.asignatura ? [parseInt(formData.asignatura, 10)] : []),
-      nivel_id: selectedNivelesIds.length > 0 ? selectedNivelesIds[0] : (formData.nivel ? parseInt(formData.nivel, 10) : null),
-      niveles_ids: selectedNivelesIds.length > 0 ? selectedNivelesIds : (formData.nivel ? [parseInt(formData.nivel, 10)] : []),
-      paralelo_id: selectedParalelosIds.length > 0 ? selectedParalelosIds[0] : (formData.paralelo ? parseInt(formData.paralelo, 10) : null),
-      paralelos_ids: selectedParalelosIds.length > 0 ? selectedParalelosIds : (formData.paralelo ? [parseInt(formData.paralelo, 10)] : []),
-      rol_id: selectedRolesIds.length > 0 ? selectedRolesIds[0] : (formData.rol ? parseInt(formData.rol, 10) : null),
-      roles_ids: selectedRolesIds.length > 0 ? selectedRolesIds : (formData.rol ? [parseInt(formData.rol, 10)] : []),
+      asignatura_id: selectedAsignaturasIds.length > 0 ? selectedAsignaturasIds[0] : null,
+      asignaturas_ids: selectedAsignaturasIds,
+      nivel_id: selectedNivelesIds.length > 0 ? selectedNivelesIds[0] : null,
+      niveles_ids: selectedNivelesIds,
+      paralelo_id: selectedParalelosIds.length > 0 ? selectedParalelosIds[0] : null,
+      paralelos_ids: selectedParalelosIds,
+      rol_id: selectedRolesIds.length > 0 ? selectedRolesIds[0] : null,
+      roles_ids: selectedRolesIds,
     };
     
     const url = editingId ? `/profesores/${editingId}` : '/profesores';
@@ -593,7 +597,7 @@ export default function GestionDocentesPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                   {/* PASO 1: Periodo — siempre activo */}
                   <div className="grid gap-2">
                     <Label htmlFor="filtro-periodo" className="flex items-center gap-1">
@@ -604,7 +608,7 @@ export default function GestionDocentesPage() {
                       value={filtros.periodo}
                       onValueChange={(v) => setFiltros(prev => ({ ...prev, periodo: v, facultad: "", carrera: "", malla: "" }))}
                     >
-                      <SelectTrigger id="filtro-periodo">
+                      <SelectTrigger id="filtro-periodo" className="w-full min-w-0">
                         <SelectValue placeholder="Seleccione un periodo..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -626,10 +630,10 @@ export default function GestionDocentesPage() {
                       onValueChange={(v) => setFiltros(prev => ({ ...prev, facultad: v, carrera: "", malla: "" }))}
                       disabled={!periodoOk}
                     >
-                      <SelectTrigger id="filtro-facultad">
+                      <SelectTrigger id="filtro-facultad" className="w-full min-w-0">
                         <SelectValue placeholder={periodoOk ? "Seleccione una facultad..." : "Primero seleccione un periodo"} />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="max-w-xs">
                         {facultades.map((f) => (
                           <SelectItem key={f.id} value={f.id.toString()}>{f.nombre}</SelectItem>
                         ))}
@@ -648,10 +652,10 @@ export default function GestionDocentesPage() {
                       onValueChange={(v) => setFiltros(prev => ({ ...prev, carrera: v, malla: "" }))}
                       disabled={!facultadOk}
                     >
-                      <SelectTrigger id="filtro-carrera">
+                      <SelectTrigger id="filtro-carrera" className="w-full min-w-0">
                         <SelectValue placeholder={facultadOk ? "Seleccione una carrera..." : "Primero seleccione una facultad"} />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="max-w-xs">
                         {carrerasFiltradasPorFiltro.map((c) => (
                           <SelectItem key={c.id} value={c.id.toString()}>{c.nombre}</SelectItem>
                         ))}
@@ -667,7 +671,7 @@ export default function GestionDocentesPage() {
                       onValueChange={(v) => setFiltros(prev => ({ ...prev, malla: v }))}
                       disabled={!carreraOk}
                     >
-                      <SelectTrigger id="filtro-malla">
+                      <SelectTrigger id="filtro-malla" className="w-full min-w-0">
                         <SelectValue placeholder={carreraOk ? "Todas las mallas" : "Primero seleccione una carrera"} />
                       </SelectTrigger>
                       <SelectContent>
@@ -887,10 +891,63 @@ export default function GestionDocentesPage() {
                       )}
                     </div>
                     
+                    {/* --- SELECTOR MÚLTIPLE DE NIVELES --- */}
+                    <div className="grid gap-2">
+                      <Label>Niveles Asignados</Label>
+                      <p className="text-sm text-muted-foreground">Seleccione el nivel primero — las asignaturas se filtrarán automáticamente.</p>
+                      <div className="flex gap-2">
+                        <Select
+                          onValueChange={(v) => {
+                            const id = parseInt(v, 10);
+                            if (!selectedNivelesIds.includes(id)) setSelectedNivelesIds(prev => [...prev, id]);
+                          }}
+                        >
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Agregar nivel..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {niveles
+                              .filter(n => !selectedNivelesIds.includes(n.id))
+                              .map((n) => (
+                                <SelectItem key={n.id} value={n.id.toString()}>
+                                  {getNivelLabel(n)}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {selectedNivelesIds.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {selectedNivelesIds.map((nid, idx) => {
+                            const niv = niveles.find(n => Number(n.id) === nid);
+                            return (
+                              <Badge key={nid} variant="outline" className={`text-sm py-1 px-3 ${idx === 0 ? 'bg-purple-100 text-purple-800 border-purple-300' : 'bg-violet-50 text-violet-700 border-violet-200'}`}>
+                                {niv ? getNivelLabel(niv) : `Nivel #${nid}`}
+                                {idx === 0 && <span className="ml-1 text-xs">(principal)</span>}
+                                <button type="button" onClick={() => setSelectedNivelesIds(prev => prev.filter(id => id !== nid))} className="ml-2 hover:text-red-600">
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {selectedNivelesIds.length === 0 && (
+                        <p className="text-xs text-amber-600">Seleccione al menos un nivel para filtrar las asignaturas.</p>
+                      )}
+                    </div>
+
                     {/* --- SELECTOR MÚLTIPLE DE ASIGNATURAS --- */}
                     <div className="grid gap-2">
                       <Label>Asignaturas Asignadas</Label>
-                      <p className="text-sm text-muted-foreground">Seleccione una o más asignaturas. La primera será la asignatura principal.</p>
+                      <p className="text-sm text-muted-foreground">
+                        Seleccione una o más asignaturas. La primera será la asignatura principal.
+                        {selectedNivelesIds.length > 0 && (
+                          <span className="ml-1 text-purple-700 font-medium">
+                            (Filtradas por nivel seleccionado)
+                          </span>
+                        )}
+                      </p>
                       <div className="flex gap-2">
                         <Select
                           onValueChange={(v) => {
@@ -901,7 +958,7 @@ export default function GestionDocentesPage() {
                           }}
                         >
                           <SelectTrigger className="flex-1">
-                            <SelectValue placeholder="Agregar asignatura..." />
+                            <SelectValue placeholder={selectedNivelesIds.length > 0 ? "Agregar asignatura (filtrada por nivel)..." : "Agregar asignatura..."} />
                           </SelectTrigger>
                           <SelectContent>
                             {asignaturasFiltradas
@@ -935,53 +992,11 @@ export default function GestionDocentesPage() {
                         </div>
                       )}
                       {selectedAsignaturasIds.length === 0 && (
-                        <p className="text-xs text-amber-600">Seleccione al menos una asignatura para el docente.</p>
-                      )}
-                    </div>
-
-                    {/* --- SELECTOR MÚLTIPLE DE NIVELES --- */}
-                    <div className="grid gap-2">
-                      <Label>Niveles Asignados</Label>
-                      <p className="text-sm text-muted-foreground">Un docente puede impartir clases en varios niveles simultáneamente.</p>
-                      <div className="flex gap-2">
-                        <Select
-                          onValueChange={(v) => {
-                            const id = parseInt(v, 10);
-                            if (!selectedNivelesIds.includes(id)) setSelectedNivelesIds(prev => [...prev, id]);
-                          }}
-                        >
-                          <SelectTrigger className="flex-1">
-                            <SelectValue placeholder="Agregar nivel..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {niveles
-                              .filter(n => !selectedNivelesIds.includes(n.id))
-                              .map((n) => (
-                                <SelectItem key={n.id} value={n.id.toString()}>
-                                  {getNivelLabel(n)}
-                                </SelectItem>
-                              ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {selectedNivelesIds.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {selectedNivelesIds.map((nid, idx) => {
-                            const niv = niveles.find(n => n.id === nid);
-                            return (
-                              <Badge key={nid} variant="outline" className={`text-sm py-1 px-3 ${idx === 0 ? 'bg-purple-100 text-purple-800 border-purple-300' : 'bg-violet-50 text-violet-700 border-violet-200'}`}>
-                                {niv ? getNivelLabel(niv) : `Nivel #${nid}`}
-                                {idx === 0 && <span className="ml-1 text-xs">(principal)</span>}
-                                <button type="button" onClick={() => setSelectedNivelesIds(prev => prev.filter(id => id !== nid))} className="ml-2 hover:text-red-600">
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </Badge>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {selectedNivelesIds.length === 0 && (
-                        <p className="text-xs text-amber-600">Seleccione al menos un nivel para el docente.</p>
+                        <p className="text-xs text-amber-600">
+                          {selectedNivelesIds.length === 0
+                            ? "Seleccione un nivel primero para ver las asignaturas disponibles."
+                            : "Seleccione al menos una asignatura para el docente."}
+                        </p>
                       )}
                     </div>
 

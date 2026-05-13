@@ -466,6 +466,56 @@ exports.obtenerAsignaturasCarrera = async (req, res) => {
 module.exports = exports;
 
 // =========================================================================
+// HABILITAR FIRMA QR PARA DOCUMENTOS DE DOCENTES
+// POST /api/comision-academica/habilitar-firma
+// Body: { syllabus_ids: [1,2,3], programa_ids: [4,5], estado: 'enviado' }
+// =========================================================================
+exports.habilitarFirma = async (req, res) => {
+  try {
+    const { syllabus_ids = [], programa_ids = [], estado = 'enviado' } = req.body;
+
+    const estadosValidos = ['enviado', 'aprobado', 'borrador'];
+    if (!estadosValidos.includes(estado)) {
+      return res.status(400).json({ success: false, message: 'Estado inválido. Use: enviado, aprobado, borrador' });
+    }
+
+    let syllabusActualizados = 0;
+    let programasActualizados = 0;
+
+    if (syllabus_ids.length > 0) {
+      const ids = syllabus_ids.map(Number).filter(n => !isNaN(n));
+      if (ids.length > 0) {
+        const [count] = await db.SyllabusDocente.update(
+          { estado },
+          { where: { id: { [Op.in]: ids } } }
+        );
+        syllabusActualizados = count;
+      }
+    }
+
+    if (programa_ids.length > 0) {
+      const ids = programa_ids.map(Number).filter(n => !isNaN(n));
+      if (ids.length > 0) {
+        const [count] = await db.ProgramaAnaliticoDocente.update(
+          { estado },
+          { where: { id: { [Op.in]: ids } } }
+        );
+        programasActualizados = count;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Firma habilitada: ${syllabusActualizados} syllabus y ${programasActualizados} programas actualizados a estado "${estado}"`,
+      data: { syllabusActualizados, programasActualizados, estado }
+    });
+  } catch (error) {
+    console.error('❌ Error en habilitarFirma:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// =========================================================================
 // CRUD SYLLABUS COMISIÓN ACADÉMICA
 // =========================================================================
 
@@ -1005,11 +1055,19 @@ exports.listarSyllabusComision = async (req, res) => {
 
     const lista = await db.SyllabusComisionAcademica.findAll({
       where,
-      order: [['createdAt', 'DESC']],
-      attributes: ['id', 'nombre', 'materias', 'periodo', 'asignatura_id', 'usuario_id', 'estado', 'createdAt', 'updatedAt']
+      order: [['createdAt', 'DESC']]
     });
 
-    return res.status(200).json({ success: true, data: lista });
+    // Parsear datos_syllabus para cada registro
+    const listaConDatos = lista.map(s => {
+      const item = s.toJSON();
+      if (typeof item.datos_syllabus === 'string') {
+        try { item.datos_syllabus = JSON.parse(item.datos_syllabus); } catch(e) {}
+      }
+      return item;
+    });
+
+    return res.status(200).json({ success: true, data: listaConDatos });
   } catch (error) {
     console.error('❌ Error al listar syllabus comisión:', error);
     return res.status(500).json({ success: false, message: 'Error al listar', error: error.message });

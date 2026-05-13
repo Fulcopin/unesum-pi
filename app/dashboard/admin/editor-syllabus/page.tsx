@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Home } from "lucide-react"
+import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Home, Lock } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import * as mammoth from "mammoth"
 import jsPDF from "jspdf"
@@ -25,7 +25,8 @@ interface TableCell {
   isHeader: boolean; 
   rowSpan: number; 
   colSpan: number; 
-  isEditable: boolean; 
+  isEditable: boolean;
+  isLocked?: boolean;
   backgroundColor?: string; 
   textColor?: string; 
   fontSize?: string; 
@@ -57,10 +58,19 @@ export default function EditorSyllabusPage() {
   const [isListLoading, setIsListLoading] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [tempName, setTempName] = useState("")
   
   const [selectedCells, setSelectedCells] = useState<string[]>([])
   const [editingCell, setEditingCell] = useState<string | null>(null)
   const [editContent, setEditContent] = useState("")
+  const [cellLockState, setCellLockState] = useState<Record<string, boolean>>({})
+  
+  // --- MODO EDICIÓN DE SYLLABUS DE COMISIÓN (para bloquear celdas a docentes) ---
+  const [editingComisionId, setEditingComisionId] = useState<number | null>(null)
+  const [comisionSyllabusList, setComisionSyllabusList] = useState<any[]>([])
+  const [showComisionSelector, setShowComisionSelector] = useState(false)
+  const [isLoadingComision, setIsLoadingComision] = useState(false)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -68,6 +78,19 @@ export default function EditorSyllabusPage() {
   const activeSyllabus = syllabi.find((s) => s.id === activeSyllabusId);
   const activeTab = activeSyllabus?.tabs.find(t => t.id === activeTabId);
   const tableData = activeTab ? activeTab.rows : [];
+  const lockedCellCount = Object.values(cellLockState).filter(Boolean).length;
+
+  const buildCellLockState = (tabs: TabData[] = []) => {
+    const nextState: Record<string, boolean> = {}
+    tabs.forEach((tab) => {
+      (tab.rows || []).forEach((row) => {
+        (row.cells || []).forEach((cell) => {
+          nextState[cell.id] = !!cell.isLocked
+        })
+      })
+    })
+    return nextState
+  }
 
   // --- CARGA INICIAL ---
   useEffect(() => {
@@ -118,7 +141,6 @@ export default function EditorSyllabusPage() {
     if (!selectedPeriod || activeSyllabusId || isListLoading || savedSyllabi.length === 0) return;
     const syllabiDelPeriodo = savedSyllabi.filter(s => s.periodo === selectedPeriod);
     if (syllabiDelPeriodo.length === 0) return;
-
     const syllabusToLoad = syllabiDelPeriodo[0];
     let editorData = syllabusToLoad.datos_syllabus;
     if (!editorData) return;
@@ -134,6 +156,8 @@ export default function EditorSyllabusPage() {
     setSyllabi([editorData]);
     setActiveSyllabusId(editorData.id);
     setActiveTabId(editorData.tabs[0]?.id || null);
+    setCellLockState(buildCellLockState(editorData.tabs));
+    setEditingComisionId(null);
   }, [selectedPeriod, isListLoading, savedSyllabi.length, activeSyllabusId]);
 
   // --- API ---
@@ -169,6 +193,7 @@ export default function EditorSyllabusPage() {
             id: row.id,
             cells: row.cells.map(cell => ({
               ...cell,
+              isLocked: cell.id in cellLockState ? !!cellLockState[cell.id] : !!cell.isLocked,
               styles: {
                 ...(cell.backgroundColor ? { backgroundColor: cell.backgroundColor } : {}),
                 ...(cell.textColor ? { textColor: cell.textColor } : {}),
@@ -187,7 +212,44 @@ export default function EditorSyllabusPage() {
         datos_syllabus: datosParaGuardar
       }
       
-      const isUpdate = typeof activeSyllabus.id === "number"
+      const isUpdate = activeSyllabus.id !== null && activeSyllabus.id !== undefined && !String(activeSyllabus.id).startsWith('syllabus-')
+
+      // === GUARDAR EN SYLLABUS DE COMISIÓN (para que los bloqueos lleguen al docente) ===
+      if (editingComisionId) {
+        const result = await apiRequest(`/api/comision-academica/syllabus/${editingComisionId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ datos_syllabus: datosParaGuardar })
+        })
+        const savedRecord = result.data
+        let savedData = savedRecord.datos_syllabus
+        if (typeof savedData === 'string') { try { savedData = JSON.parse(savedData) } catch(e) {} }
+        savedData = savedData || datosParaGuardar
+        savedData.id = `comision-${editingComisionId}`
+        savedData.name = activeSyllabus.name
+        if (savedData.tabs) {
+          savedData.tabs = savedData.tabs.map((t: any) => ({
+            ...t,
+            rows: (t.rows || []).map((r: any) => ({
+              ...r,
+              cells: (r.cells || []).map((c: any) => ({
+                ...c,
+                backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
+                textColor: c.styles?.textColor || c.textColor,
+                textAlign: c.styles?.textAlign || c.textAlign,
+                textOrientation: c.styles?.textOrientation || c.textOrientation,
+                isEditable: true
+              }))
+            }))
+          }))
+        }
+        setCellLockState(buildCellLockState(savedData.tabs || []))
+        setSyllabi((prev) => prev.map((s) => (s.id === activeSyllabusId ? savedData : s)))
+        const savedLockedCount = Object.values(buildCellLockState(savedData.tabs || [])).filter(Boolean).length
+        alert(`✅ Bloqueos guardados en el syllabus de comisión. Celdas bloqueadas: ${savedLockedCount}.`)
+        return
+      }
+
+      // === GUARDAR NORMAL EN TABLA SYLLABI ===
       const endpoint = isUpdate ? `/api/syllabi/${activeSyllabus.id}` : "/api/syllabi"
       const method = isUpdate ? "PUT" : "POST"
 
@@ -196,6 +258,7 @@ export default function EditorSyllabusPage() {
       
       const savedUIData = savedRecord.datos_syllabus;
       savedUIData.id = savedRecord.id;
+      savedUIData.name = savedRecord.nombre || activeSyllabus.name;
       
       if (savedUIData.tabs) {
           savedUIData.tabs = savedUIData.tabs.map((t: any) => ({
@@ -213,6 +276,8 @@ export default function EditorSyllabusPage() {
               }))
           }));
       }
+
+            setCellLockState(buildCellLockState(savedUIData.tabs || []))
 
       setSyllabi((prev) => prev.map((s) => (s.id === activeSyllabusId ? savedUIData : s)))
       setActiveSyllabusId(savedUIData.id)
@@ -345,9 +410,27 @@ export default function EditorSyllabusPage() {
         editorData.name = syllabusToLoad.nombre;
       }
       
+      // Normalizar celdas: extraer estilos y marcar como editables
+      editorData.tabs = editorData.tabs.map((t: any) => ({
+        ...t,
+        rows: (t.rows || []).map((r: any) => ({
+          ...r,
+          cells: (r.cells || []).map((c: any) => ({
+            ...c,
+            backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
+            textColor: c.styles?.textColor || c.textColor,
+            textAlign: c.styles?.textAlign || c.textAlign,
+            textOrientation: c.styles?.textOrientation || c.textOrientation,
+            isEditable: true
+          }))
+        }))
+      }));
+      
       setSyllabi([editorData]);
       setActiveSyllabusId(editorData.id);
       setActiveTabId(editorData.tabs[0]?.id || null);
+      setCellLockState(buildCellLockState(editorData.tabs));
+      setEditingComisionId(null);
       
       // Establecer el periodo seleccionado
       setSelectedPeriod(syllabusToLoad.periodo);
@@ -362,6 +445,82 @@ export default function EditorSyllabusPage() {
       console.log("📋 IDs disponibles:", savedSyllabi.map(s => s.id));
     }
   };
+
+  // --- CARGAR LISTA DE SYLLABI DE COMISIÓN ---
+  const loadComisionSyllabusList = async () => {
+    setIsLoadingComision(true)
+    try {
+      const data = await apiRequest('/api/comision-academica/syllabus')
+      const list = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : [])
+      setComisionSyllabusList(list)
+      setShowComisionSelector(true)
+    } catch (e: any) {
+      alert(`Error al cargar syllabi de comisión: ${e.message}`)
+    } finally {
+      setIsLoadingComision(false)
+    }
+  }
+
+  // --- CARGAR UN SYLLABUS DE COMISIÓN EN EL EDITOR ---
+  const handleLoadComisionSyllabus = async (record: any) => {
+    setIsLoadingComision(true)
+    try {
+      const response = await apiRequest(`/api/comision-academica/syllabus/${record.id}`)
+      const fullRecord = response?.data || record
+
+      let datos = fullRecord.datos_syllabus
+      if (typeof datos === 'string') { try { datos = JSON.parse(datos) } catch(e) {} }
+      if (!datos) { alert('Este syllabus no tiene datos de editor'); return }
+
+      let tabs = datos.tabs
+      if (!tabs && (datos as any).rows) {
+        tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: (datos as any).rows }]
+      }
+      if (!tabs) tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: [] }]
+
+      // Normalizar celdas (preservar isLocked)
+      tabs = tabs.map((t: any) => ({
+        ...t,
+        rows: (t.rows || []).map((r: any) => ({
+          ...r,
+          cells: (r.cells || []).map((c: any) => ({
+            ...c,
+            backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
+            textColor: c.styles?.textColor || c.textColor,
+            textAlign: c.styles?.textAlign || c.textAlign,
+            textOrientation: c.styles?.textOrientation || c.textOrientation,
+            isEditable: true
+            // isLocked se preserva vía spread de ...c
+          }))
+        }))
+      }))
+
+      const editorData: SyllabusData = {
+        id: `comision-${fullRecord.id}`,
+        name: fullRecord.nombre || fullRecord.nombre_archivo || 'Syllabus Comisión',
+        description: '',
+        tabs,
+        metadata: {
+          subject: fullRecord.nombre || '',
+          period: fullRecord.periodo || '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      }
+
+      setSyllabi([editorData])
+      setActiveSyllabusId(editorData.id)
+      setActiveTabId(tabs[0]?.id || null)
+      setCellLockState(buildCellLockState(tabs))
+      setEditingComisionId(Number(fullRecord.id))
+      setShowComisionSelector(false)
+      if (fullRecord.periodo) setSelectedPeriod(String(fullRecord.periodo))
+    } catch (e: any) {
+      alert(`Error al cargar syllabus de comisión: ${e.message}`)
+    } finally {
+      setIsLoadingComision(false)
+    }
+  }
 
   // --- NUEVA FUNCIÓN: Upload con validación para comisión académica ---
   const handleUploadConValidacion = async (file: File) => {
@@ -614,7 +773,7 @@ export default function EditorSyllabusPage() {
 
       const newData: SyllabusData = {
         id: `syllabus-${Date.now()}`,
-        name: meta.subject || `Syllabus de ${file.name}`,
+        name: meta.subject || file.name.replace(/\.docx?$/i, ''),
         description: "Importado",
         metadata: { ...meta, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
         tabs: newTabs,
@@ -623,6 +782,8 @@ export default function EditorSyllabusPage() {
       setSyllabi([newData]);
       setActiveSyllabusId(newData.id);
       setActiveTabId(newTabs[0]?.id || null);
+      setCellLockState(buildCellLockState(newTabs));
+      setEditingComisionId(null);
 
     } catch (e) { console.error(e); alert("Error crítico."); } 
     finally { setIsLoading(false); }
@@ -727,6 +888,27 @@ export default function EditorSyllabusPage() {
   const removeSelectedColumn = () => { const pos = findCellPosition(selectedCells[0]); if (pos) { const updated = tableData.map(r => ({ ...r, cells: r.cells.filter((_, i) => i !== pos.colIndex) })); handleUpdateActiveTabRows(updated); setSelectedCells([]); } }
   const clearSelectedCells=()=>{ const updated=tableData.map(r=>({...r,cells:r.cells.map(c=>selectedCells.includes(c.id)?{...c,content:""}:c)})); handleUpdateActiveTabRows(updated); setSelectedCells([]) }
   
+  const toggleLockCells = () => {
+    if (selectedCells.length === 0) return;
+
+    const allLocked = selectedCells.every(id => !!cellLockState[id]);
+    const updated = tableData.map(row => ({
+      ...row,
+      cells: row.cells.map(cell =>
+        selectedCells.includes(cell.id) ? { ...cell, isLocked: !allLocked } : cell
+      )
+    }));
+
+    setCellLockState((prev) => {
+      const next = { ...prev };
+      selectedCells.forEach((id) => {
+        next[id] = !allLocked;
+      });
+      return next;
+    });
+    handleUpdateActiveTabRows(updated);
+  };
+
   const toggleVerticalText = () => {
     if (selectedCells.length === 0) return;
     const updated = tableData.map(row => ({
@@ -957,6 +1139,8 @@ export default function EditorSyllabusPage() {
   };
 
   const handleNewSyllabus = () => {
+    setCellLockState({});
+    setEditingComisionId(null);
     setShowSyllabusSelector(true);
   };
 
@@ -980,6 +1164,9 @@ export default function EditorSyllabusPage() {
                     <div className="flex gap-2">
                       <Button onClick={handleNewSyllabus} className="bg-emerald-600 hover:bg-emerald-700">
                         <Plus className="h-4 w-4 mr-2" /> Nuevo
+                      </Button>
+                      <Button onClick={loadComisionSyllabusList} disabled={isLoadingComision} className="bg-amber-600 hover:bg-amber-700">
+                        <Lock className="h-4 w-4 mr-2" /> {isLoadingComision ? "Cargando..." : "Bloquear Syllabus de Docentes"}
                       </Button>
                       <Button onClick={handleSaveToDB} disabled={!activeSyllabus} className="bg-blue-600 hover:bg-blue-700">
                         <Save className="h-4 w-4 mr-2" /> Guardar
@@ -1067,6 +1254,47 @@ export default function EditorSyllabusPage() {
                 </div>
               )}
 
+              {/* Modal Selector de Syllabus de COMISIÓN (para bloquear celdas a docentes) */}
+              {showComisionSelector && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <Card className="w-full max-w-3xl max-h-[80vh] overflow-y-auto">
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Lock className="h-5 w-5 text-amber-600" />
+                          <span>Seleccionar Syllabus de Comisión para Bloquear</span>
+                        </div>
+                        <Button variant="ghost" size="icon" onClick={() => setShowComisionSelector(false)}>
+                          <X className="h-5 w-5" />
+                        </Button>
+                      </CardTitle>
+                      <p className="text-sm text-amber-700 bg-amber-50 rounded p-2 mt-2">
+                        Selecciona el syllabus que verán los docentes. Podrás marcar celdas como bloqueadas para que los docentes no puedan editarlas.
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      {comisionSyllabusList.length === 0 ? (
+                        <p className="text-center text-gray-500 py-8">No hay syllabi de comisión disponibles</p>
+                      ) : (
+                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                          {comisionSyllabusList.map((s: any) => (
+                            <div key={s.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-amber-50">
+                              <div className="flex-1">
+                                <p className="font-medium">{s.nombre || s.nombre_archivo || 'Sin nombre'}</p>
+                                <p className="text-sm text-gray-500">Periodo: {s.periodo} | Asignatura ID: {s.asignatura_id || 'N/A'}</p>
+                              </div>
+                              <Button onClick={() => handleLoadComisionSyllabus(s)} className="bg-amber-600 hover:bg-amber-700">
+                                <Lock className="h-4 w-4 mr-1" /> Abrir y Bloquear
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
               {/* Tabla de Syllabus Creados */}
               <Card>
                 <CardHeader>
@@ -1136,14 +1364,44 @@ export default function EditorSyllabusPage() {
               <Card className="mb-6 border-t-4 border-t-emerald-600">
                 <CardHeader>
                   <CardTitle className="flex flex-wrap items-center justify-between gap-4 text-emerald-800">
-                    <span className="truncate">{activeSyllabus.name}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {editingName ? (
+                        <>
+                          <Input
+                            value={tempName}
+                            onChange={e => setTempName(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { setSyllabi(p => p.map(s => s.id === activeSyllabusId ? { ...s, name: tempName } : s)); setEditingName(false); } if (e.key === 'Escape') setEditingName(false); }}
+                            className="h-8 text-sm font-semibold"
+                            autoFocus
+                          />
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => { setSyllabi(p => p.map(s => s.id === activeSyllabusId ? { ...s, name: tempName } : s)); setEditingName(false); }}><Check className="h-4 w-4 text-green-600" /></Button>
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => setEditingName(false)}><X className="h-4 w-4 text-red-500" /></Button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="truncate">{activeSyllabus.name}</span>
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7 flex-shrink-0" title="Renombrar" onClick={() => { setTempName(activeSyllabus.name); setEditingName(true); }}><Pencil className="h-4 w-4" /></Button>
+                        </>
+                      )}
+                    </div>
                     <div className="flex-shrink-0 flex items-center gap-2">
-                       <Button onClick={() => { setActiveSyllabusId(null); setSyllabi([]); }} variant="outline" size="sm"> <Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
-                       <Button onClick={handleSaveToDB} className="bg-blue-600 hover:bg-blue-700" size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> Guardar</>}</Button>
+                       <Button onClick={() => { setActiveSyllabusId(null); setSyllabi([]); setEditingComisionId(null); setCellLockState({}); }} variant="outline" size="sm"> <Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
+                       <Button onClick={handleSaveToDB} className={editingComisionId ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"} size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> {editingComisionId ? "Guardar Bloqueos" : "Guardar"}</>}</Button>
                        <Button onClick={handlePrintToPdf} variant="outline" size="sm" disabled={!activeTab}><Printer className="h-4 w-4 mr-2" /> Imprimir</Button>
                     </div>
                   </CardTitle>
                 </CardHeader>
+                {(editingComisionId || lockedCellCount > 0) && (
+                  <div className="mx-4 mb-2 flex items-center gap-2 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 text-sm text-amber-800">
+                    <Lock className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                    <span>
+                      {editingComisionId
+                        ? <><strong>Modo bloqueo (comisión #{editingComisionId})</strong> — </>
+                        : <><strong>Bloqueo en syllabus general</strong> — </>}
+                      Celdas bloqueadas: <strong>{lockedCellCount}</strong>. Selecciona celdas y presiona <strong>Bloquear</strong>. Los docentes no podrán editar esas celdas. Luego guarda.
+                    </span>
+                  </div>
+                )}
                 <CardContent>
                   <div className="grid grid-cols-1 gap-4 mt-4 border-t pt-4">
                     <div className="space-y-2">
@@ -1205,6 +1463,8 @@ export default function EditorSyllabusPage() {
                        <Button size="sm" onClick={toggleVerticalText} className="bg-white text-emerald-700 border-emerald-200" disabled={!selectedCells.length} title="Rotar Texto Verticalmente"><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
                        <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
                        <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
+                       <div className="w-px h-6 bg-emerald-200 mx-1"></div>
+                       <Button size="sm" onClick={toggleLockCells} disabled={!selectedCells.length} className="bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100" title="Bloquear/Desbloquear celdas para docentes"><Lock className="h-4 w-4 mr-1" />Bloquear</Button>
                     </div>
 
                     <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white">
@@ -1241,6 +1501,7 @@ export default function EditorSyllabusPage() {
                                   if (cell.rowSpan === 0 || cell.colSpan === 0) return null;
                                   
                                   const isSelected = selectedCells.includes(cell.id);
+                                  const isLockedForDocente = !!cellLockState[cell.id] || !!cell.isLocked;
                                   const isHeader = cell.isHeader;
                                   const isSeparator = cell.content.trim() === ':';
                                   const isVertical = cell.textOrientation === 'vertical';
@@ -1275,10 +1536,13 @@ export default function EditorSyllabusPage() {
                                         border border-gray-200 
                                         relative transition-all duration-75 ease-in-out
                                         ${isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"}
+                                        ${isLockedForDocente ? "bg-amber-50/60" : ""}
                                         ${isSelected ? "ring-2 ring-inset ring-emerald-500 z-10" : ""}
                                       `}
                                       style={{ 
-                                        backgroundColor: cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'),
+                                        backgroundColor: isLockedForDocente
+                                          ? '#fffbeb'
+                                          : cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'),
                                         color: cell.textColor, 
                                         width: widthStyle,
                                         minWidth: minWidthStyle, 
@@ -1319,6 +1583,11 @@ export default function EditorSyllabusPage() {
                                           </div>
                                         )}
                                       </div>
+                                      {isLockedForDocente && (
+                                        <div className="absolute top-0.5 right-0.5" title="Bloqueado para docentes">
+                                          <Lock className="h-3 w-3 text-amber-500" />
+                                        </div>
+                                      )}
                                     </td>
                                   )
                                 })}

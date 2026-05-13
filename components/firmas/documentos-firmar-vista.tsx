@@ -99,8 +99,8 @@ interface Nivel {
 
 interface Props {
   tipo: TipoDocumento;
-  etapaUsuario: 'comision_academica' | 'direccion' | 'decano' | 'docente';
-  rolDashboard: 'decano' | 'direccion' | 'comision' | 'docente';
+  etapaUsuario: 'coordinador' | 'comision_academica' | 'director_academico' | 'direccion' | 'decano' | 'docente';
+  rolDashboard: 'decano' | 'direccion' | 'comision' | 'coordinador' | 'docente';
 }
 
 export function DocumentosFirmarVista({ tipo, etapaUsuario, rolDashboard }: Props) {
@@ -219,7 +219,12 @@ export function DocumentosFirmarVista({ tipo, etapaUsuario, rolDashboard }: Prop
   const stats = useMemo(() => {
     const total = docs.length;
     const completos = docs.filter((d) => d.completo).length;
-    const meTocaFirmar = docs.filter((d) => d.siguiente_etapa === etapaUsuario).length;
+    const meTocaFirmar = docs.filter((d) => {
+      if (d.completo) return false;
+      const yaFirmo = d.firmas.find(f => f.etapa === etapaUsuario)?.firmado;
+      if (yaFirmo) return false;
+      return d.siguiente_etapa === etapaUsuario;
+    }).length;
     return { total, completos, meTocaFirmar };
   }, [docs, etapaUsuario]);
 
@@ -408,7 +413,8 @@ export function DocumentosFirmarVista({ tipo, etapaUsuario, rolDashboard }: Prop
                     {docsPorNivel[nivelKey].map((d) => {
                       const totalEt = d.firmas.length;
                       const firmados = d.firmas.filter((f) => f.firmado).length;
-                      const meToca = d.siguiente_etapa === etapaUsuario;
+                      const yaFirmo = d.firmas.find(f => f.etapa === etapaUsuario)?.firmado;
+                      const meToca = !d.completo && !yaFirmo && (d.siguiente_etapa === etapaUsuario || puedeFirmarSinOrden);
                       return (
                         <TableRow key={`${d.tipo}-${d.id}`}>
                           <TableCell>

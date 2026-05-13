@@ -26,6 +26,7 @@ export default function ComisionDashboard() {
       color: "bg-emerald-600",
       featured: true,
     },
+
     /*{
       title: "Editor de Syllabus",
       description: "Crear y editar syllabus con pestañas personalizables y tablas interactivas",
@@ -96,7 +97,7 @@ export default function ComisionDashboard() {
   ]
 
   return (
-    <ProtectedRoute allowedRoles={["comision", "comision_academica"]}>
+    <ProtectedRoute allowedRoles={["coordinador", "comision", "comision_academica"]}>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
 

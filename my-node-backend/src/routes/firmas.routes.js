@@ -59,7 +59,7 @@ router.get(
 // Firma masiva (decano o dirección firman todos los pendientes de su etapa)
 router.post(
   '/firmar-masivo',
-  authorize(['decano', 'coordinador', 'direccion', 'administrador']),
+  authorize(['decano', 'coordinador', 'direccion', 'comision', 'comision_academica', 'administrador']),
   firmasController.firmarMasivo
 );
 

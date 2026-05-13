@@ -177,8 +177,9 @@ exports.firmar = async (req, res) => {
       });
     }
 
-    // Verificar orden secuencial (admin puede omitir el orden)
-    if (rolActivo !== 'administrador') {
+    // Verificar orden secuencial (solo admin puede omitir el orden)
+    const ROLES_SIN_ORDEN = ['administrador'];
+    if (!ROLES_SIN_ORDEN.includes(rolActivo)) {
       const etapaIdx = ETAPAS_ORDEN.indexOf(etapaSolicitada);
       for (let i = 0; i < etapaIdx; i++) {
         if (!porEtapa[ETAPAS_ORDEN[i]]) {
@@ -448,21 +449,38 @@ exports.pendientes = async (req, res) => {
       if (periodo) whereDoc.periodo = periodo;
 
       if (t === 'syllabus') {
-        docs = await Syllabus.findAll({
-          where: whereDoc,
-          include: [includeAsignatura, { model: Profesor, as: 'profesor', required: false }],
-          order: [['id', 'DESC']],
-          limit: 500,
-        });
+        // Query both admin-general syllabi AND commission syllabi
+        const [adminDocs, comisionDocs] = await Promise.all([
+          Syllabus.findAll({
+            where: { ...whereDoc, asignatura_id: { [Op.ne]: null } },
+            include: [includeAsignatura, { model: Profesor, as: 'profesor', required: false }],
+            order: [['id', 'DESC']],
+            limit: 500,
+          }),
+          SyllabusComisionAcademica.findAll({
+            where: whereDoc,
+            include: [includeAsignatura],
+            order: [['id', 'DESC']],
+            limit: 500,
+          }),
+        ]);
+        // Merge, tagging their source so we know where to look up the doc
+        docs = [
+          ...adminDocs.map(d => ({ ...d.toJSON(), _model: 'Syllabus', _orig: d })),
+          ...comisionDocs.map(d => ({ ...d.toJSON(), _model: 'SyllabusComisionAcademica', _orig: d })),
+        ];
       } else if (t === 'programa_analitico') {
-        docs = await ProgramasAnaliticos.findAll({
+        const rawDocs = await ProgramasAnaliticos.findAll({
           where: whereDoc,
           include: [includeAsignatura],
           order: [['id', 'DESC']],
           limit: 500,
         });
+        docs = rawDocs.map(d => ({ ...d.toJSON(), _model: 'ProgramasAnaliticos', _orig: d }));
       }
 
+      // Collect seen IDs to avoid duplicate document entries (prefer commission record)
+      const seenIds = {};
       for (const d of docs) {
         // Scope: filtrar por carrera del coordinador
         if (scopeCarreraId && d.asignatura?.carrera_id?.toString() !== scopeCarreraId.toString()) continue;
@@ -477,6 +495,11 @@ exports.pendientes = async (req, res) => {
 
         // Mostrar si el usuario aún NO ha firmado este documento (sin bloqueo secuencial)
         if (porEtapa[etapaUsuario]) continue;
+
+        // Deduplicate: for SyllabusComisionAcademica skip if same asignatura+periodo already covered by a Syllabus
+        const dedupeKey = `${t}:${d.asignatura_id}:${d.periodo}`;
+        if (seenIds[dedupeKey]) continue;
+        seenIds[dedupeKey] = true;
 
         const sigEtapa = siguienteEtapa(porEtapa);
 
@@ -503,8 +526,8 @@ exports.pendientes = async (req, res) => {
             : null,
           profesor: d.profesor
             ? {
-                id: d.profesor.id,
-                nombre: nombreUsuario(d.profesor),
+                id: d.profesor_id || d.profesor.id,
+                nombre: typeof d.profesor === 'object' ? nombreUsuario(d.profesor) : String(d.profesor),
               }
             : null,
           firmas: ETAPAS_ORDEN.map((e) => ({
@@ -577,21 +600,36 @@ exports.listar = async (req, res) => {
       if (periodo) whereDoc.periodo = periodo;
 
       if (t === 'syllabus') {
-        docs = await Syllabus.findAll({
-          where: whereDoc,
-          include: [includeAsignatura, { model: Profesor, as: 'profesor', required: false }],
-          order: [['id', 'DESC']],
-          limit: 1000,
-        });
+        // Query both admin-general syllabi (with actual asignatura) AND commission syllabi
+        const [adminDocs, comisionDocs] = await Promise.all([
+          Syllabus.findAll({
+            where: { ...whereDoc, asignatura_id: { [Op.ne]: null } },
+            include: [includeAsignatura, { model: Profesor, as: 'profesor', required: false }],
+            order: [['id', 'DESC']],
+            limit: 1000,
+          }),
+          SyllabusComisionAcademica.findAll({
+            where: whereDoc,
+            include: [includeAsignatura],
+            order: [['id', 'DESC']],
+            limit: 1000,
+          }),
+        ]);
+        docs = [
+          ...adminDocs.map(d => ({ ...d.toJSON(), _model: 'Syllabus' })),
+          ...comisionDocs.map(d => ({ ...d.toJSON(), _model: 'SyllabusComisionAcademica' })),
+        ];
       } else if (t === 'programa_analitico') {
-        docs = await ProgramasAnaliticos.findAll({
+        const rawDocs = await ProgramasAnaliticos.findAll({
           where: whereDoc,
           include: [includeAsignatura],
           order: [['id', 'DESC']],
           limit: 1000,
         });
+        docs = rawDocs.map(d => ({ ...d.toJSON(), _model: 'ProgramasAnaliticos' }));
       }
 
+      const seenListar = {};
       for (const d of docs) {
         // Scope: coordinador solo ve su carrera
         if (scopeCarreraId && d.asignatura?.carrera_id?.toString() !== scopeCarreraId.toString()) continue;
@@ -601,6 +639,11 @@ exports.listar = async (req, res) => {
           if (!facId || String(facId) !== scopeFacultadId) continue;
         }
         if (nivel_id && d.asignatura?.nivel_id?.toString() !== nivel_id.toString()) continue;
+
+        // Deduplicate by asignatura+periodo (prefer commission record)
+        const dedupeKey = `${t}:${d.asignatura_id}:${d.periodo}`;
+        if (seenListar[dedupeKey]) continue;
+        seenListar[dedupeKey] = true;
 
         const { porEtapa } = await firmasDeDocumento(t, d.id);
         const sigEtapa = siguienteEtapa(porEtapa);
@@ -626,7 +669,9 @@ exports.listar = async (req, res) => {
                   : null,
               }
             : null,
-          profesor: d.profesor ? { id: d.profesor.id, nombre: nombreUsuario(d.profesor) } : null,
+          profesor: d.profesor
+            ? { id: d.profesor_id || d.profesor.id, nombre: typeof d.profesor === 'object' ? nombreUsuario(d.profesor) : null }
+            : null,
           firmas: ETAPAS_ORDEN.map((e) => ({
             etapa: e,
             firmado: !!porEtapa[e],

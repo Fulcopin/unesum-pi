@@ -3427,7 +3427,9 @@ exports.eliminarAgrupaciones = async (req, res) => {
 exports.create = async (req, res) => {
   try {
     const { nombre, periodo, materias, asignatura_id, datos_tabla } = req.body;
-    const usuario_id = req.user.id; 
+    // Solo guardar usuario_id si el usuario viene de la tabla 'usuarios' (admin/comision).
+    // Los profesores están en 'profesores', no en 'usuarios', por lo que causaría FK error.
+    const usuario_id = (req.user.tabla === 'usuarios') ? req.user.id : null;
 
     if (!nombre || !periodo || !datos_tabla) {
       return res.status(400).json({
@@ -3601,7 +3603,8 @@ exports.uploadValidado = async (req, res) => {
     const archivo = req.file;
     const { nombre, periodo, materias } = req.body;
     const asignatura_id = req.body.asignatura_id ? parseInt(req.body.asignatura_id, 10) : null;
-    const usuario_id = req.user.id;
+    // Solo guardar usuario_id si el usuario viene de la tabla 'usuarios' (admin/comision).
+    const usuario_id = (req.user.tabla === 'usuarios') ? req.user.id : null;
 
     // Parsear el archivo Word para extraer contenido
     let datosTabla = {
@@ -3697,7 +3700,7 @@ exports.update = async (req, res) => {
 
     // ¡VERIFICACIÓN DE PERMISOS! El creador, admin o comisión académica puede editar.
     const rolesPermitidos = ['administrador', 'comision_academica', 'comision'];
-    if (programa.usuario_id !== userId && !rolesPermitidos.includes(userRol)) {
+    if (Number(programa.usuario_id) !== Number(userId) && !rolesPermitidos.includes(userRol)) {
         return res.status(403).json({ 
           success: false, 
           message: 'No tienes permiso para editar este programa analítico.' 

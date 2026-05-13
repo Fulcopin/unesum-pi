@@ -72,7 +72,8 @@ exports.create = async (req, res) => {
     const { nombre, datos_tabla, periodo, materias, asignatura_id } = req.body;
     
     // El ID del usuario viene del token de autenticación (middleware)
-    const usuario_id = req.user.id; 
+    // Solo guardar usuario_id si el usuario viene de la tabla 'usuarios' (admin/comision).
+    const usuario_id = (req.user.tabla === 'usuarios') ? req.user.id : null;
 
     if (!nombre || !datos_tabla) {
       return res.status(400).json({
@@ -122,8 +123,9 @@ exports.update = async (req, res) => {
     }
 
     // ¡VERIFICACIÓN DE PERMISOS!
-    // Solo el usuario que creó el programa puede actualizarlo.
-    if (programa.usuario_id !== userId) {
+    // Admin y comisión pueden editar cualquier programa; otros solo el suyo.
+    const rolesPermitidos = ['administrador', 'comision_academica', 'comision'];
+    if (Number(programa.usuario_id) !== Number(userId) && !rolesPermitidos.includes(req.user.rol)) {
         return res.status(403).json({ success: false, message: 'No tienes permiso para editar este programa.' });
     }
     
@@ -168,7 +170,9 @@ exports.delete = async (req, res) => {
     }
 
     // ¡VERIFICACIÓN DE PERMISOS!
-    if (programa.usuario_id !== userId) {
+    // Admin y comisión pueden eliminar cualquier programa.
+    const rolesPermitidos = ['administrador', 'comision_academica', 'comision'];
+    if (Number(programa.usuario_id) !== Number(userId) && !rolesPermitidos.includes(req.user.rol)) {
         return res.status(403).json({ success: false, message: 'No tienes permiso para eliminar este programa.' });
     }
     

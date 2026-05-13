@@ -8,7 +8,7 @@ export default function DireccionProgramaAnaliticoPage() {
     <ProtectedRoute allowedRoles={['direccion', 'administrador']}>
       <DocumentosFirmarVista
         tipo="programa_analitico"
-        etapaUsuario="direccion"
+        etapaUsuario="director_academico"
         rolDashboard="direccion"
       />
     </ProtectedRoute>

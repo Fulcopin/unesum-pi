@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import {
   ArrowLeft, Users, GraduationCap, CheckCircle2, XCircle,
   ChevronDown, ChevronRight, Eye, Search, AlertCircle,
-  FileText, FileSpreadsheet, RefreshCw,
+  FileText, FileSpreadsheet, RefreshCw, QrCode, CheckSquare, Square, Loader2,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -46,6 +46,9 @@ interface SeguimientoData {
   asignaturas: AsignaturaConDocentes[];
 }
 
+// Key for a selection entry: "syllabus-{id}" or "programa-{id}"
+type SelKey = string;
+
 function estadoBadge(estado: string | null) {
   if (!estado) return null;
   const map: Record<string, string> = {
@@ -70,6 +73,11 @@ export default function DocumentosDocentesPage() {
   const [busqueda, setBusqueda] = useState("");
   const [filtro, setFiltro] = useState<"todos" | "con_syllabus" | "sin_syllabus" | "con_programa" | "sin_programa">("todos");
 
+  // Selection for firma
+  const [seleccionados, setSeleccionados] = useState<Set<SelKey>>(new Set());
+  const [habilitando, setHabilitando] = useState(false);
+  const [resultadoFirma, setResultadoFirma] = useState<string | null>(null);
+
   useEffect(() => { cargarPeriodos(); }, []);
   useEffect(() => { if (periodoSeleccionado) cargarDatos(); }, [periodoSeleccionado]);
 
@@ -92,6 +100,8 @@ export default function DocumentosDocentesPage() {
   const cargarDatos = async () => {
     setLoading(true);
     setError(null);
+    setSeleccionados(new Set());
+    setResultadoFirma(null);
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
@@ -101,7 +111,6 @@ export default function DocumentosDocentesPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Error al cargar los datos");
       setData(json.data);
-      // Expandir todas por defecto si hay pocas materias
       if (json.data?.asignaturas?.length <= 8) {
         setExpandidos(new Set(json.data.asignaturas.map((a: AsignaturaConDocentes) => a.id)));
       }
@@ -125,6 +134,83 @@ export default function DocumentosDocentesPage() {
   };
   const colapsarTodas = () => setExpandidos(new Set());
 
+  // ── Selección ──
+  const toggleSel = (key: SelKey) =>
+    setSeleccionados(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+
+  // Toggle todos los docs de una asignatura (que sí tienen syllabus/programa)
+  const toggleAsignatura = (asig: AsignaturaConDocentes) => {
+    const keys: SelKey[] = [];
+    asig.docentes.forEach(d => {
+      if (d.syllabus_id) keys.push(`syllabus-${d.syllabus_id}`);
+      if (d.programa_id) keys.push(`programa-${d.programa_id}`);
+    });
+    if (keys.length === 0) return;
+    const allSelected = keys.every(k => seleccionados.has(k));
+    setSeleccionados(prev => {
+      const next = new Set(prev);
+      if (allSelected) keys.forEach(k => next.delete(k));
+      else keys.forEach(k => next.add(k));
+      return next;
+    });
+  };
+
+  // Toggle seleccionar TODO
+  const toggleTodo = () => {
+    if (!data) return;
+    const allKeys: SelKey[] = [];
+    data.asignaturas.forEach(asig =>
+      asig.docentes.forEach(d => {
+        if (d.syllabus_id) allKeys.push(`syllabus-${d.syllabus_id}`);
+        if (d.programa_id) allKeys.push(`programa-${d.programa_id}`);
+      })
+    );
+    if (allKeys.length === 0) return;
+    const allSel = allKeys.every(k => seleccionados.has(k));
+    setSeleccionados(allSel ? new Set() : new Set(allKeys));
+  };
+
+  // Habilitar firma para los seleccionados
+  const habilitarFirma = async () => {
+    if (seleccionados.size === 0) return;
+    setHabilitando(true);
+    setResultadoFirma(null);
+    try {
+      const token = localStorage.getItem("token");
+      const syllabus_ids: number[] = [];
+      const programa_ids: number[] = [];
+      seleccionados.forEach(key => {
+        const [tipo, idStr] = key.split("-");
+        const id = parseInt(idStr, 10);
+        if (tipo === "syllabus") syllabus_ids.push(id);
+        else if (tipo === "programa") programa_ids.push(id);
+      });
+
+      const res = await fetch(`${API_URL}/comision-academica/habilitar-firma`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ syllabus_ids, programa_ids, estado: "enviado" }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "Error al habilitar firma");
+      setResultadoFirma(`✅ ${json.message}`);
+      setSeleccionados(new Set());
+      // Recargar para reflejar el nuevo estado
+      await cargarDatos();
+    } catch (e: any) {
+      setResultadoFirma(`❌ ${e.message}`);
+    } finally {
+      setHabilitando(false);
+    }
+  };
+
   // Totales globales
   const totales = useMemo(() => {
     if (!data) return null;
@@ -145,7 +231,6 @@ export default function DocumentosDocentesPage() {
         if (busqueda) {
           const q = busqueda.toLowerCase();
           if (!a.nombre.toLowerCase().includes(q) && !a.codigo.toLowerCase().includes(q)) {
-            // también buscar en nombres de docentes
             if (!a.docentes.some(d => `${d.nombres} ${d.apellidos}`.toLowerCase().includes(q))) return false;
           }
         }
@@ -156,7 +241,6 @@ export default function DocumentosDocentesPage() {
         return true;
       })
       .sort((a, b) => {
-        // Ordenar por nivel
         const romanos: Record<string, number> = { I:1, II:2, III:3, IV:4, V:5, VI:6, VII:7, VIII:8, IX:9, X:10 };
         const num = (s: string) => { const m = s.match(/(\d+|[IVX]+)/i); if (!m) return 0; const v = m[1].toUpperCase(); return romanos[v] ?? (Number.parseInt(v) || 0); };
         return num(a.nivel) - num(b.nivel) || a.nombre.localeCompare(b.nombre);
@@ -182,8 +266,23 @@ export default function DocumentosDocentesPage() {
     return num(a) - num(b);
   });
 
+  // Calcular si toda una asignatura está seleccionada
+  const asigAllSelected = (asig: AsignaturaConDocentes) => {
+    const keys: SelKey[] = [];
+    asig.docentes.forEach(d => {
+      if (d.syllabus_id) keys.push(`syllabus-${d.syllabus_id}`);
+      if (d.programa_id) keys.push(`programa-${d.programa_id}`);
+    });
+    return keys.length > 0 && keys.every(k => seleccionados.has(k));
+  };
+  const asigSomeSelected = (asig: AsignaturaConDocentes) =>
+    asig.docentes.some(d =>
+      (d.syllabus_id && seleccionados.has(`syllabus-${d.syllabus_id}`)) ||
+      (d.programa_id && seleccionados.has(`programa-${d.programa_id}`))
+    );
+
   return (
-    <ProtectedRoute allowedRoles={["comision", "comision_academica", "administrador"]}>
+    <ProtectedRoute allowedRoles={["coordinador", "comision", "comision_academica", "administrador"]}>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
         <main className="max-w-7xl mx-auto px-4 py-8 space-y-6">
@@ -258,6 +357,14 @@ export default function DocumentosDocentesPage() {
             </Card>
           )}
 
+          {resultadoFirma && (
+            <Card className={resultadoFirma.startsWith("✅") ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}>
+              <CardContent className="py-3 px-4 text-sm font-medium">
+                {resultadoFirma}
+              </CardContent>
+            </Card>
+          )}
+
           {!loading && data && (
             <>
               {/* ── Estadísticas globales ── */}
@@ -304,6 +411,48 @@ export default function DocumentosDocentesPage() {
                 <Button size="sm" variant="outline" onClick={colapsarTodas}>Colapsar todo</Button>
               </div>
 
+              {/* ── Barra de acciones de firma ── */}
+              <div className="flex flex-wrap items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+                <button
+                  onClick={toggleTodo}
+                  className="flex items-center gap-2 text-sm text-blue-800 font-medium hover:text-blue-900 transition-colors"
+                >
+                  {seleccionados.size > 0 ? (
+                    <CheckSquare className="h-4 w-4 text-blue-600" />
+                  ) : (
+                    <Square className="h-4 w-4 text-blue-400" />
+                  )}
+                  {seleccionados.size > 0 ? `${seleccionados.size} seleccionado(s)` : "Seleccionar todo"}
+                </button>
+
+                {seleccionados.size > 0 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-gray-500 text-xs h-7"
+                    onClick={() => setSeleccionados(new Set())}
+                  >
+                    Limpiar selección
+                  </Button>
+                )}
+
+                <div className="flex-1" />
+
+                <Button
+                  onClick={habilitarFirma}
+                  disabled={seleccionados.size === 0 || habilitando}
+                  className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+                  size="sm"
+                >
+                  {habilitando ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <QrCode className="h-4 w-4" />
+                  )}
+                  {habilitando ? "Habilitando..." : `Habilitar firma QR${seleccionados.size > 0 ? ` (${seleccionados.size})` : ""}`}
+                </Button>
+              </div>
+
               {/* ── Lista por nivel → materia → docentes ── */}
               <div className="space-y-4">
                 {nivelesOrdenados.map(nivel => (
@@ -329,68 +478,89 @@ export default function DocumentosDocentesPage() {
                           : pendiente ? "bg-amber-50 border-amber-200"
                             : "bg-gray-50 border-gray-200";
 
+                        const allSel = asigAllSelected(asig);
+                        const someSel = asigSomeSelected(asig);
+
                         return (
                           <Card key={asig.id} className={`border overflow-hidden ${barColor}`}>
-                            {/* Fila de materia clickeable */}
-                            <button
-                              onClick={() => toggle(asig.id)}
-                              className="w-full text-left px-5 py-4 flex items-center gap-4 hover:brightness-95 transition-all"
-                            >
-                              {/* Nombre & código */}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-semibold text-gray-900">{asig.nombre}</span>
-                                  <Badge variant="outline" className="text-xs">{asig.codigo}</Badge>
-                                  {sinDocentes && <Badge variant="outline" className="text-xs text-gray-400">Sin docentes</Badge>}
-                                </div>
-
-                                {/* Contadores syllabus / programa */}
-                                {!sinDocentes && (
-                                  <div className="flex flex-wrap items-center gap-4 mt-2 text-sm">
-                                    <span className="flex items-center gap-1 text-blue-700">
-                                      <Users className="h-3.5 w-3.5" />
-                                      {asig.stats.total_docentes} doc.
-                                    </span>
-                                    <span className={`flex items-center gap-1 font-medium ${asig.stats.con_syllabus === asig.stats.total_docentes ? "text-emerald-700" : "text-orange-600"}`}>
-                                      <FileText className="h-3.5 w-3.5" />
-                                      Syllabus {asig.stats.con_syllabus}/{asig.stats.total_docentes}
-                                    </span>
-                                    <span className={`flex items-center gap-1 font-medium ${asig.stats.con_programa === asig.stats.total_docentes ? "text-purple-700" : "text-orange-600"}`}>
-                                      <FileSpreadsheet className="h-3.5 w-3.5" />
-                                      Programa {asig.stats.con_programa}/{asig.stats.total_docentes}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Mini barras de progreso */}
-                              {asig.stats.total_docentes > 0 && (
-                                <div className="hidden sm:flex flex-col gap-1.5 w-32 flex-shrink-0">
-                                  <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-                                    <span className="w-3">S</span>
-                                    <div className="flex-1 h-2 rounded-full bg-gray-200 overflow-hidden">
-                                      <div className="h-full bg-emerald-500 rounded-full transition-all"
-                                        style={{ width: `${(asig.stats.con_syllabus / asig.stats.total_docentes) * 100}%` }} />
-                                    </div>
-                                    <span>{Math.round((asig.stats.con_syllabus / asig.stats.total_docentes) * 100)}%</span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-                                    <span className="w-3">P</span>
-                                    <div className="flex-1 h-2 rounded-full bg-gray-200 overflow-hidden">
-                                      <div className="h-full bg-purple-500 rounded-full transition-all"
-                                        style={{ width: `${(asig.stats.con_programa / asig.stats.total_docentes) * 100}%` }} />
-                                    </div>
-                                    <span>{Math.round((asig.stats.con_programa / asig.stats.total_docentes) * 100)}%</span>
-                                  </div>
-                                </div>
+                            {/* Fila de materia */}
+                            <div className="px-5 py-4 flex items-center gap-3">
+                              {/* Checkbox de asignatura completa */}
+                              {!sinDocentes && (
+                                <button
+                                  onClick={() => toggleAsignatura(asig)}
+                                  className="flex-shrink-0 text-blue-500 hover:text-blue-700"
+                                  title="Seleccionar todos los docs de esta materia"
+                                >
+                                  {allSel ? (
+                                    <CheckSquare className="h-4 w-4 text-blue-600" />
+                                  ) : someSel ? (
+                                    <CheckSquare className="h-4 w-4 text-blue-300" />
+                                  ) : (
+                                    <Square className="h-4 w-4 text-gray-300" />
+                                  )}
+                                </button>
                               )}
 
-                              {expanded
-                                ? <ChevronDown className="h-4 w-4 text-gray-500 flex-shrink-0" />
-                                : <ChevronRight className="h-4 w-4 text-gray-500 flex-shrink-0" />}
-                            </button>
+                              {/* Toggle expand — click en el resto de la fila */}
+                              <button
+                                onClick={() => toggle(asig.id)}
+                                className="flex-1 flex items-center gap-4 text-left hover:brightness-95 transition-all"
+                              >
+                                {/* Nombre & código */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-semibold text-gray-900">{asig.nombre}</span>
+                                    <Badge variant="outline" className="text-xs">{asig.codigo}</Badge>
+                                    {sinDocentes && <Badge variant="outline" className="text-xs text-gray-400">Sin docentes</Badge>}
+                                  </div>
+                                  {!sinDocentes && (
+                                    <div className="flex flex-wrap items-center gap-4 mt-2 text-sm">
+                                      <span className="flex items-center gap-1 text-blue-700">
+                                        <Users className="h-3.5 w-3.5" />
+                                        {asig.stats.total_docentes} doc.
+                                      </span>
+                                      <span className={`flex items-center gap-1 font-medium ${asig.stats.con_syllabus === asig.stats.total_docentes ? "text-emerald-700" : "text-orange-600"}`}>
+                                        <FileText className="h-3.5 w-3.5" />
+                                        Syllabus {asig.stats.con_syllabus}/{asig.stats.total_docentes}
+                                      </span>
+                                      <span className={`flex items-center gap-1 font-medium ${asig.stats.con_programa === asig.stats.total_docentes ? "text-purple-700" : "text-orange-600"}`}>
+                                        <FileSpreadsheet className="h-3.5 w-3.5" />
+                                        Programa {asig.stats.con_programa}/{asig.stats.total_docentes}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
 
-                            {/* Panel expandido — un docente por fila */}
+                                {/* Mini barras de progreso */}
+                                {asig.stats.total_docentes > 0 && (
+                                  <div className="hidden sm:flex flex-col gap-1.5 w-32 flex-shrink-0">
+                                    <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
+                                      <span className="w-3">S</span>
+                                      <div className="flex-1 h-2 rounded-full bg-gray-200 overflow-hidden">
+                                        <div className="h-full bg-emerald-500 rounded-full transition-all"
+                                          style={{ width: `${(asig.stats.con_syllabus / asig.stats.total_docentes) * 100}%` }} />
+                                      </div>
+                                      <span>{Math.round((asig.stats.con_syllabus / asig.stats.total_docentes) * 100)}%</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
+                                      <span className="w-3">P</span>
+                                      <div className="flex-1 h-2 rounded-full bg-gray-200 overflow-hidden">
+                                        <div className="h-full bg-purple-500 rounded-full transition-all"
+                                          style={{ width: `${(asig.stats.con_programa / asig.stats.total_docentes) * 100}%` }} />
+                                      </div>
+                                      <span>{Math.round((asig.stats.con_programa / asig.stats.total_docentes) * 100)}%</span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {expanded
+                                  ? <ChevronDown className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                                  : <ChevronRight className="h-4 w-4 text-gray-500 flex-shrink-0" />}
+                              </button>
+                            </div>
+
+                            {/* Panel expandido */}
                             {expanded && (
                               <div className="bg-white border-t divide-y divide-gray-100">
                                 {sinDocentes ? (
@@ -398,62 +568,105 @@ export default function DocumentosDocentesPage() {
                                     <Users className="h-4 w-4" /> No hay docentes asignados a esta materia
                                   </div>
                                 ) : (
-                                  asig.docentes.map(doc => (
-                                    <div key={doc.profesor_id} className="flex flex-wrap items-center gap-4 px-6 py-3">
-                                      {/* Info docente */}
-                                      <div className="flex-1 min-w-48">
-                                        <p className="font-medium text-gray-900 text-sm">
-                                          {doc.nombres} {doc.apellidos}
-                                        </p>
-                                        <p className="text-xs text-gray-400">{doc.email}</p>
-                                      </div>
+                                  asig.docentes.map(doc => {
+                                    const sylKey = doc.syllabus_id ? `syllabus-${doc.syllabus_id}` : null;
+                                    const progKey = doc.programa_id ? `programa-${doc.programa_id}` : null;
+                                    const sylSel = sylKey ? seleccionados.has(sylKey) : false;
+                                    const progSel = progKey ? seleccionados.has(progKey) : false;
+                                    const anyDocSel = sylSel || progSel;
 
-                                      {/* Syllabus */}
-                                      <div className="flex items-center gap-2">
-                                        {doc.tiene_syllabus ? (
-                                          <>
-                                            <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-300 gap-1">
-                                              <CheckCircle2 className="h-3 w-3" /> Syllabus
+                                    return (
+                                      <div
+                                        key={doc.profesor_id}
+                                        className={`flex flex-wrap items-center gap-4 px-6 py-3 transition-colors ${anyDocSel ? "bg-blue-50/60" : ""}`}
+                                      >
+                                        {/* Checkboxes por documento */}
+                                        <div className="flex gap-1.5 flex-shrink-0">
+                                          {/* Syllabus checkbox */}
+                                          <button
+                                            onClick={() => sylKey && toggleSel(sylKey)}
+                                            disabled={!doc.tiene_syllabus}
+                                            title={doc.tiene_syllabus ? "Seleccionar syllabus" : "No hay syllabus"}
+                                            className={`rounded p-0.5 transition-colors ${doc.tiene_syllabus ? "text-emerald-600 hover:text-emerald-800 cursor-pointer" : "text-gray-200 cursor-not-allowed"}`}
+                                          >
+                                            {sylSel ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                                          </button>
+                                          {/* Programa checkbox */}
+                                          <button
+                                            onClick={() => progKey && toggleSel(progKey)}
+                                            disabled={!doc.tiene_programa}
+                                            title={doc.tiene_programa ? "Seleccionar programa" : "No hay programa"}
+                                            className={`rounded p-0.5 transition-colors ${doc.tiene_programa ? "text-purple-600 hover:text-purple-800 cursor-pointer" : "text-gray-200 cursor-not-allowed"}`}
+                                          >
+                                            {progSel ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                                          </button>
+                                        </div>
+
+                                        {/* Info docente */}
+                                        <div className="flex-1 min-w-48">
+                                          <p className="font-medium text-gray-900 text-sm">
+                                            {doc.nombres} {doc.apellidos}
+                                          </p>
+                                          <p className="text-xs text-gray-400">{doc.email}</p>
+                                        </div>
+
+                                        {/* Syllabus */}
+                                        <div className="flex items-center gap-2">
+                                          {doc.tiene_syllabus ? (
+                                            <>
+                                              <Badge className={`gap-1 border ${doc.estado_syllabus === "enviado" ? "bg-blue-100 text-blue-800 border-blue-300" : "bg-emerald-100 text-emerald-800 border-emerald-300"}`}>
+                                                <CheckCircle2 className="h-3 w-3" /> Syllabus
+                                              </Badge>
+                                              {estadoBadge(doc.estado_syllabus)}
+                                              {doc.estado_syllabus === "enviado" && (
+                                                <Badge className="bg-blue-100 text-blue-700 border border-blue-300 gap-1 text-[10px]">
+                                                  <QrCode className="h-2.5 w-2.5" /> Firma habilitada
+                                                </Badge>
+                                              )}
+                                              <Link href={`/dashboard/comision/ver-syllabus-docente?id=${doc.syllabus_id}`}>
+                                                <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1 text-emerald-700 border-emerald-300 hover:bg-emerald-50">
+                                                  <Eye className="h-3 w-3" /> Ver
+                                                </Button>
+                                              </Link>
+                                            </>
+                                          ) : (
+                                            <Badge variant="outline" className="gap-1 text-gray-400">
+                                              <XCircle className="h-3 w-3" /> Sin syllabus
                                             </Badge>
-                                            {estadoBadge(doc.estado_syllabus)}
-                                            <Link href={`/dashboard/comision/ver-syllabus-docente?id=${doc.syllabus_id}`}>
-                                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1 text-emerald-700 border-emerald-300 hover:bg-emerald-50">
-                                                <Eye className="h-3 w-3" /> Ver
-                                              </Button>
-                                            </Link>
-                                          </>
-                                        ) : (
-                                          <Badge variant="outline" className="gap-1 text-gray-400">
-                                            <XCircle className="h-3 w-3" /> Sin syllabus
-                                          </Badge>
-                                        )}
-                                      </div>
+                                          )}
+                                        </div>
 
-                                      {/* Separador */}
-                                      <div className="h-4 w-px bg-gray-200 hidden sm:block" />
+                                        {/* Separador */}
+                                        <div className="h-4 w-px bg-gray-200 hidden sm:block" />
 
-                                      {/* Programa analítico */}
-                                      <div className="flex items-center gap-2">
-                                        {doc.tiene_programa ? (
-                                          <>
-                                            <Badge className="bg-purple-100 text-purple-800 border border-purple-300 gap-1">
-                                              <CheckCircle2 className="h-3 w-3" /> Prog. Analítico
+                                        {/* Programa analítico */}
+                                        <div className="flex items-center gap-2">
+                                          {doc.tiene_programa ? (
+                                            <>
+                                              <Badge className={`gap-1 border ${doc.estado_programa === "enviado" ? "bg-blue-100 text-blue-800 border-blue-300" : "bg-purple-100 text-purple-800 border-purple-300"}`}>
+                                                <CheckCircle2 className="h-3 w-3" /> Prog. Analítico
+                                              </Badge>
+                                              {estadoBadge(doc.estado_programa)}
+                                              {doc.estado_programa === "enviado" && (
+                                                <Badge className="bg-blue-100 text-blue-700 border border-blue-300 gap-1 text-[10px]">
+                                                  <QrCode className="h-2.5 w-2.5" /> Firma habilitada
+                                                </Badge>
+                                            )}
+                                              <Link href={`/dashboard/comision/ver-programa-docente?id=${doc.programa_id}`}>
+                                                <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1 text-purple-700 border-purple-300 hover:bg-purple-50">
+                                                  <Eye className="h-3 w-3" /> Ver
+                                                </Button>
+                                              </Link>
+                                            </>
+                                          ) : (
+                                            <Badge variant="outline" className="gap-1 text-gray-400">
+                                              <XCircle className="h-3 w-3" /> Sin programa
                                             </Badge>
-                                            {estadoBadge(doc.estado_programa)}
-                                            <Link href={`/dashboard/comision/ver-programa-docente?id=${doc.programa_id}`}>
-                                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1 text-purple-700 border-purple-300 hover:bg-purple-50">
-                                                <Eye className="h-3 w-3" /> Ver
-                                              </Button>
-                                            </Link>
-                                          </>
-                                        ) : (
-                                          <Badge variant="outline" className="gap-1 text-gray-400">
-                                            <XCircle className="h-3 w-3" /> Sin programa
-                                          </Badge>
-                                        )}
+                                          )}
+                                        </div>
                                       </div>
-                                    </div>
-                                  ))
+                                    );
+                                  })
                                 )}
                               </div>
                             )}

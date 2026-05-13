@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Home, Loader2 } from "lucide-react"
+import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Home, Loader2, Lock } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import * as mammoth from "mammoth"
 import jsPDF from "jspdf"
@@ -24,7 +24,8 @@ interface TableCell {
   isHeader: boolean; 
   rowSpan: number; 
   colSpan: number; 
-  isEditable: boolean; 
+  isEditable: boolean;
+  isLocked?: boolean;
   backgroundColor?: string; 
   textColor?: string; 
   fontSize?: string; 
@@ -60,10 +61,11 @@ export default function EditorProgramaAnaliticoPage() {
   const [isListLoading, setIsListLoading] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  
-  const [selectedCells, setSelectedCells] = useState<string[]>([])
+  const [editingName, setEditingName] = useState(false)
+  const [tempName, setTempName] = useState("")
   const [editingCell, setEditingCell] = useState<string | null>(null)
   const [editContent, setEditContent] = useState("")
+  const [selectedCells, setSelectedCells] = useState<string[]>([])
   
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -85,12 +87,12 @@ export default function EditorProgramaAnaliticoPage() {
             console.error("Error en /api/periodo:", err);
             return { data: [] };
           }),
-          apiRequest("/api/carrera").catch(err => {
-            console.error("Error en /api/carrera:", err);
+          apiRequest("/api/carreras").catch(err => {
+            console.error("Error en /api/carreras:", err);
             return { data: [] };
           }),
-          apiRequest("/api/asignatura").catch(err => {
-            console.error("Error en /api/asignatura:", err);
+          apiRequest("/api/asignaturas").catch(err => {
+            console.error("Error en /api/asignaturas:", err);
             return { data: [] };
           })
         ]);
@@ -129,7 +131,7 @@ export default function EditorProgramaAnaliticoPage() {
       }
       
       try {
-        const response = await apiRequest(`/api/asignatura?carrera_id=${selectedCarrera}`);
+        const response = await apiRequest(`/api/asignaturas?carrera_id=${selectedCarrera}`);
         const asignaturasArray = Array.isArray(response?.data) ? response.data : (Array.isArray(response) ? response : []);
         setAsignaturas(asignaturasArray);
         console.log('✅ Asignaturas cargadas:', asignaturasArray.length);
@@ -178,6 +180,7 @@ export default function EditorProgramaAnaliticoPage() {
     try {
       const datosParaGuardar = {
         version: "2.0",
+        name: activeProgramaAnalitico.name || 'ProgramaAnalitico',
         metadata: activeProgramaAnalitico.metadata,
         tabs: activeProgramaAnalitico.tabs.map(tab => ({
           id: tab.id,
@@ -205,7 +208,7 @@ export default function EditorProgramaAnaliticoPage() {
         ...(selectedAsignatura && { asignatura_id: parseInt(selectedAsignatura) })
       }
       
-      const isUpdate = typeof activeProgramaAnalitico.id === "number"
+      const isUpdate = activeProgramaAnalitico.id !== null && activeProgramaAnalitico.id !== undefined && !String(activeProgramaAnalitico.id).startsWith('ProgramaAnalitico-')
       const endpoint = isUpdate ? `/api/programa-analitico/${activeProgramaAnalitico.id}` : "/api/programa-analitico"
       const method = isUpdate ? "PUT" : "POST"
 
@@ -214,6 +217,7 @@ export default function EditorProgramaAnaliticoPage() {
       
       const savedUIData = savedRecord.datos_tabla;
       savedUIData.id = savedRecord.id;
+      savedUIData.name = savedRecord.nombre || activeProgramaAnalitico.name;
       
       if (savedUIData.tabs) {
           savedUIData.tabs = savedUIData.tabs.map((t: any) => ({
@@ -260,7 +264,7 @@ export default function EditorProgramaAnaliticoPage() {
     updateProgramaAnalitico(activeProgramaAnalitico.id, field === 'subject' ? { metadata: updatedMetadata, name: value } : { metadata: updatedMetadata });
   };
 
-  const handleLoadProgramaAnalitico = (ProgramaAnaliticoId: string) => {
+  const handleLoadProgramaAnalitico = (ProgramaAnaliticoId: string, sourceList?: SavedProgramaAnaliticoRecord[]) => {
     console.log("🔍 handleLoadProgramaAnalitico - ID recibido:", ProgramaAnaliticoId);
     console.log("📚 savedprogramas disponibles:", savedprogramas.length);
     
@@ -272,8 +276,9 @@ export default function EditorProgramaAnaliticoPage() {
     const id = parseInt(ProgramaAnaliticoId, 10);
     console.log("🔢 ID parseado:", id);
     
-    // Comparar convirtiendo ambos a número
-    const ProgramaAnaliticoToLoad = savedprogramas.find(s => Number(s.id) === id);
+    // Usar sourceList si se provee (evita race condition con estado async)
+    const list = sourceList ?? savedprogramas;
+    const ProgramaAnaliticoToLoad = list.find(s => Number(s.id) === id);
     console.log("📖 ProgramaAnalitico encontrado:", ProgramaAnaliticoToLoad ? "SÍ" : "NO");
     
     if (ProgramaAnaliticoToLoad) {
@@ -363,6 +368,22 @@ export default function EditorProgramaAnaliticoPage() {
         editorData.name = ProgramaAnaliticoToLoad.nombre;
       }
       
+      // Normalizar celdas: extraer estilos y marcar como editables
+      editorData.tabs = editorData.tabs.map((t: any) => ({
+        ...t,
+        rows: (t.rows || []).map((r: any) => ({
+          ...r,
+          cells: (r.cells || []).map((c: any) => ({
+            ...c,
+            backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
+            textColor: c.styles?.textColor || c.textColor,
+            textAlign: c.styles?.textAlign || c.textAlign,
+            textOrientation: c.styles?.textOrientation || c.textOrientation,
+            isEditable: true
+          }))
+        }))
+      }));
+      
       setprogramas([editorData]);
       setActiveProgramaAnaliticoId(editorData.id);
       setActiveTabId(editorData.tabs[0]?.id || null);
@@ -448,8 +469,9 @@ export default function EditorProgramaAnaliticoPage() {
           setSavedprogramas(programasArray);
           
           // Cargar el ProgramaAnalitico recién guardado
+          // Se pasa programasArray directamente para evitar race condition con el estado async
           if (result.data?.id) {
-            handleLoadProgramaAnalitico(result.data.id.toString());
+            handleLoadProgramaAnalitico(result.data.id.toString(), programasArray);
           }
         } catch (err) {
           console.error("Error recargando lista:", err);
@@ -647,7 +669,7 @@ export default function EditorProgramaAnaliticoPage() {
 
       const newData: ProgramaAnaliticoData = {
         id: `ProgramaAnalitico-${Date.now()}`,
-        name: meta.subject || `ProgramaAnalitico de ${file.name}`,
+        name: meta.subject || file.name.replace(/\.docx?$/i, ''),
         description: "Importado",
         metadata: { ...meta, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
         tabs: newTabs,
@@ -1297,7 +1319,26 @@ export default function EditorProgramaAnaliticoPage() {
               <Card className="mb-6 border-t-4 border-t-emerald-600">
                 <CardHeader>
                   <CardTitle className="flex flex-wrap items-center justify-between gap-4 text-emerald-800">
-                    <span className="truncate">{activeProgramaAnalitico.name}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {editingName ? (
+                        <>
+                          <Input
+                            value={tempName}
+                            onChange={e => setTempName(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { setprogramas(p => p.map(s => s.id === activeProgramaAnaliticoId ? { ...s, name: tempName } : s)); setEditingName(false); } if (e.key === 'Escape') setEditingName(false); }}
+                            className="h-8 text-sm font-semibold"
+                            autoFocus
+                          />
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => { setprogramas(p => p.map(s => s.id === activeProgramaAnaliticoId ? { ...s, name: tempName } : s)); setEditingName(false); }}><Check className="h-4 w-4 text-green-600" /></Button>
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => setEditingName(false)}><X className="h-4 w-4 text-red-500" /></Button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="truncate">{activeProgramaAnalitico.name}</span>
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7 flex-shrink-0" title="Renombrar" onClick={() => { setTempName(activeProgramaAnalitico.name); setEditingName(true); }}><Pencil className="h-4 w-4" /></Button>
+                        </>
+                      )}
+                    </div>
                     <div className="flex-shrink-0 flex items-center gap-2">
                        <Button onClick={() => { setActiveProgramaAnaliticoId(null); setprogramas([]); }} variant="outline" size="sm"> <Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
                        <Button onClick={handleSaveToDB} className="bg-blue-600 hover:bg-blue-700" size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> Guardar</>}</Button>
@@ -1366,6 +1407,8 @@ export default function EditorProgramaAnaliticoPage() {
                        <Button size="sm" onClick={toggleVerticalText} className="bg-white text-emerald-700 border-emerald-200" disabled={!selectedCells.length} title="Rotar Texto Verticalmente"><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
                        <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
                        <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
+                       <div className="w-px h-6 bg-emerald-200 mx-1"></div>
+                       <Button size="sm" onClick={toggleLockCells} disabled={!selectedCells.length} className="bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100" title="Bloquear/Desbloquear celda para docentes"><Lock className="h-4 w-4 mr-1" />Bloquear</Button>
                     </div>
 
                     <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white">
@@ -1436,6 +1479,7 @@ export default function EditorProgramaAnaliticoPage() {
                                         border border-gray-200 
                                         relative transition-all duration-75 ease-in-out
                                         ${isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"}
+                                        ${cell.isLocked ? "bg-amber-50/60" : ""}
                                         ${isSelected ? "ring-2 ring-inset ring-emerald-500 z-10" : ""}
                                       `}
                                       style={{ 
@@ -1480,6 +1524,11 @@ export default function EditorProgramaAnaliticoPage() {
                                           </div>
                                         )}
                                       </div>
+                                      {cell.isLocked && (
+                                        <div className="absolute top-0.5 right-0.5" title="Bloqueado para docentes">
+                                          <Lock className="h-3 w-3 text-amber-500" />
+                                        </div>
+                                      )}
                                     </td>
                                   )
                                 })}

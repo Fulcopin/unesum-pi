@@ -25,21 +25,24 @@ import {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
-/* Nuevo orden: Decano → Dirección → Docente */
-const ETAPAS = ['decano', 'direccion', 'docente'];
+/* Flujo vigente: Docente → Coordinador/a → Decano/a → Dirección Académica */
+const ETAPAS = ['docente', 'coordinador', 'decano', 'director_academico'];
 const ETAPA_LABELS: Record<string, string> = {
-  decano: 'Decano',
-  direccion: 'Dirección de Carrera',
   docente: 'Docente',
+  coordinador: 'Coordinador/a de Carrera',
+  decano: 'Decano/a de Facultad',
+  director_academico: 'Director/a Académico/a',
 };
 const ROL_A_ETAPA: Record<string, string> = {
-  decano: 'decano',
-  direccion: 'direccion',
   docente: 'docente',
   profesor: 'docente',
-  comision: 'direccion',
-  comision_academica: 'direccion',
-  administrador: 'decano',
+  coordinador: 'coordinador',
+  comision: 'coordinador',
+  comision_academica: 'coordinador',
+  decano: 'decano',
+  subdecano: 'decano',
+  direccion: 'director_academico',
+  administrador: 'director_academico',
 };
 const TIPO_LABELS: Record<string, string> = {
   syllabus: 'Syllabus',
