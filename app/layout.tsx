@@ -17,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="es">
+    <html lang="es" suppressHydrationWarning>
       <head>
         <style>{`
 html {
@@ -27,7 +27,7 @@ html {
 }
         `}</style>
       </head>
-      <body className="unesum-platform-bg">
+      <body className="unesum-platform-bg" suppressHydrationWarning>
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

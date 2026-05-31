@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import type React from "react"
 import { useState, useEffect, useRef } from "react"
@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Save, ArrowLeft, Loader2 } from "lucide-react"
+import { Save, ArrowLeft, Loader2, FileText, Lock, Unlock, ShieldAlert } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
 import { FirmasPanel } from "@/components/firmas/firmas-panel"
@@ -16,14 +16,28 @@ import { PrintProgramaAnalitico } from "@/components/programa-analitico/print-pr
 
 // --- INTERFACES ---
 interface TableCell {
-  id: string; content: string; isHeader: boolean; rowSpan: number; colSpan: number;
-  isEditable: boolean; docenteEditable?: boolean; backgroundColor?: string; textColor?: string; fontSize?: string;
-  fontWeight?: string; textAlign?: string; textOrientation?: 'horizontal' | 'vertical';
+  id: string; 
+  content: string; 
+  isHeader: boolean; 
+  rowSpan: number; 
+  colSpan: number;
+  isEditable: boolean; 
+  isLocked?: boolean;
+  docenteEditable?: boolean;
+  backgroundColor?: string; 
+  textColor?: string; 
+  fontSize?: string;
+  fontWeight?: string; 
+  textAlign?: string; 
+  textOrientation?: 'horizontal' | 'vertical';
 }
 interface TableRow { id: string; cells: TableCell[]; }
 interface TabData { id: string; title: string; rows: TableRow[]; }
 interface ProgramaData {
-  id?: string | number; name?: string; description?: string; tabs: TabData[];
+  id?: string | number; 
+  name?: string; 
+  description?: string; 
+  tabs: TabData[];
   metadata?: { subject?: string; period?: string; level?: string; createdAt: string; updatedAt: string; };
   version?: string;
 }
@@ -125,7 +139,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
     }
 
     try {
-      // 1. Primero buscar si el docente ya tiene una versiÃ³n guardada
+      // 1. Primero buscar si el docente ya tiene una versión guardada
       try {
         const docenteRes = await apiRequest(`/docente-editor/programa/mio?asignatura_id=${asignaturaId}&periodo=${selectedPeriod}`)
         if (docenteRes.success && docenteRes.data?.datos_programa) {
@@ -137,10 +151,9 @@ export default function DocenteEditorProgramaAnaliticoPage() {
           setLoading(false)
           return
         }
-      } catch (e) { /* No tiene versiÃ³n propia, buscar la de comisiÃ³n */ }
+      } catch (e) { /* No tiene versión propia, buscar la de comisión */ }
 
-      // 2. Buscar programa de la comisión (el backend busca por asignatura+periodo y si no encuentra,
-      //    retorna el más reciente para esa asignatura — con su período real incluido en la respuesta)
+      // 2. Buscar programa de la comisión
       const comisionRes = await apiRequest(`/docente-editor/programa/comision?asignatura_id=${asignaturaId}&periodo=${selectedPeriod}`)
       if (comisionRes.success && comisionRes.data) {
         let datos = comisionRes.data.datos_programa
@@ -148,6 +161,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
         processProgramaData(datos)
         setProgramaComisionId(comisionRes.data.id)
         setHasDocenteVersion(false)
+        
         // Auto-sincronizar el selector de periodo con el periodo real del programa cargado
         const periodoCargado = comisionRes.data.periodo
         if (periodoCargado) {
@@ -167,7 +181,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
         setError("La comisión académica aún no ha subido un programa analítico para tu asignatura. Contacta a la comisión académica.")
       }
     } catch (e: any) {
-      setError(e.message || "Error al cargar programa analÃ­tico")
+      setError(e.message || "Error al cargar programa analítico")
     } finally {
       setLoading(false)
     }
@@ -176,14 +190,14 @@ export default function DocenteEditorProgramaAnaliticoPage() {
   const processProgramaData = (datos: any) => {
     let parsed: ProgramaData
 
-    // If datos has secciones format (old), convert to tabs
+    // Convertir de formato antiguo "secciones" a "tabs" si es necesario
     let normalizedDatos = datos
     if (!datos.tabs && datos.secciones && Array.isArray(datos.secciones)) {
       normalizedDatos = {
         ...datos,
         tabs: datos.secciones.map((sec: any, idx: number) => ({
           id: sec.id || `tab-${idx}`,
-          title: sec.titulo || sec.title || `SecciÃ³n ${idx + 1}`,
+          title: sec.titulo || sec.title || `Sección ${idx + 1}`,
           rows: (sec.filas || sec.rows || []).map((fila: any, fIdx: number) => ({
             id: fila.id || `row-${idx}-${fIdx}`,
             cells: (fila.celdas || fila.cells || []).map((celda: any, cIdx: number) => ({
@@ -222,7 +236,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
         }))
       }
     } else {
-      setError("Formato de programa analÃ­tico no reconocido")
+      setError("Formato de programa analítico no reconocido")
       return
     }
 
@@ -235,31 +249,103 @@ export default function DocenteEditorProgramaAnaliticoPage() {
   const activeTab = programaData?.tabs.find(t => t.id === activeTabId)
   const tableData = activeTab?.rows || []
 
-  // Valores para auto-rellenar celdas vacías en el editor (ASIGNATURA, PERIODO, NIVEL, DOCENTE)
+  // Auto-relleno de celdas
   const asignaturaNombreActual = asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre || ''
   const periodoNombreActual = periodos.find((p: any) => String(p.id) === selectedPeriod)?.nombre || ''
   const nivelNombreActual = profesorInfo?.nivel?.nombre || ''
   const docenteNombreActual = profesorInfo ? `${profesorInfo.nombres || ''} ${profesorInfo.apellidos || ''}`.trim() : ''
 
+  // ─── Convertir Nivel a Ordinal en Español ────────────────────────────────────
+  const formatearNivelOrdinal = (val: string | number): string => {
+    if (!val) return '';
+    const originalVal = String(val).trim();
+    const valStr = originalVal.toUpperCase();
+
+    const ordinalsMap: Record<string, string> = {
+      'PRIMERO': 'Primero',
+      'SEGUNDO': 'Segundo',
+      'TERCERO': 'Tercero',
+      'CUARTO': 'Cuarto',
+      'QUINTO': 'Quinto',
+      'SEXTO': 'Sexto',
+      'SÉPTIMO': 'Séptimo',
+      'OCTAVO': 'Octavo',
+      'NOVENO': 'Noveno',
+      'DÉCIMO': 'Décimo',
+      'PRIMER': 'Primer',
+      'TERCER': 'Tercer',
+      'DÉCIMO PRIMERO': 'Décimo Primero',
+      'DÉCIMO SEGUNDO': 'Décimo Segundo'
+    };
+
+    const ordinalsList = Object.keys(ordinalsMap);
+    if (ordinalsList.includes(valStr)) {
+      return ordinalsMap[valStr];
+    }
+
+    const mapaOrdinales: Record<string, string> = {
+      '1': 'Primero', '2': 'Segundo', '3': 'Tercero', '4': 'Cuarto', '5': 'Quinto',
+      '6': 'Sexto', '7': 'Séptimo', '8': 'Octavo', '9': 'Noveno', '10': 'Décimo',
+      '11': 'Décimo Primero', '12': 'Décimo Segundo'
+    };
+
+    const mapaAbreviaturas: Record<string, string> = {
+      '1RO': 'Primero', '1RA': 'Primero', '1°': 'Primero', '1.º': 'Primero', '1ER': 'Primero', '1º': 'Primero',
+      '2DO': 'Segundo', '2DA': 'Segundo', '2°': 'Segundo', '2.º': 'Segundo', '2º': 'Segundo',
+      '3RO': 'Tercero', '3RA': 'Tercero', '3°': 'Tercero', '3.º': 'Tercero', '3º': 'Tercero', '3ER': 'Tercero',
+      '4TO': 'Cuarto', '4TA': 'Cuarto', '4°': 'Cuarto', '4.º': 'Cuarto', '4º': 'Cuarto',
+      '5TO': 'Quinto', '5TA': 'Quinto', '5°': 'Quinto', '5.º': 'Quinto', '5º': 'Quinto',
+      '6TO': 'Sexto', '6TA': 'Sexto', '6°': 'Sexto', '6.º': 'Sexto', '6º': 'Sexto',
+      '7MO': 'Séptimo', '7MA': 'Séptimo', '7°': 'Séptimo', '7.º': 'Séptimo', '7º': 'Séptimo',
+      '8VO': 'Octavo', '8VA': 'Octavo', '8°': 'Octavo', '8.º': 'Octavo', '8º': 'Octavo',
+      '9NO': 'Noveno', '9NA': 'Noveno', '9°': 'Noveno', '9.º': 'Noveno', '9º': 'Noveno',
+      '10MO': 'Décimo', '10MA': 'Décimo', '10°': 'Décimo', '10.º': 'Décimo', '10º': 'Décimo'
+    };
+
+    if (mapaOrdinales[valStr]) {
+      return mapaOrdinales[valStr];
+    }
+
+    const cleanVal = valStr.replace(/[\.\s]/g, '');
+    if (mapaAbreviaturas[cleanVal]) {
+      return mapaAbreviaturas[cleanVal];
+    }
+
+    for (const [num, word] of Object.entries(mapaOrdinales)) {
+      const regex = new RegExp(`\\b${num}\\b|\\b${num}(?:do|er|ro|to|mo|vo|no|º|°|._º)\\b`, 'i');
+      if (regex.test(valStr)) {
+        return originalVal.replace(new RegExp(`\\b${num}\\b|\\b${num}(?:do|er|ro|to|mo|vo|no|º|°|._º)?\\b`, 'i'), word);
+      }
+    }
+
+    return originalVal;
+  };
+
   const getDisplayContent = (cells: TableCell[], idx: number): string => {
     const cell = cells[idx]
+    if (idx > 0) {
+      const prevLabel = (cells[idx - 1].content || '').toUpperCase().trim()
+      if (prevLabel === 'NIVEL') {
+        const val = cell.content?.trim() || nivelNombreActual
+        return formatearNivelOrdinal(val)
+      }
+    }
     if (cell.content?.trim()) return cell.content
     if (idx === 0) return ''
     const prevLabel = (cells[idx - 1].content || '').toUpperCase().trim()
     if (prevLabel.includes('ASIGNATURA') && asignaturaNombreActual) return asignaturaNombreActual
     if ((prevLabel.includes('PERIODO') || prevLabel.includes('PAO')) && periodoNombreActual) return periodoNombreActual
-    if (prevLabel === 'NIVEL' && nivelNombreActual) return nivelNombreActual
+    if (prevLabel === 'NIVEL' && nivelNombreActual) return formatearNivelOrdinal(nivelNombreActual)
     if (prevLabel === 'DOCENTE' && docenteNombreActual) return docenteNombreActual
     return ''
   }
 
-  // Edición de celdas - verificar si la comisión lo permite
+  // Permisos del Docente para editar la celda
   const isCellEditable = (cell: TableCell): boolean => {
-    // Si la comisión configuró docenteEditable, respetar esa configuración
+    if (cell.isLocked === true) return false; // Bloqueo estricto del Administrador
     if (cell.docenteEditable === true) return true;
     if (cell.docenteEditable === false) return false;
-    // Si no está configurado (undefined), todas editables por defecto en programa analítico
-    return true;
+    return true; // Por defecto editable si no se especifica
   }
 
   const saveEdit = () => {
@@ -336,14 +422,14 @@ export default function DocenteEditorProgramaAnaliticoPage() {
         body: JSON.stringify({
           asignatura_id: asignaturaId,
           periodo: selectedPeriod,
-          nombre: programaData.name || 'Programa AnalÃ­tico Docente',
+          nombre: programaData.name || 'Programa Analítico Docente',
           datos_programa: datosParaGuardar,
           programa_comision_id: programa_comision_id
         })
       })
 
       setHasDocenteVersion(true)
-      alert("Programa analítico guardado exitosamente!")
+      alert("¡Programa analítico guardado exitosamente!")
     } catch (error: any) {
       alert(`Error al guardar: ${error.message}`)
     } finally {
@@ -351,220 +437,262 @@ export default function DocenteEditorProgramaAnaliticoPage() {
     }
   }
 
-
   return (
     <ProtectedRoute allowedRoles={["profesor", "docente"]}>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gradient-to-b from-blue-50 via-white to-blue-50"
+        style={{
+          backgroundImage: 'radial-gradient(circle at 20% 50%, rgba(59, 130, 246, 0.04) 0%, transparent 50%), radial-gradient(circle at 80% 80%, rgba(37, 99, 235, 0.04) 0%, transparent 50%)',
+        }}
+      >
         <MainHeader />
 
-        <main className="max-w-7xl mx-auto px-6 py-6">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <Link href="/dashboard/docente">
-                <Button variant="outline" size="sm"><ArrowLeft className="h-4 w-4 mr-2" /> Volver</Button>
-              </Link>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Editor de Programa Analítico</h1>
-                <p className="text-sm text-gray-500">
-                  {profesorInfo ? `${profesorInfo.nombres} ${profesorInfo.apellidos}` : 'Cargando...'}
-                  {selectedAsignaturaId && asignaturasDisponibles.length > 0 && (
-                    <> &mdash; {asignaturasDisponibles.find((a: any) => String(a.id) === selectedAsignaturaId)?.nombre || 'Sin asignatura'}</>
-                  )}
-                  {!selectedAsignaturaId && asignaturasDisponibles.length === 0 && profesorInfo && ' — Sin asignatura'}
-                </p>
-              </div>
+        <main className="max-w-[100rem] mx-auto px-4 sm:px-6 py-6">
+          
+          {/* Título y breadcrumb */}
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-blue-800 mb-1 flex items-center gap-2">
+                <FileText className="h-8 w-8 text-blue-600" />
+                Editor de Programa Analítico
+              </h1>
+              <p className="text-blue-600/70">
+                Docente: <strong className="text-blue-800 font-semibold">{profesorInfo ? `${profesorInfo.nombres} ${profesorInfo.apellidos}` : 'Cargando...'}</strong>
+              </p>
             </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              {asignaturasDisponibles.length > 1 && (
-                <Select value={selectedAsignaturaId} onValueChange={setSelectedAsignaturaId}>
-                  <SelectTrigger className="w-[250px]"><SelectValue placeholder="Asignatura" /></SelectTrigger>
-                  <SelectContent>
-                    {asignaturasDisponibles.map((a: any) => (
-                      <SelectItem key={a.id} value={String(a.id)}>{a.nombre} ({a.codigo})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-                <SelectTrigger className="w-[250px]"><SelectValue placeholder="Periodo" /></SelectTrigger>
-                <SelectContent>
-                  {periodos.map(p => (
-                    <SelectItem key={p.id} value={String(p.id)}>{p.nombre}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700" disabled={isSaving || !programaData}>
-                {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Guardando...</> : <><Save className="h-4 w-4 mr-2" /> Guardar</>}
+            <Link href="/dashboard/docente">
+              <Button variant="outline" size="sm" className="border-blue-200 text-blue-700 hover:bg-blue-50">
+                <ArrowLeft className="h-4 w-4 mr-2" /> Volver al Dashboard
               </Button>
-              <PrintProgramaAnalitico
-                programaData={programaData}
-                asignaturaNombre={asignaturaNombreActual}
-                periodoNombre={periodoNombreActual}
-                nivelNombre={nivelNombreActual}
-                docenteNombre={docenteNombreActual}
-                programa_comision_id={programa_comision_id}
-                token={token || ''}
-                buttonLabel="Imprimir / PDF"
-              />
-            </div>
+            </Link>
           </div>
 
+          {/* Versión guardada banner */}
           {hasDocenteVersion && (
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-              Estás editando tu versión guardada del programa analítico.
+            <div className="mb-4 p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 flex items-center gap-2.5 shadow-sm">
+              <span className="flex h-2.5 w-2.5 rounded-full bg-blue-600 animate-pulse shrink-0"></span>
+              <span>Estás editando tu versión guardada localmente de este programa analítico.</span>
             </div>
           )}
 
+          {/* Sincronización automática de periodo */}
           {periodoAutoSyncMsg && (
-            <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-800">
-              ⚠️ {periodoAutoSyncMsg}
+            <div className="mb-4 p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-sm text-amber-800 flex items-center gap-2 shadow-sm">
+              <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0" />
+              <span>{periodoAutoSyncMsg}</span>
             </div>
           )}
 
-          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
-            Haz doble clic en las celdas habilitadas para editarlas. Las celdas bloqueadas por la comisión aparecen en gris.
+          {/* Información del editor */}
+          <div className="mb-6 p-3.5 bg-blue-50/40 border border-blue-100 rounded-xl text-sm text-blue-800 flex items-center gap-2.5 shadow-sm">
+            <Unlock className="h-4 w-4 text-blue-600 shrink-0" />
+            <span>Haz doble clic en las celdas habilitadas para editarlas. Las celdas bloqueadas por la comisión aparecen con un candado gris.</span>
           </div>
 
+          {/* Selector de Asignatura y Periodo */}
+          <Card className="mb-6 border-t-4 border-t-blue-600 border-blue-100 shadow-md">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex flex-wrap items-center justify-between gap-4 text-blue-800 text-lg font-bold">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText className="h-5 w-5 text-blue-600 shrink-0" />
+                  <span className="truncate">{programaData?.name || 'Programa Analítico'}</span>
+                </div>
+                <div className="flex-shrink-0 flex items-center gap-2">
+                  <Button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-700 h-9" disabled={isSaving || !programaData}>
+                    {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Guardando...</> : <><Save className="h-4 w-4 mr-2" /> Guardar Cambios</>}
+                  </Button>
+                  <PrintProgramaAnalitico
+                    programaData={programaData}
+                    asignaturaNombre={asignaturaNombreActual}
+                    periodoNombre={periodoNombreActual}
+                    nivelNombre={nivelNombreActual}
+                    docenteNombre={docenteNombreActual}
+                    programa_comision_id={programa_comision_id}
+                    token={token || ''}
+                    buttonLabel="Imprimir / PDF"
+                    buttonClassName="h-9 text-sm px-3"
+                  />
+                </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 border-t pt-4">
+                {asignaturasDisponibles.length > 1 && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-slate-600">Asignatura</label>
+                    <Select value={selectedAsignaturaId} onValueChange={setSelectedAsignaturaId}>
+                      <SelectTrigger className="w-full bg-white border-slate-200"><SelectValue placeholder="Asignatura" /></SelectTrigger>
+                      <SelectContent>
+                        {asignaturasDisponibles.map((a: any) => (
+                          <SelectItem key={a.id} value={String(a.id)}>{a.nombre} ({a.codigo})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-600">Periodo Académico</label>
+                  <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                    <SelectTrigger className="w-full bg-white border-slate-200"><SelectValue placeholder="Periodo" /></SelectTrigger>
+                    <SelectContent>
+                      {periodos.map(p => (
+                        <SelectItem key={p.id} value={String(p.id)}>{p.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Loader */}
           {loading && (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
-              <span className="ml-3 text-gray-600">Cargando programa analÃ­tico...</span>
+            <div className="flex flex-col items-center justify-center py-24 bg-white rounded-2xl border border-blue-100 shadow-sm">
+              <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+              <span className="mt-4 text-slate-600 font-medium">Cargando la estructura del programa analítico...</span>
             </div>
           )}
 
+          {/* Errores */}
           {error && !loading && (
-            <div className="p-6 text-center">
-              <p className="text-red-600 mb-4">{error}</p>
-              <Button onClick={loadPrograma} variant="outline">Reintentar</Button>
+            <div className="p-12 text-center bg-white rounded-2xl border border-blue-100 shadow-sm max-w-2xl mx-auto">
+              <p className="text-slate-600 text-base mb-6 font-medium">{error}</p>
+              <Button onClick={loadPrograma} className="bg-blue-600 hover:bg-blue-700">Reintentar Carga</Button>
             </div>
           )}
 
+          {/* Contenedor del Editor */}
           {!loading && !error && programaData && (
             <>
-              {/* Tabs */}
-              <div className="flex gap-1 mb-4 overflow-x-auto pb-2 border-b">
-                {programaData.tabs.map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTabId(tab.id)}
-                    className={`px-4 py-2 text-sm rounded-t-lg whitespace-nowrap transition-colors ${
-                      activeTabId === tab.id
-                        ? 'bg-emerald-600 text-white font-medium'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                  >
-                    {tab.title}
-                  </button>
-                ))}
+              {/* Pestañas (Secciones) idénticas a la comisión académica */}
+              <div className="mb-4 select-none">
+                <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-blue-100">
+                  {programaData.tabs.map(tab => (
+                    <div
+                      key={tab.id}
+                      onClick={() => setActiveTabId(tab.id)}
+                      className={`flex items-center h-10 px-4 rounded-md border cursor-pointer transition-all duration-200 ${
+                        activeTabId === tab.id
+                          ? 'bg-blue-600 text-white border-blue-700 shadow-md font-medium'
+                          : 'bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100'
+                      }`}
+                    >
+                      <span className="max-w-[200px] truncate" title={tab.title}>{tab.title}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              {/* Table */}
+              {/* Tabla Renderizada con alineaciones y estilos oficiales */}
               {activeTab && (
-                <Card className="border-emerald-100 shadow-md">
+                <Card className="border-blue-100 shadow-md">
                   <CardContent className="p-4">
-                    <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white max-h-[75vh] overflow-y-auto">
-                      <table className="border-collapse text-xs text-left w-full">
-                        {tableData.length === 0 ? (
-                          <tbody><tr><td className="p-12 text-center text-gray-500">La tabla está vacía.</td></tr></tbody>
-                        ) : (() => {
-                          // Separar filas de encabezado (sticky) y filas de cuerpo
-                          const renderCell = (cell: TableCell, cellIndex: number, row: TableRow) => {
-                            if ((cell.rowSpan ?? 1) <= 0 || (cell.colSpan ?? 1) <= 0) return null;
-                            const isVertical = cell.textOrientation === 'vertical';
-                            const editable = isCellEditable(cell);
-                            return (
-                              <td
-                                key={cell.id}
-                                className={`border relative align-top ${editable ? 'cursor-cell' : 'cursor-not-allowed'} ${
-                                  cell.isHeader
-                                    ? 'border-gray-400 bg-[#e8f0f8] font-bold text-gray-800'
-                                    : editable
-                                      ? 'border-gray-300 bg-white text-gray-700 hover:bg-blue-50/50'
-                                      : 'border-gray-300 bg-gray-50 text-gray-500'
-                                }`}
-                                style={{ backgroundColor: cell.backgroundColor || undefined, padding: 0, minWidth: isVertical ? '28px' : '40px', minHeight: '28px' }}
-                                rowSpan={cell.rowSpan}
-                                colSpan={cell.colSpan}
-                                onDoubleClick={() => {
-                                  if (!editable) return;
-                                  setModalCell({ id: cell.id, content: cell.content || '', isEditable: true });
-                                  setEditContent(cell.content || '');
-                                }}
-                              >
-                                <div
-                                  className="w-full h-full px-1 py-0.5 flex justify-start text-left"
-                                  style={{
-                                    writingMode: isVertical ? 'vertical-rl' : 'horizontal-tb',
-                                    transform: isVertical ? 'rotate(180deg)' : 'none',
-                                    alignItems: 'flex-start',
-                                    maxHeight: isVertical ? '100px' : 'none',
-                                    whiteSpace: isVertical ? 'nowrap' : 'pre-wrap',
-                                    overflow: 'hidden',
-                                    lineHeight: '1.15',
-                                    fontSize: isVertical ? '9px' : '11px',
-                                    minHeight: '24px',
-                                  }}
-                                >
-                                  {editingCell === cell.id ? (
-                                    <Textarea
-                                      value={editContent}
-                                      onChange={(e) => setEditContent(e.target.value)}
-                                      autoFocus
-                                      onBlur={saveEdit}
-                                      className="w-full min-h-[50px] p-1 text-xs resize-y"
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); saveEdit(); }
-                                        if (e.key === "Escape") cancelEdit();
-                                      }}
-                                    />
-                                  ) : (
-                                    <div className="whitespace-pre-wrap break-words w-full" style={{ wordBreak: 'break-word', lineHeight: '1.15' }}>
-                                      {getDisplayContent(row.cells, cellIndex) || <span className="opacity-0">.</span>}
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
-                            );
-                          };
+                    <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white">
+                      <table className="w-full border-collapse text-sm text-left">
+                        <tbody className="divide-y divide-gray-200">
+                          {tableData.length === 0 ? (
+                            <tr>
+                              <td className="p-12 text-center text-gray-500 italic">La tabla no tiene celdas o filas definidas.</td>
+                            </tr>
+                          ) : (
+                            tableData.map((row) => {
+                              const isFormRow = row.cells.length === 3 && row.cells[1].content.trim() === ':';
 
-                          const isHeaderRow = (row: TableRow) =>
-                            row.cells.some(c => c.isHeader && (c.rowSpan ?? 1) > 0 && (c.colSpan ?? 1) > 0);
-                          const hasVisibleCells = (row: TableRow) =>
-                            row.cells.some(c => (c.rowSpan ?? 1) > 0 && (c.colSpan ?? 1) > 0);
+                              return (
+                                <tr key={row.id} className="hover:bg-gray-50/50 transition-colors">
+                                  {row.cells.map((cell, index) => {
+                                    if ((cell.rowSpan ?? 1) <= 0 || (cell.colSpan ?? 1) <= 0) return null;
 
-                          const theadRows = tableData.filter(r => isHeaderRow(r) && hasVisibleCells(r));
-                          const tbodyRows = tableData.filter(r => !isHeaderRow(r) && hasVisibleCells(r));
+                                    const isHeader = cell.isHeader;
+                                    const isSeparator = cell.content.trim() === ':';
+                                    const isVertical = cell.textOrientation === 'vertical';
 
-                          return (
-                            <>
-                              {theadRows.length > 0 && (
-                                <thead className="sticky top-0 z-10 shadow-sm">
-                                  {theadRows.map((row) => (
-                                    <tr key={row.id}>
-                                      {row.cells.map((cell, cellIndex) => renderCell(cell, cellIndex, row))}
-                                    </tr>
-                                  ))}
-                                </thead>
-                              )}
-                              <tbody>
-                                {tbodyRows.length === 0 ? (
-                                  <tr>
-                                    <td colSpan={100} className="text-center text-gray-400 italic py-6 border border-gray-200 bg-gray-50">
-                                      Sin filas de datos — la comisión no ha añadido contenido aún
-                                    </td>
-                                  </tr>
-                                ) : (
-                                  tbodyRows.map((row) => (
-                                    <tr key={row.id} className="hover:bg-blue-50/30">
-                                      {row.cells.map((cell, cellIndex) => renderCell(cell, cellIndex, row))}
-                                    </tr>
-                                  ))
-                                )}
-                              </tbody>
-                            </>
-                          );
-                        })()}
+                                    let widthStyle = 'auto';
+                                    let minWidthStyle = 'auto';
+
+                                    if (isFormRow) {
+                                      if (index === 0) widthStyle = '20%';
+                                      else if (index === 1) widthStyle = '1%';
+                                      else widthStyle = 'auto';
+                                    } else {
+                                      if (isVertical) {
+                                        minWidthStyle = '40px';
+                                        widthStyle = '1%';
+                                      } else if (cell.content.length > 5 || isHeader) {
+                                        minWidthStyle = '120px';
+                                      } else {
+                                        minWidthStyle = '40px';
+                                      }
+                                    }
+
+                                    let justifyContent = 'justify-start';
+                                    if (isHeader || isSeparator || isVertical) {
+                                      justifyContent = 'justify-center';
+                                    } else if (isFormRow && index === 2) {
+                                      const labelUpper = (row.cells[0].content || '').toUpperCase().trim();
+                                      if (labelUpper === 'NIVEL') justifyContent = 'justify-center';
+                                    }
+
+                                    const editable = isCellEditable(cell);
+
+                                    return (
+                                      <td
+                                        key={cell.id}
+                                        className={`
+                                          border border-gray-200 
+                                          relative transition-all duration-75 ease-in-out
+                                          ${isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"}
+                                          ${editable ? "hover:bg-blue-50/40 cursor-cell" : "bg-slate-50/60 cursor-not-allowed opacity-80"}
+                                        `}
+                                        style={{
+                                          backgroundColor: cell.backgroundColor || (isHeader ? '#f9fafb' : editable ? '#ffffff' : '#f8fafc'),
+                                          color: cell.textColor,
+                                          width: widthStyle,
+                                          minWidth: minWidthStyle,
+                                          whiteSpace: isSeparator ? 'nowrap' : 'normal',
+                                          padding: 0,
+                                          height: '1px',
+                                        }}
+                                        rowSpan={cell.rowSpan || 1}
+                                        colSpan={cell.colSpan || 1}
+                                        onDoubleClick={() => {
+                                          if (editable) {
+                                            setModalCell({ id: cell.id, content: cell.content || '', isEditable: true });
+                                            setEditContent(cell.content || '');
+                                          }
+                                        }}
+                                      >
+                                        <div
+                                          className={`w-full h-full flex items-center ${justifyContent} p-2`}
+                                          style={{
+                                            writingMode: isVertical ? 'vertical-rl' : undefined,
+                                            transform: isVertical ? 'rotate(180deg)' : undefined,
+                                            minHeight: isVertical ? '120px' : 'auto',
+                                            textAlign: (isFormRow && index === 2 && (row.cells[0].content || '').toUpperCase().trim() === 'NIVEL') ? 'center' : (isHeader ? 'center' : (cell.textAlign as any) || 'left'),
+                                            fontSize: cell.fontSize || (isVertical ? '9px' : '11px'),
+                                            fontWeight: cell.fontWeight || undefined,
+                                          }}
+                                        >
+                                          <div className="whitespace-pre-wrap leading-normal break-words w-full">
+                                            {getDisplayContent(row.cells, index) || <span className="opacity-0">.</span>}
+                                          </div>
+
+                                          {/* Candados flotantes en las celdas */}
+                                          <div className="absolute top-1 right-1 opacity-20 hover:opacity-100 transition-opacity">
+                                            {editable ? (
+                                              <Unlock className="h-3 w-3 text-green-500" />
+                                            ) : (
+                                              <Lock className="h-3 w-3 text-slate-400" />
+                                            )}
+                                          </div>
+                                        </div>
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
                       </table>
                     </div>
                   </CardContent>
@@ -589,24 +717,25 @@ export default function DocenteEditorProgramaAnaliticoPage() {
           )}
         </main>
 
-        {/* Modal de ediciÃ³n */}
+        {/* Modal de edición */}
         {modalCell && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setModalCell(null)}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4" onClick={(e) => e.stopPropagation()}>
-              <div className="p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setModalCell(null)}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex items-center gap-2">
+                <FileText className="h-5 w-5 text-blue-600" />
                 <h3 className="text-lg font-bold text-blue-800">Editar Celda</h3>
               </div>
               <div className="p-4">
                 <Textarea
                   value={editContent}
                   onChange={(e) => setEditContent(e.target.value)}
-                  className="w-full min-h-[300px] p-3 text-sm border-gray-300 rounded-lg"
+                  className="w-full min-h-[300px] p-3 text-sm border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                   autoFocus
                 />
               </div>
               <div className="flex justify-end gap-3 p-4 border-t bg-gray-50">
                 <Button variant="outline" onClick={() => setModalCell(null)}>Cerrar</Button>
-                <Button className="bg-blue-600 text-white" onClick={saveModalEdit}>
+                <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={saveModalEdit}>
                   <Save className="h-4 w-4 mr-2" /> Guardar
                 </Button>
               </div>

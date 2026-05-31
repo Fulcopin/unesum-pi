@@ -26,6 +26,7 @@ interface TableCell {
   rowSpan: number; 
   colSpan: number; 
   isEditable: boolean; 
+  isLocked?: boolean;
   docenteEditable?: boolean;
   backgroundColor?: string; 
   textColor?: string; 
@@ -122,6 +123,66 @@ export default function EditorProgramaAnaliticoComisionPage() {
     if (HERRAMIENTAS_TABLA_BLOQUEADAS) setConfigModeDocente(false)
   }, [])
 
+  // HELPER: Sincronizar bloqueos desde la plantilla del admin
+  const syncLocksFromTemplate = (uiData: any, periodoStr: string) => {
+    // Buscar la plantilla del administrador para este periodo
+    const templateAdmin = savedProgramas.find(s => !s.asignatura_id && s.periodo === periodoStr);
+    if (!templateAdmin) return uiData;
+
+    let templateData = (templateAdmin as any).datos_tabla || (templateAdmin as any).datos_programa;
+    if (typeof templateData === 'string') {
+      try { templateData = JSON.parse(templateData); } catch (e) { return uiData; }
+    }
+    
+    if (!templateData?.tabs || !uiData?.tabs) return uiData;
+
+    const newTabs = uiData.tabs.map((tab: any, tIdx: number) => {
+      // Intentar encontrar el tab correspondiente por título o índice
+      const tTab = templateData.tabs.find((t: any) => t.title === tab.title) || templateData.tabs[tIdx];
+      if (!tTab) return tab;
+
+      // Recopilar todas las celdas bloqueadas de este tab en la plantilla
+      const lockedTemplateCells = tTab.rows.flatMap((r: any) => r.cells).filter((c: any) => c.isLocked === true);
+      const unlockedTemplateCells = tTab.rows.flatMap((r: any) => r.cells).filter((c: any) => c.isLocked === false);
+
+      const newRows = tab.rows.map((row: any, rIdx: number) => {
+        const tRow = tTab.rows[rIdx];
+        
+        const newCells = row.cells.map((cell: any, cIdx: number) => {
+          let shouldLock = cell.isLocked;
+
+          // 1. Intentar match por índice exacto (si la fila existe)
+          if (tRow && tRow.cells[cIdx]) {
+            const tCell = tRow.cells[cIdx];
+            if (tCell.isLocked !== undefined) {
+              shouldLock = tCell.isLocked;
+            }
+          } 
+          
+          // 2. Si no hubo match por índice, intentar match por contenido (muy útil para headers o etiquetas)
+          if (shouldLock === undefined && cell.content && cell.content.trim().length > 0) {
+            const cellContentNorm = cell.content.trim().toUpperCase();
+            
+            // Buscar si esta celda exacta fue bloqueada en la plantilla
+            const matchedLocked = lockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
+            if (matchedLocked) {
+               shouldLock = true;
+            } else {
+               const matchedUnlocked = unlockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
+               if (matchedUnlocked) shouldLock = false;
+            }
+          }
+
+          return { ...cell, isLocked: shouldLock };
+        });
+        return { ...row, cells: newCells };
+      });
+      return { ...tab, rows: newRows };
+    });
+
+    return { ...uiData, tabs: newTabs };
+  };
+
   // Si vinimos con params ?asignatura=..&periodo=.., intentar cargar el programa correspondiente
   useEffect(() => {
     if (!asignaturaParam || !periodoParam) return;
@@ -133,7 +194,8 @@ export default function EditorProgramaAnaliticoComisionPage() {
       // preparar la UI data y setActive
       const programaToLoad = (match as any).datos_tabla || (match as any).datos_programa || null
       if (programaToLoad) {
-        const uiData = typeof programaToLoad === 'string' ? JSON.parse(programaToLoad) : programaToLoad
+        let uiData = typeof programaToLoad === 'string' ? JSON.parse(programaToLoad) : programaToLoad
+        uiData = syncLocksFromTemplate(uiData, String(periodoParam));
         setProgramas([uiData])
         setActiveProgramaId(uiData.id || match.id)
         setActiveTabId(uiData.tabs?.[0]?.id || null)
@@ -327,9 +389,10 @@ export default function EditorProgramaAnaliticoComisionPage() {
         editorData.name = programaToLoad.nombre || 'Programa Analítico';
       }
       
-      setProgramas([editorData]);
-      setActiveProgramaId(editorData.id);
-      setActiveTabId(editorData.tabs[0]?.id || null);
+      const syncedEditorData = syncLocksFromTemplate(editorData, programaToLoad.periodo || '');
+      setProgramas([syncedEditorData]);
+      setActiveProgramaId(syncedEditorData.id);
+      setActiveTabId(syncedEditorData.tabs[0]?.id || null);
       
       setSelectedPeriod(programaToLoad.periodo || '');
       console.log("✅ Programa cargado exitosamente, periodo:", programaToLoad.periodo, "tabs:", editorData.tabs.length);
@@ -398,12 +461,21 @@ export default function EditorProgramaAnaliticoComisionPage() {
                   const hasBold = !!td.querySelector("strong, b");
                   const isHeader = td.tagName === "TH" || hasBold || (rowsRaw.length > 3 && rIdx <= 1);
 
-                  const verticalKeywords = ["PRESENCIAL", "SINCRÓNICA", "SINCRONICA", "PFAE", "TA"];
+                  const verticalKeywords = [
+                    "PRESENCIAL", "SINCRÓNICA", "SINCRONICA", "PFAE", "TA",
+                    "HD. PRESENCIAL", "HD. SINCRÓNICA", "HD. SINCRONICA",
+                    "HD PRESENCIAL", "HD SINCRÓNICA", "HD SINCRONICA"
+                  ];
                   
                   let guessVertical = false;
                   if (isHeader) {
                       const contentTrimmed = contentUpper.trim();
-                      guessVertical = verticalKeywords.includes(contentTrimmed);
+                      guessVertical = verticalKeywords.includes(contentTrimmed) || 
+                                      contentTrimmed.includes("HD. PRESENCIAL") || 
+                                      contentTrimmed.includes("HD. SINCRÓNICA") ||
+                                      contentTrimmed.includes("HD. SINCRONICA") ||
+                                      contentTrimmed.includes("HD PRESENCIAL") ||
+                                      contentTrimmed.includes("HD SINCRÓNICA");
                   }
                   return {
                     id: `cell-${newTabs.length}-${rIdx}-${cIdx}-${Date.now()}`,
@@ -479,9 +551,10 @@ export default function EditorProgramaAnaliticoComisionPage() {
         tabs: newTabs,
       };
       
-      setProgramas([newData]);
-      setActiveProgramaId(newData.id);
-      setActiveTabId(newTabs[0]?.id || null);
+      const syncedNewData = syncLocksFromTemplate(newData, meta.period || selectedPeriod || '');
+      setProgramas([syncedNewData]);
+      setActiveProgramaId(syncedNewData.id);
+      setActiveTabId(syncedNewData.tabs[0]?.id || null);
 
     } catch (e) { console.error(e); alert("Error crítico."); } 
     finally { setIsLoading(false); }
@@ -922,6 +995,9 @@ export default function EditorProgramaAnaliticoComisionPage() {
     ? savedProgramas.filter(s => s.periodo === selectedPeriod || !s.periodo)
     : savedProgramas;
   
+  const hasLockedCellsSelected = activeTab?.rows.flatMap(r => r.cells).filter(c => selectedCells.includes(c.id)).some(c => c.isLocked) || false;
+  const isToolsDisabled = !selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS || hasLockedCellsSelected;
+
   return (
     <ProtectedRoute allowedRoles={["comision_academica", "comision", "administrador"]}>
       <div className="min-h-screen bg-gradient-to-b from-blue-50 via-white to-blue-50"
@@ -955,7 +1031,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
                       </Button>
                       <PrintProgramaAnalitico
                         programaData={activePrograma || null}
-                        asignaturaNombre={activePrograma?.name || activePrograma?.metadata?.subject || ''}
+                        asignaturaNombre={(activePrograma as any)?.name || (activePrograma as any)?.metadata?.subject || ''}
                         periodoNombre={selectedPeriod}
                         buttonLabel="Imprimir"
                       />
@@ -1185,17 +1261,17 @@ export default function EditorProgramaAnaliticoComisionPage() {
                 <Card className="border-blue-100 shadow-md">
                   <CardContent className="p-4">
                     <div className={`flex flex-wrap gap-2 mb-2 p-2 border rounded-md bg-blue-50/50 ${HERRAMIENTAS_TABLA_BLOQUEADAS ? "opacity-60 pointer-events-none" : ""}`}>
-                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertRow('above')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Fila ↑</Button>
-                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertRow('below')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Fila ↓</Button>
-                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertColumn('left')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Col ←</Button>
-                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertColumn('right')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Col →</Button>
+                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertRow('above')} disabled={isToolsDisabled}><Plus className="h-3 w-3 mr-1"/>Fila ↑</Button>
+                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertRow('below')} disabled={isToolsDisabled}><Plus className="h-3 w-3 mr-1"/>Fila ↓</Button>
+                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertColumn('left')} disabled={isToolsDisabled}><Plus className="h-3 w-3 mr-1"/>Col ←</Button>
+                       <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertColumn('right')} disabled={isToolsDisabled}><Plus className="h-3 w-3 mr-1"/>Col →</Button>
                        <div className="w-px h-6 bg-blue-200 mx-1"></div>
-                       <Button size="sm" onClick={removeSelectedRow} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Minus className="h-3 w-3 mr-1"/>Fila</Button>
-                       <Button size="sm" onClick={removeSelectedColumn} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Minus className="h-3 w-3 mr-1"/>Col</Button>
+                       <Button size="sm" onClick={removeSelectedRow} className="bg-red-50 text-red-600 border-red-200" disabled={isToolsDisabled}><Minus className="h-3 w-3 mr-1"/>Fila</Button>
+                       <Button size="sm" onClick={removeSelectedColumn} className="bg-red-50 text-red-600 border-red-200" disabled={isToolsDisabled}><Minus className="h-3 w-3 mr-1"/>Col</Button>
                        <div className="w-px h-6 bg-blue-200 mx-1"></div>
-                       <Button size="sm" onClick={toggleVerticalText} className="bg-white text-blue-700 border-blue-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} title="Rotar Texto Verticalmente"><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
-                       <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2 || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
-                       <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
+                       <Button size="sm" onClick={toggleVerticalText} className="bg-white text-blue-700 border-blue-200" disabled={isToolsDisabled} title="Rotar Texto Verticalmente"><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
+                       <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2 || isToolsDisabled} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
+                       <Button size="sm" onClick={clearSelectedCells} disabled={isToolsDisabled} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
                        <div className="w-px h-6 bg-blue-200 mx-1"></div>
                        <Button 
                          size="sm" 
@@ -1294,12 +1370,13 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                         ${configModeDocente ? configModeClass : (
                                           isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"
                                         )}
+                                        ${!configModeDocente && cell.isLocked ? "bg-amber-50/60" : ""}
                                         ${!configModeDocente && isSelected ? "ring-2 ring-inset ring-blue-500 z-10" : ""}
                                       `}
                                       style={{ 
                                         backgroundColor: configModeDocente 
                                           ? (docenteFlag === true ? '#f0fdf4' : docenteFlag === false ? '#fef2f2' : '#f9fafb')
-                                          : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff')),
+                                          : (cell.isLocked ? '#fffbeb' : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'))),
                                         color: cell.textColor, 
                                         width: widthStyle,
                                         minWidth: minWidthStyle, 
@@ -1310,7 +1387,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                       rowSpan={cell.rowSpan || 1} 
                                       colSpan={cell.colSpan || 1} 
                                       onClick={(e) => handleCellClick(cell.id, e)} 
-                                      onDoubleClick={() => { if (!configModeDocente) cell.isEditable && startEditing(cell.id, cell.content) }}
+                                      onDoubleClick={() => { if (!configModeDocente && !cell.isLocked) cell.isEditable && startEditing(cell.id, cell.content) }}
                                     >
                                       <div 
                                         className={`w-full h-full flex items-center ${justifyContent} p-2`}
@@ -1339,7 +1416,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                             {cell.content || <span className="opacity-0">.</span>}
                                           </div>
                                         )}
-                                        {configModeDocente && (
+                                        {configModeDocente ? (
                                           <div className="absolute top-0 right-0 p-0.5">
                                             {docenteFlag === true ? (
                                               <Unlock className="h-3 w-3 text-green-600" />
@@ -1349,6 +1426,8 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                               <span className="text-[8px] text-gray-400">?</span>
                                             )}
                                           </div>
+                                        ) : (
+                                          cell.isLocked && <Lock className="h-3 w-3 text-amber-600 absolute top-1 right-1 opacity-70 pointer-events-none" />
                                         )}
                                       </div>
                                     </td>

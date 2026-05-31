@@ -170,21 +170,21 @@ button:not(:disabled) {
   cursor: pointer;
 }
 
+body.unesum-platform-bg {
+  background-color: #f2fcf5;
+}
+
 body.unesum-platform-bg::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -2;
   pointer-events: none;
-  background-image:
-    linear-gradient(135deg, rgba(7, 94, 71, 0.86) 0%, rgba(28, 139, 104, 0.58) 38%, rgba(244, 250, 246, 0.78) 100%),
-    radial-gradient(circle at 16% 18%, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0) 28%),
-    url("/images/unesum-campus-aerial.png"),
-    url("/images/unesum-building.png");
-  background-size: auto, auto, cover, 34vw auto;
-  background-position: center, left top, center center, right bottom;
-  background-repeat: no-repeat;
-  filter: saturate(1.05) contrast(1.02);
+  background-image: 
+    radial-gradient(at 0% 0%, hsla(152, 100%, 93%, 1) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, hsla(143, 85%, 96%, 1) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, hsla(160, 100%, 96%, 1) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, hsla(150, 70%, 90%, 1) 0px, transparent 50%);
 }
 
 body.unesum-platform-bg::after {
@@ -193,13 +193,10 @@ body.unesum-platform-bg::after {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    linear-gradient(180deg, rgba(248, 252, 249, 0.08) 0%, rgba(243, 248, 245, 0.36) 100%),
-    repeating-linear-gradient(120deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 26px);
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%2310b981' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }
 
 body.unesum-platform-bg [class*="min-h-screen"][class*="bg-gray-50"],
 body.unesum-platform-bg [class*="min-h-screen"][class*="bg-gradient-to-"] {
-  background: linear-gradient(180deg, rgba(248, 251, 249, 0.76) 0%, rgba(239, 246, 241, 0.84) 100%) !important;
-  backdrop-filter: blur(8px);
+  background: transparent !important;
 }

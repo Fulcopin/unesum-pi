@@ -60,13 +60,15 @@ exports.create = async (req, res) => {
       }
     }
     
+    const isProfesor = req.user.tabla === 'profesores' || ['profesor', 'docente'].includes(req.user.rol);
     const nuevoSyllabus = await Syllabus.create({
       nombre,
       periodo,
       materias: materias || nombre,
       asignatura_id: asignatura_id || null, // 🆕 Guardar asignatura_id para validación futura
       datos_syllabus,
-      usuario_id
+      usuario_id: isProfesor ? null : req.user.id,
+      profesor_id: isProfesor ? req.user.id : null
     });
     
     return res.status(201).json({
@@ -187,11 +189,17 @@ exports.getMine = async (req, res) => {
     const ultimoPeriodo = ultimoPeriodoEntry.periodo;
 
     // 2. Buscar todos los syllabi que pertenezcan a ESE profesor y a ESE último periodo.
+    const isProfesor = req.user.tabla === 'profesores' || ['profesor', 'docente'].includes(req.user.rol);
+    const queryWhere = { periodo: ultimoPeriodo };
+    if (isProfesor) {
+      queryWhere.profesor_id = usuario_id;
+    } else {
+      queryWhere.usuario_id = usuario_id;
+    }
+
+    // 2. Buscar todos los syllabi que pertenezcan a ESE profesor y a ESE último periodo.
     const syllabi = await Syllabus.findAll({
-      where: {
-        usuario_id: usuario_id,
-        periodo: ultimoPeriodo
-      },
+      where: queryWhere,
       order: [['updated_at', 'DESC']],
       // No es estrictamente necesario incluir el creador, pero es buena práctica
       include: { 
@@ -438,7 +446,12 @@ exports.delete = async (req, res) => {
     }
 
     // ¡VERIFICACIÓN DE PERMISOS!
-    if (syllabus.usuario_id !== userId && userRol !== 'administrador') {
+    const isProfesor = req.user.tabla === 'profesores' || ['profesor', 'docente'].includes(userRol);
+    const isOwner = isProfesor 
+      ? String(syllabus.profesor_id) === String(userId)
+      : String(syllabus.usuario_id) === String(userId);
+
+    if (!isOwner && userRol !== 'administrador') {
         return res.status(403).json({ success: false, message: 'No tienes permiso para eliminar este syllabus.' });
     }
     
@@ -1095,12 +1108,14 @@ exports.uploadDocument = async (req, res) => {
     };
 
     // Crear el registro en la base de datos
+    const isProfesor = req.user.tabla === 'profesores' || ['profesor', 'docente'].includes(req.user.rol);
     const nuevoSyllabus = await Syllabus.create({
       nombre,
       periodo,
       materias,
       datos_syllabus,
-      usuario_id
+      usuario_id: isProfesor ? null : req.user.id,
+      profesor_id: isProfesor ? req.user.id : null
     });
 
     // Eliminar el archivo temporal
@@ -1242,12 +1257,14 @@ exports.uploadExcel = async (req, res) => {
     };
 
     // Crear el registro en la base de datos
+    const isProfesor = req.user.tabla === 'profesores' || ['profesor', 'docente'].includes(req.user.rol);
     const nuevoSyllabus = await Syllabus.create({
       nombre,
       periodo,
       materias,
       datos_syllabus,
-      usuario_id
+      usuario_id: isProfesor ? null : req.user.id,
+      profesor_id: isProfesor ? req.user.id : null
     });
 
     // Eliminar el archivo temporal
@@ -1521,6 +1538,7 @@ exports.subirSyllabusConValidacion = async (req, res) => {
     });
 
     // 4. Guardar el syllabus validado
+    const isProfesor = req.user.tabla === 'profesores' || ['profesor', 'docente'].includes(req.user.rol);
     const nuevoSyllabus = await Syllabus.create({
       nombre,
       periodo,
@@ -1530,7 +1548,8 @@ exports.subirSyllabusConValidacion = async (req, res) => {
         titulos: titulosProfesor,
         validacion: resultado
       },
-      usuario_id,
+      usuario_id: isProfesor ? null : req.user.id,
+      profesor_id: isProfesor ? req.user.id : null,
       es_plantilla_referencia: false,
       titulos_extraidos: titulosProfesor
     });

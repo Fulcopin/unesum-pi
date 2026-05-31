@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { Button } from '@/components/ui/button';
 import { Printer } from 'lucide-react';
@@ -83,6 +83,81 @@ const ETAPA_LABELS: Record<string, string> = {
 
 const VISADO_ETAPAS = ['decano', 'director_academico', 'coordinador', 'docente'] as const;
 
+// ─── Convertir Nivel a Ordinal en Español ────────────────────────────────────
+function formatearNivelOrdinal(val: string | number): string {
+  if (!val) return '';
+  const originalVal = String(val).trim();
+  const valStr = originalVal.toUpperCase();
+
+  const ordinalsMap: Record<string, string> = {
+    'PRIMERO': 'Primero',
+    'SEGUNDO': 'Segundo',
+    'TERCERO': 'Tercero',
+    'CUARTO': 'Cuarto',
+    'QUINTO': 'Quinto',
+    'SEXTO': 'Sexto',
+    'SÉPTIMO': 'Séptimo',
+    'OCTAVO': 'Octavo',
+    'NOVENO': 'Noveno',
+    'DÉCIMO': 'Décimo',
+    'PRIMER': 'Primer',
+    'TERCER': 'Tercer',
+    'DÉCIMO PRIMERO': 'Décimo Primero',
+    'DÉCIMO SEGUNDO': 'Décimo Segundo'
+  };
+
+  const ordinalsList = Object.keys(ordinalsMap);
+  if (ordinalsList.includes(valStr)) {
+    return ordinalsMap[valStr];
+  }
+
+  const mapaOrdinales: Record<string, string> = {
+    '1': 'Primero',
+    '2': 'Segundo',
+    '3': 'Tercero',
+    '4': 'Cuarto',
+    '5': 'Quinto',
+    '6': 'Sexto',
+    '7': 'Séptimo',
+    '8': 'Octavo',
+    '9': 'Noveno',
+    '10': 'Décimo',
+    '11': 'Décimo Primero',
+    '12': 'Décimo Segundo'
+  };
+
+  const mapaAbreviaturas: Record<string, string> = {
+    '1RO': 'Primero', '1RA': 'Primero', '1°': 'Primero', '1.º': 'Primero', '1ER': 'Primero', '1º': 'Primero',
+    '2DO': 'Segundo', '2DA': 'Segundo', '2°': 'Segundo', '2.º': 'Segundo', '2º': 'Segundo',
+    '3RO': 'Tercero', '3RA': 'Tercero', '3°': 'Tercero', '3.º': 'Tercero', '3º': 'Tercero', '3ER': 'Tercero',
+    '4TO': 'Cuarto', '4TA': 'Cuarto', '4°': 'Cuarto', '4.º': 'Cuarto', '4º': 'Cuarto',
+    '5TO': 'Quinto', '5TA': 'Quinto', '5°': 'Quinto', '5.º': 'Quinto', '5º': 'Quinto',
+    '6TO': 'Sexto', '6TA': 'Sexto', '6°': 'Sexto', '6.º': 'Sexto', '6º': 'Sexto',
+    '7MO': 'Séptimo', '7MA': 'Séptimo', '7°': 'Séptimo', '7.º': 'Séptimo', '7º': 'Séptimo',
+    '8VO': 'Octavo', '8VA': 'Octavo', '8°': 'Octavo', '8.º': 'Octavo', '8º': 'Octavo',
+    '9NO': 'Noveno', '9NA': 'Noveno', '9°': 'Noveno', '9.º': 'Noveno', '9º': 'Noveno',
+    '10MO': 'Décimo', '10MA': 'Décimo', '10°': 'Décimo', '10.º': 'Décimo', '10º': 'Décimo'
+  };
+
+  if (mapaOrdinales[valStr]) {
+    return mapaOrdinales[valStr];
+  }
+
+  const cleanVal = valStr.replace(/[\.\s]/g, '');
+  if (mapaAbreviaturas[cleanVal]) {
+    return mapaAbreviaturas[cleanVal];
+  }
+
+  for (const [num, word] of Object.entries(mapaOrdinales)) {
+    const regex = new RegExp(`\\b${num}\\b|\\b${num}(?:do|er|ro|to|mo|vo|no|º|°|._º)\\b`, 'i');
+    if (regex.test(valStr)) {
+      return originalVal.replace(new RegExp(`\\b${num}\\b|\\b${num}(?:do|er|ro|to|mo|vo|no|º|°|._º)?\\b`, 'i'), word);
+    }
+  }
+
+  return originalVal;
+}
+
 // ─── Normalizar datos a formato tabs ────────────────────────────────────────
 function normalizarATabs(raw: ProgramaData): TabData[] {
   if (raw.tabs && Array.isArray(raw.tabs) && raw.tabs.length > 0) {
@@ -114,7 +189,7 @@ function normalizarATabs(raw: ProgramaData): TabData[] {
     const rows: TableRow[] = [
       { cells: [{ content: 'ASIGNATURA', isHeader: true, colSpan: 1 }, { content: dg.asignatura || '', colSpan: 1 }, { content: 'PERIODO ACADÉMICO ORDINARIO (PAO)', isHeader: true, colSpan: 1 }, { content: dg.periodo_academico || '', colSpan: 1 }] },
       { cells: [{ content: 'CARRERA', isHeader: true }, { content: dg.carrera || '', colSpan: 3 }] },
-      { cells: [{ content: 'NIVEL', isHeader: true }, { content: dg.nivel || '', colSpan: 3 }] },
+      { cells: [{ content: 'NIVEL', isHeader: true }, { content: formatearNivelOrdinal(dg.nivel || ''), colSpan: 3 }] },
       { cells: [{ content: 'DOCENTE', isHeader: true }, { content: dg.docente || '', colSpan: 3 }] },
     ];
     if (utem.length > 0) {
@@ -131,11 +206,14 @@ function normalizarATabs(raw: ProgramaData): TabData[] {
 
 // ─── Escapa HTML ─────────────────────────────────────────────────────────────
 function esc(s: string): string {
-  return String(s || '')
+  const escaped = String(s || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br/>');
+  return escaped
+    .replace(/(programaci[oó]n\s*(?:1|i+|ii+)?)/gi, '<span style="font-weight: normal !important; font-style: normal !important;">$1</span>')
+    .replace(/((?:Primer\s+Periodo\s+)?PII?\s+2026)/gi, '<span style="font-weight: normal !important; font-style: normal !important;">$1</span>');
 }
 
 // ─── Detecta el número máximo de columnas en una pestaña (respetando colSpan) ─
@@ -206,7 +284,7 @@ function generarHTML(
           align-items: center;
           gap: 14px;
           padding: 6px 8px 6px 4mm;
-          border-bottom: 2px solid #19325f;
+          border-bottom: none;
           page-break-inside: avoid;
         }
         .inst-logo { height: 54px; width: auto; flex-shrink: 0; }
@@ -244,14 +322,20 @@ function generarHTML(
 
         /* ── Título de sección ── */
         .section-title {
-          background: #3b64a0;
+          background: #047857;
           color: #fff;
+          border: 1px solid #a0aec0;
+          border-bottom: none;
           padding: 4px 10px;
           font-size: 8.5pt;
           font-weight: bold;
           letter-spacing: 0.5px;
           margin-top: 8px;
           page-break-after: avoid;
+        }
+        .page-break {
+          page-break-before: always !important;
+          break-before: page !important;
         }
 
         /* ── Tabla general ── */
@@ -262,6 +346,7 @@ function generarHTML(
           margin-bottom: 4px;
           page-break-inside: auto;
           table-layout: auto;
+          border: 1px solid #a0aec0 !important;
         }
         td, th {
           border: 1px solid #a0aec0;
@@ -286,6 +371,19 @@ function generarHTML(
           max-width: 150px;
         }
 
+        .cell-header-periodo {
+          width: 280px !important;
+          min-width: 260px !important;
+          max-width: 320px !important;
+          white-space: nowrap !important;
+        }
+
+        .cell-header-nivel {
+          width: 140px !important;
+          min-width: 130px !important;
+          max-width: 160px !important;
+        }
+
         /* Celda de texto vertical (textOrientation=vertical) */
         .cell-vert {
           writing-mode: vertical-rl;
@@ -304,6 +402,11 @@ function generarHTML(
         }
 
         /* ── Visado ── */
+        .visado-section-container {
+          page-break-inside: avoid !important;
+          break-inside: avoid-page !important;
+          width: 100%;
+        }
         .visado-title {
           background: #fff;
           color: #19325f;
@@ -315,38 +418,51 @@ function generarHTML(
           letter-spacing: 0.4px;
           margin-top: 10px;
           page-break-after: avoid;
+          text-align: center;
         }
-        .visado-table {
+        .visado-wrap { 
+          display: flex; 
+          justify-content: center; 
           width: 100%;
+          padding: 0;
+        }
+        /* Force visado table to ignore global table min-width and center itself */
+        .visado-table {
+          display: inline-table;
+          width: auto !important;
+          min-width: 0 !important;
+          max-width: 95%;
           border-collapse: collapse;
-          margin-top: 0;
+          margin: 10px auto;
           page-break-inside: avoid;
-          table-layout: fixed;
+          table-layout: auto;
         }
         .visado-table th {
           background: #fff;
           color: #19325f;
-          text-align: center;
-          padding: 5px 6px;
+          text-align: center !important;
+          padding: 6px 12px;
           font-size: 8.5pt;
           border: 1px solid #a0aec0;
           font-weight: bold;
+          min-width: 100px;
         }
         .visado-table td {
           border: 1px solid #a0aec0;
-          text-align: center;
-          padding: 5px 4px;
+          text-align: center !important;
+          padding: 12px 8px;
           vertical-align: middle;
+          min-width: 100px;
         }
-        .qr-img { width: 80px; height: 80px; display: block; margin: 6px auto; }
-        .qr-placeholder { font-size: 7.5pt; color: #aaa; font-style: italic; margin: 10px auto; text-align: center; }
-        .firma-titulo { font-size: 8.5pt; font-weight: bold; color: #19325f; text-align: center; margin-bottom: 2px; }
-        .firma-titulo-blank { font-size: 8pt; color: #bbb; text-align: center; letter-spacing: 2px; margin-bottom: 4px; }
-        .firma-nombre { font-size: 8.5pt; font-weight: bold; text-align: center; margin-top: 4px; }
-        .firma-nombre-blank { font-size: 8pt; color: #bbb; text-align: center; letter-spacing: 2px; margin-top: 8px; }
-        .firma-fecha { font-size: 7pt; color: #555; margin-top: 3px; text-align: center; }
-        .pendiente { font-size: 8pt; color: #999; font-style: italic; }
-        .visado-td-firma { border: 1px solid #a0aec0; text-align: center; padding: 8px 6px; vertical-align: middle; }
+        .qr-img { width: 70px; height: 70px; display: block; margin: 8px auto; }
+        .qr-placeholder { font-size: 7.5pt; color: #aaa; font-style: italic; margin: 12px auto; text-align: center; padding: 8px 0; }
+        .firma-titulo { font-size: 8.5pt; font-weight: bold; color: #19325f; text-align: center !important; margin-bottom: 3px; }
+        .firma-titulo-blank { font-size: 8pt; color: #bbb; text-align: center !important; letter-spacing: 2px; margin-bottom: 6px; }
+        .firma-nombre { font-size: 8.5pt; font-weight: bold; text-align: center !important; margin-top: 6px; word-wrap: break-word; }
+        .firma-nombre-blank { font-size: 8pt; color: #bbb; text-align: center !important; letter-spacing: 2px; margin-top: 10px; }
+        .firma-fecha { font-size: 7pt; color: #555; margin-top: 4px; text-align: center !important; }
+        .pendiente { font-size: 8pt; color: #999; font-style: italic; text-align: center !important; }
+        .visado-td-firma { border: 1px solid #a0aec0; text-align: center !important; padding: 12px 8px; vertical-align: top; min-width: 100px; }
 
         @page { margin: 8mm; size: landscape; }
         @media print {
@@ -358,7 +474,9 @@ function generarHTML(
           }
           .no-print { display: none !important; }
           .page-wrap { width: 100%; min-width: 240mm; padding: 0; }
-          table { min-width: 230mm; }
+          table { min-width: 230mm; border: 1px solid #a0aec0 !important; }
+          /* Ensure visado table can shrink on print */
+          .visado-table { min-width: 0 !important; width: auto !important; display: inline-table; }
         }
       </style>
     </head>
@@ -376,19 +494,26 @@ function generarHTML(
           <div class="prog">PROGRAMA ANALÍTICO</div>
         </div>
       </div>
-      ${(asignatura || periodo) ? `
-      <div class="inst-subline">
-        ${esc(asignatura)}${asignatura && periodo ? '&nbsp;&nbsp;&bull;&nbsp;&nbsp;' : ''}${esc(periodo ? `Periodo: ${periodo}` : '')}${docente ? `&nbsp;&nbsp;&bull;&nbsp;&nbsp;Docente: ${esc(docente)}` : ''}
-      </div>` : ''}
   `;
 
   let contentHTML = '';
+  let openedAvoidDiv = false;
 
   for (const tab of tabs) {
     if (!tab.rows || tab.rows.length === 0) continue;
     if (tab.title.trim().toUpperCase() === 'VISADO') continue;
+    let displayTitle = tab.title.replace(/secci[óo]n\s*/gi, '').trim();
+    if (/^\d+$/.test(displayTitle)) {
+      displayTitle = '';
+    }
+    const isBibliografia = tab.title.trim().toUpperCase().includes('BIBLIOGRAF') || tab.title.trim().toUpperCase().includes('FUENTES');
+    
+    if (isBibliografia && !openedAvoidDiv) {
+      contentHTML += '<div class="avoid-break-together" style="page-break-inside: avoid; break-inside: avoid-page; width: 100%;">';
+      openedAvoidDiv = true;
+    }
 
-    contentHTML += `<div class="section-title">${esc(tab.title)}</div>`;
+    contentHTML += `<div class="section-title">${displayTitle ? esc(displayTitle) : '&nbsp;'}</div>`;
     contentHTML += '<table>';
 
     for (const row of tab.rows) {
@@ -396,7 +521,8 @@ function generarHTML(
       if (visibleCells.length === 0) continue;
 
       contentHTML += '<tr>';
-      for (const cell of visibleCells) {
+      for (let i = 0; i < visibleCells.length; i++) {
+        const cell = visibleCells[i];
         const rs = cell.rowSpan || 1;
         const cs = cell.colSpan || 1;
         const isHeader = cell.isHeader;
@@ -408,7 +534,30 @@ function generarHTML(
         if (bg) styleAttr += `background:${bg};`;
         if (color) styleAttr += `color:${color};`;
 
-        const cls = [isHeader ? 'cell-header' : '', isVert ? 'cell-vert' : ''].filter(Boolean).join(' ');
+        let isNivelValue = false;
+        if (i > 0) {
+          const prevCellText = (visibleCells[i - 1].content || '').toUpperCase().trim();
+          if (prevCellText === 'NIVEL') {
+            isNivelValue = true;
+          } else if (i > 1 && prevCellText === ':' && (visibleCells[i - 2].content || '').toUpperCase().trim() === 'NIVEL') {
+            isNivelValue = true;
+          }
+        }
+        if (isNivelValue) {
+          styleAttr += 'text-align:center !important;';
+        }
+
+        let extraCls = '';
+        const upperContent = (cell.content || '').toUpperCase();
+        if (isHeader) {
+          if (upperContent.includes('PERIODO') || upperContent.includes('ORDINARIO') || upperContent.includes('PAO')) {
+            extraCls = ' cell-header-periodo';
+          } else if (upperContent.includes('NIVEL')) {
+            extraCls = ' cell-header-nivel';
+          }
+        }
+
+        const cls = [isHeader ? 'cell-header' : '', isVert ? 'cell-vert' : ''].filter(Boolean).join(' ') + extraCls;
 
         contentHTML += `<td rowspan="${rs}" colspan="${cs}" class="${cls}"${styleAttr ? ` style="${styleAttr}"` : ''}>${esc(cell.content || '&nbsp;')}</td>`;
       }
@@ -430,8 +579,9 @@ function generarHTML(
     return { titulo: '', nombreSolo: nombre };
   };
 
+  contentHTML += '<div class="visado-section-container">';
   contentHTML += '<div class="visado-title">VISADO</div>';
-  contentHTML += '<table class="visado-table"><thead><tr>';
+  contentHTML += '<div class="visado-wrap"><table class="visado-table"><thead><tr>';
   for (const e of VISADO_ETAPAS) {
     contentHTML += `<th>${esc(ETAPA_LABELS[e] || e)}</th>`;
   }
@@ -470,7 +620,11 @@ function generarHTML(
     }
   }
 
-  contentHTML += '</tr></tbody></table>';
+  contentHTML += '</tr></tbody></table></div></div>';
+
+  if (openedAvoidDiv) {
+    contentHTML += '</div>';
+  }
 
   const tFooter = `</div></body></html>`;
   return tHeader + headerHTML + contentHTML + tFooter;
@@ -507,12 +661,13 @@ export function PrintProgramaAnalitico({
       || programaData.name
       || programaData.nombre
       || '';
-    const periodo = periodoNombre
+    let periodo = periodoNombre
       || programaData.datos_generales?.periodo_academico
       || programaData.metadata?.period
       || '';
+    periodo = periodo.replace(/Primer\s+Periodo\s*/gi, '').trim();
     const docente = docenteNombre || programaData.datos_generales?.docente || '';
-    const nivel = nivelNombre || programaData.datos_generales?.nivel || programaData.metadata?.level || '';
+    const nivel = formatearNivelOrdinal(nivelNombre || programaData.datos_generales?.nivel || programaData.metadata?.level || '');
 
     // Auto-llenar celdas vacias junto a etiquetas conocidas (ASIGNATURA, PERIODO, DOCENTE)
     const autoFilledTabs = tabs.map(tab => ({
@@ -520,16 +675,20 @@ export function PrintProgramaAnalitico({
       rows: tab.rows.map(row => {
         const cells = row.cells.map(c => ({ ...c }));
         for (let i = 1; i < cells.length; i++) {
-          if (cells[i].content?.trim()) continue; // ya tiene contenido
           const label = (cells[i - 1].content || '').toUpperCase().trim();
-          if (label.includes('ASIGNATURA') && asignatura)
-            cells[i] = { ...cells[i], content: asignatura };
-          else if ((label.includes('PERIODO') || label.includes('PAO')) && periodo)
-            cells[i] = { ...cells[i], content: periodo };
-          else if (label === 'DOCENTE' && docente)
-            cells[i] = { ...cells[i], content: docente };
-          else if (label === 'NIVEL' && nivel)
-            cells[i] = { ...cells[i], content: nivel };
+          if (label === 'NIVEL') {
+            const currentVal = cells[i].content?.trim() || nivel;
+            if (currentVal) {
+              cells[i] = { ...cells[i], content: formatearNivelOrdinal(currentVal) };
+            }
+          } else if (!cells[i].content?.trim()) { // solo si está vacío para otras etiquetas
+            if (label.includes('ASIGNATURA') && asignatura)
+              cells[i] = { ...cells[i], content: asignatura };
+            else if ((label.includes('PERIODO') || label.includes('PAO')) && periodo)
+              cells[i] = { ...cells[i], content: periodo };
+            else if (label === 'DOCENTE' && docente)
+              cells[i] = { ...cells[i], content: docente };
+          }
         }
         return { ...row, cells };
       }),

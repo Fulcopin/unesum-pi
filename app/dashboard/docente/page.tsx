@@ -128,11 +128,11 @@ export default function DocenteDashboard() {
             {[
               { title: "Cronograma Institucional", desc: "Ver el calendario de actividades y eventos académicos", icon: Calendar, href: "/dashboard/cronograma", color: "bg-blue-600" },
               { title: "Mi QR Personal", desc: "Ver y descargar tu sello digital", icon: QrCode, href: "/dashboard/docente/mi-qr", color: "bg-emerald-600" },
-              { title: "Horas Extracurriculares", desc: "Registrar y gestionar horas extracurriculares", icon: BookOpen, href: "/dashboard/docente/Horas_Extracurriculares", color: "bg-teal-500" },
-              { title: "Mi Perfil", desc: "Actualizar información personal y académica", icon: User, href: "/dashboard/docente/perfil", color: "bg-purple-500" },
-              { title: "Plan de Trabajo Docente", desc: "Planificación de trabajo docente", icon: Calendar, href: "/dashboard/docente/plan_trabajo", color: "bg-orange-500" },
-              { title: "Planificación de Actividades", desc: "Generar reportes de mis actividades docentes", icon: FileText, href: "/dashboard/docente/reportes", color: "bg-red-500" },
-              { title: "Asistente IA", desc: "Consulta información curricular con IA", icon: Bot, href: "/dashboard/docente/asistente-ia", color: "bg-blue-600" },
+              // { title: "Horas Extracurriculares", desc: "Registrar y gestionar horas extracurriculares", icon: BookOpen, href: "/dashboard/docente/Horas_Extracurriculares", color: "bg-teal-500" },
+              //{ title: "Mi Perfil", desc: "Actualizar información personal y académica", icon: User, href: "/dashboard/docente/perfil", color: "bg-purple-500" },
+              // { title: "Plan de Trabajo Docente", desc: "Planificación de trabajo docente", icon: Calendar, href: "/dashboard/docente/plan_trabajo", color: "bg-orange-500" },
+              // { title: "Planificación de Actividades", desc: "Generar reportes de mis actividades docentes", icon: FileText, href: "/dashboard/docente/reportes", color: "bg-red-500" },
+              // { title: "Asistente IA", desc: "Consulta información curricular con IA", icon: Bot, href: "/dashboard/docente/asistente-ia", color: "bg-blue-600" },
             ].map((mod) => {
               const Icon = mod.icon
               return (

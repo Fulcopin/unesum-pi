@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
@@ -49,12 +49,15 @@ interface ProgramaData {
 }
 
 function escapeHtml(value: string) {
-  return value
+  const escaped = String(value || "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+  return escaped
+    .replace(/(programaci[oó]n\s*(?:1|i+|ii+)?)/gi, '<span style="font-weight: normal !important; font-style: normal !important;">$1</span>')
+    .replace(/((?:Primer\s+Periodo\s+)?PII?\s+2026)/gi, '<span style="font-weight: normal !important; font-style: normal !important;">$1</span>');
 }
 
 function getCellLayout(cell: TabCell, cellIndex: number, visibleCells: TabCell[], isFirstSection = false) {
@@ -213,7 +216,7 @@ function buildVisadoHtml(firmasData: any) {
   }).join("");
 
   return `
-    <section class="print-section visado-section" data-export-section="visado">
+    <section class="print-section visado-section" data-export-section="visado" style="page-break-inside: avoid !important; break-inside: avoid-page !important;">
       <div class="section-title">VISADO</div>
       <table class="visado-table">
         <tbody>
@@ -484,15 +487,15 @@ function VisorContent() {
 
   /* ── SECTIONS ── */
   .print-section { margin-top: 6pt; }
-  .section-title { background: #3b64a0; color: white; padding: 4pt 6pt; font-size: 8pt; font-weight: 700; border-radius: 2pt 2pt 0 0; }
-  .table-shell { border: 0.5pt solid #c7cdd6; border-top: none; }
+  .section-title { background: #3b64a0; color: white; padding: 4pt 6pt; font-size: 8pt; font-weight: 700; border-radius: 2pt 2pt 0 0; border: 0.5pt solid #c7cdd6; border-bottom: none; }
+  .table-shell { border: 0.5pt solid #c7cdd6; }
 
   /* ── TABLES ── */
   table { width: 100%; border-collapse: collapse; table-layout: auto; background: white; }
   td { border: 0.5pt solid #c7cdd6; vertical-align: middle; padding: 2pt 3pt; word-break: break-word; overflow-wrap: break-word; white-space: normal; writing-mode: horizontal-tb !important; }
 
   /* ── VISADO ── */
-  .visado-section { margin-top: 10pt; }
+  .visado-section { margin-top: 10pt; page-break-inside: avoid !important; break-inside: avoid-page !important; }
   .visado-table { table-layout: fixed; }
   .visado-label { background: #dce5f2; color: #19325f; text-align: center; font-size: 8pt; font-weight: 700; padding: 5pt; }
   .visado-content { min-height: 80pt; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5pt; padding: 6pt; text-align: center; }
@@ -505,6 +508,7 @@ function VisorContent() {
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .print-section { page-break-inside: auto; }
     tr { page-break-inside: avoid; }
+    .visado-section { page-break-inside: avoid !important; break-inside: avoid-page !important; }
   }
 </style>
 </head>

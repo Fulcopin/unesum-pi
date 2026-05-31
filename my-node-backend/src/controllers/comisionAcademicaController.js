@@ -210,6 +210,10 @@ exports.obtenerEstructuraFacultad = async (req, res) => {
                 model: db.Nivel,
                 as: 'nivel',
                 attributes: ['id', 'nombre']
+              },
+              {
+                model: db.DistribucionHoras,
+                as: 'horas'
               }
             ]
           }
@@ -229,6 +233,13 @@ exports.obtenerEstructuraFacultad = async (req, res) => {
         codigo: asig.codigo,
         nivel: asig.nivel ? asig.nivel.nombre : 'Sin nivel',
         estado: asig.estado,
+        horas: asig.horas ? {
+          horasDocencia: asig.horas.horas_docencia,
+          horasPractica: asig.horas.horas_practica,
+          horasAutonoma: asig.horas.horas_autonoma,
+          horasVinculacion: asig.horas.horas_vinculacion,
+          horasPracticaPreprofesional: asig.horas.horas_practica_preprofesional
+        } : null,
         tiene_syllabus: false,
         syllabus_id: null,
         tiene_programa: false,
@@ -307,6 +318,10 @@ exports.obtenerEstructuraFacultad = async (req, res) => {
               model: db.Nivel,
               as: 'nivel',
               attributes: ['id', 'nombre']
+            },
+            {
+              model: db.DistribucionHoras,
+              as: 'horas'
             }
           ]
         }
@@ -321,6 +336,13 @@ exports.obtenerEstructuraFacultad = async (req, res) => {
         codigo: asig.codigo,
         nivel: asig.nivel ? asig.nivel.nombre : 'Sin nivel',
         estado: asig.estado,
+        horas: asig.horas ? {
+          horasDocencia: asig.horas.horas_docencia,
+          horasPractica: asig.horas.horas_practica,
+          horasAutonoma: asig.horas.horas_autonoma,
+          horasVinculacion: asig.horas.horas_vinculacion,
+          horasPracticaPreprofesional: asig.horas.horas_practica_preprofesional
+        } : null,
         tiene_syllabus: false,
         syllabus_id: null,
         tiene_programa: false,
@@ -423,6 +445,10 @@ exports.obtenerAsignaturasCarrera = async (req, res) => {
           model: db.Organizacion,
           as: 'organizacion',
           attributes: ['id', 'nombre']
+        },
+        {
+          model: db.DistribucionHoras,
+          as: 'horas'
         }
       ]
     });
@@ -435,6 +461,13 @@ exports.obtenerAsignaturasCarrera = async (req, res) => {
       estado: asig.estado,
       nivel: asig.nivel ? asig.nivel.nombre : null,
       organizacion: asig.organizacion ? asig.organizacion.nombre : null,
+      horas: asig.horas ? {
+        horasDocencia: asig.horas.horas_docencia,
+        horasPractica: asig.horas.horas_practica,
+        horasAutonoma: asig.horas.horas_autonoma,
+        horasVinculacion: asig.horas.horas_vinculacion,
+        horasPracticaPreprofesional: asig.horas.horas_practica_preprofesional
+      } : null,
       tiene_syllabus: false,
       syllabus_id: null,
       tiene_programa: false,
@@ -826,7 +859,10 @@ exports.obtenerDocentesPorAsignatura = async (req, res) => {
           model: db.Asignatura,
           as: 'asignaturas',
           required: false,
-          include: [{ model: db.Nivel, as: 'nivel', attributes: ['id', 'nombre'] }]
+          include: [
+            { model: db.Nivel, as: 'nivel', attributes: ['id', 'nombre'] },
+            { model: db.DistribucionHoras, as: 'horas' }
+          ]
         }
       ]
     });
@@ -1018,6 +1054,13 @@ exports.obtenerDocentesPorAsignatura = async (req, res) => {
         nombre: asig.nombre,
         codigo: asig.codigo,
         nivel: asig.nivel ? asig.nivel.nombre : 'Sin nivel',
+        horas: asig.horas ? {
+          horasDocencia: asig.horas.horas_docencia,
+          horasPractica: asig.horas.horas_practica,
+          horasAutonoma: asig.horas.horas_autonoma,
+          horasVinculacion: asig.horas.horas_vinculacion,
+          horasPracticaPreprofesional: asig.horas.horas_practica_preprofesional
+        } : null,
         docentes,
         stats: {
           total_docentes: docentes.length,

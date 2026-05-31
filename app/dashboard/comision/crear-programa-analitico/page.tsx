@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
@@ -10,7 +10,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Eraser, FileDown, Lock, Unlock, Settings } from "lucide-react"
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion"
+import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Eraser, FileDown, Lock, Unlock, Settings, Home, ArrowLeft, AlignLeft, AlignCenter, AlignRight, AlignJustify } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import * as mammoth from "mammoth"
 import jsPDF from "jspdf"
@@ -33,12 +34,13 @@ interface TableCell {
   textAlign?: string;
   textOrientation?: 'horizontal' | 'vertical';
   docenteEditable?: boolean;
+  isLocked?: boolean;
 }
 
 interface TableRow { id: string; cells: TableCell[]; }
 interface TabData { id: string; title: string; rows: TableRow[]; }
 interface ProgramaAnaliticoData { id: string | number; name: string; description: string; tabs: TabData[]; metadata: { subject?: string; period?: string; level?: string; createdAt: string; updatedAt: string; }; }
-interface SavedProgramaAnaliticoRecord { id: number; nombre: string; periodo: string; materias: string; datos_tabla: ProgramaAnaliticoData; created_at: string; updated_at: string; }
+interface SavedProgramaAnaliticoRecord { id: number; nombre: string; periodo: string; materias: string; asignatura_id?: number | null; datos_tabla: ProgramaAnaliticoData; created_at: string; updated_at: string; }
 
 /** Textos donde puede venir la materia (admin suele omitir asignatura_id pero guarda nombre en `nombre`/metadata). */
 function textosAsignaturaDesdeProgramaGuardado(s: any): string[] {
@@ -84,6 +86,81 @@ function coincidenciaAsignaturaFlexible(
     }
   }
   return false
+}
+
+// ─── Convertir Nivel a Ordinal en Español ────────────────────────────────────
+function formatearNivelOrdinal(val: string | number): string {
+  if (!val) return '';
+  const originalVal = String(val).trim();
+  const valStr = originalVal.toUpperCase();
+
+  const ordinalsMap: Record<string, string> = {
+    'PRIMERO': 'Primero',
+    'SEGUNDO': 'Segundo',
+    'TERCERO': 'Tercero',
+    'CUARTO': 'Cuarto',
+    'QUINTO': 'Quinto',
+    'SEXTO': 'Sexto',
+    'SÉPTIMO': 'Séptimo',
+    'OCTAVO': 'Octavo',
+    'NOVENO': 'Noveno',
+    'DÉCIMO': 'Décimo',
+    'PRIMER': 'Primer',
+    'TERCER': 'Tercer',
+    'DÉCIMO PRIMERO': 'Décimo Primero',
+    'DÉCIMO SEGUNDO': 'Décimo Segundo'
+  };
+
+  const ordinalsList = Object.keys(ordinalsMap);
+  if (ordinalsList.includes(valStr)) {
+    return ordinalsMap[valStr];
+  }
+
+  const mapaOrdinales: Record<string, string> = {
+    '1': 'Primero',
+    '2': 'Segundo',
+    '3': 'Tercero',
+    '4': 'Cuarto',
+    '5': 'Quinto',
+    '6': 'Sexto',
+    '7': 'Séptimo',
+    '8': 'Octavo',
+    '9': 'Noveno',
+    '10': 'Décimo',
+    '11': 'Décimo Primero',
+    '12': 'Décimo Segundo'
+  };
+
+  const mapaAbreviaturas: Record<string, string> = {
+    '1RO': 'Primero', '1RA': 'Primero', '1°': 'Primero', '1.º': 'Primero', '1ER': 'Primero', '1º': 'Primero',
+    '2DO': 'Segundo', '2DA': 'Segundo', '2°': 'Segundo', '2.º': 'Segundo', '2º': 'Segundo',
+    '3RO': 'Tercero', '3RA': 'Tercero', '3°': 'Tercero', '3.º': 'Tercero', '3º': 'Tercero', '3ER': 'Tercero',
+    '4TO': 'Cuarto', '4TA': 'Cuarto', '4°': 'Cuarto', '4.º': 'Cuarto', '4º': 'Cuarto',
+    '5TO': 'Quinto', '5TA': 'Quinto', '5°': 'Quinto', '5.º': 'Quinto', '5º': 'Quinto',
+    '6TO': 'Sexto', '6TA': 'Sexto', '6°': 'Sexto', '6.º': 'Sexto', '6º': 'Sexto',
+    '7MO': 'Séptimo', '7MA': 'Séptimo', '7°': 'Séptimo', '7.º': 'Séptimo', '7º': 'Séptimo',
+    '8VO': 'Octavo', '8VA': 'Octavo', '8°': 'Octavo', '8.º': 'Octavo', '8º': 'Octavo',
+    '9NO': 'Noveno', '9NA': 'Noveno', '9°': 'Noveno', '9.º': 'Noveno', '9º': 'Noveno',
+    '10MO': 'Décimo', '10MA': 'Décimo', '10°': 'Décimo', '10.º': 'Décimo', '10º': 'Décimo'
+  };
+
+  if (mapaOrdinales[valStr]) {
+    return mapaOrdinales[valStr];
+  }
+
+  const cleanVal = valStr.replace(/[\.\s]/g, '');
+  if (mapaAbreviaturas[cleanVal]) {
+    return mapaAbreviaturas[cleanVal];
+  }
+
+  for (const [num, word] of Object.entries(mapaOrdinales)) {
+    const regex = new RegExp(`\\b${num}\\b|\\b${num}(?:do|er|ro|to|mo|vo|no|º|°|._º)\\b`, 'i');
+    if (regex.test(valStr)) {
+      return originalVal.replace(new RegExp(`\\b${num}\\b|\\b${num}(?:do|er|ro|to|mo|vo|no|º|°|._º)?\\b`, 'i'), word);
+    }
+  }
+
+  return originalVal;
 }
 
 /** Alineación con admin/handleLoad: validación sólo títulos, secciones legacy, rows sueltos. */
@@ -164,9 +241,8 @@ function aplicarNormalizacionesDatosTabla(
   return ed
 }
 
-/** Comisión: estructura de tabla definida por administración; solo edición de contenido. */
-const HERRAMIENTAS_TABLA_BLOQUEADAS = true
-
+/** Comisión: estructura de tabla definida por administración; solo edición de contenido. (Habilitado por petición del usuario) */
+const HERRAMIENTAS_TABLA_BLOQUEADAS = false
 export default function EditorProgramaAnaliticoPage() {
   const { token, getToken, user } = useAuth()
   
@@ -184,7 +260,9 @@ export default function EditorProgramaAnaliticoPage() {
 
   const [isListLoading, setIsListLoading] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingPrograma, setIsLoadingPrograma] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
@@ -204,6 +282,15 @@ export default function EditorProgramaAnaliticoPage() {
   const activeProgramaAnalitico = programas.find((s) => s.id === activeProgramaAnaliticoId);
   const activeTab = activeProgramaAnalitico?.tabs.find(t => t.id === activeTabId);
   const tableData = activeTab ? activeTab.rows : [];
+
+  const selectedCellAlign = (() => {
+    if (selectedCells.length !== 1) return null;
+    for (const row of tableData) {
+      const found = row.cells.find(c => c.id === selectedCells[0]);
+      if (found) return found.textAlign || null;
+    }
+    return null;
+  })();
   const [asignaturaInfo, setAsignaturaInfo] = useState<any>(null)
 
   /**
@@ -508,11 +595,31 @@ export default function EditorProgramaAnaliticoPage() {
           )
         }
 
+        // Si no hay plantilla específica para la asignatura, buscar la plantilla maestra (donde asignatura_id es NULL)
+        if (candidatos.length === 0) {
+          console.log("ℹ️ No se encontró plantilla específica de asignatura. Buscando plantilla maestra...");
+          candidatos = savedprogramas.filter(
+            (s: any) =>
+              matchPeriodo(s.periodo, selectedPeriod) &&
+              (s.asignatura_id === null || s.asignatura_id === undefined || s.asignatura_id === "")
+          )
+          
+          if (candidatos.length === 0) {
+            const mergedList = await recolectarCandidatosDesdeApis()
+            candidatos = mergedList.filter(
+              (s: any) =>
+                matchPeriodo(s.periodo, selectedPeriod) &&
+                (s.asignatura_id === null || s.asignatura_id === undefined || s.asignatura_id === "")
+            )
+          }
+        }
+
         if (cancelled || candidatos.length === 0) {
           if (!cancelled && candidatos.length === 0) {
             console.log(
-              "ℹ️ No hay programa del administrador para esta asignatura y periodo; use la lista o suba un Word."
+              "ℹ️ No hay programa del administrador para esta asignatura y periodo; abriendo selector..."
             )
+            setShowProgramaAnaliticoSelector(true)
           }
           return
         }
@@ -664,10 +771,70 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
       // Si no hay etiquetas [NOMBRE], buscar cada etiqueta del editor en el texto
       metodo = "busqueda directa en texto";
       
-      // Convertir a HTML tambien para leer tablas
+      // Convertir a HTML tambien para leer tablas y headings
       const resultadoHtml = await mammothLib.convertToHtml({ arrayBuffer: arrayBuffer.slice(0) });
       const parser = new DOMParser();
       const htmlDoc = parser.parseFromString(resultadoHtml.value, "text/html");
+
+      // ====================================================
+      // EXTRACCIÓN DESDE HEADINGS HTML (h1/h2/h3/h4 + párrafos)
+      // Cuando el Word usa "Estilos de título", Mammoth los convierte
+      // en <h1>, <h2>, etc. El contenido siguiente son párrafos <p>.
+      // ====================================================
+      const normalizarH = (s: string) => s.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+      const etqEditorNormSet = new Set(etiquetasDelEditor.map(e => normalizarH(e.texto)));
+
+      const allNodes = Array.from(htmlDoc.body.children);
+      let headingKey = '';
+      let headingParts: string[] = [];
+
+      const flushHeading = () => {
+        if (headingKey && headingParts.length > 0) {
+          const contenido = headingParts.join('\n').trim();
+          if (contenido.length > 2 && !wordData[headingKey]) {
+            wordData[headingKey] = contenido;
+            console.log("  [heading-html] " + headingKey + " -> " + contenido.substring(0, 100));
+          }
+        }
+        headingKey = '';
+        headingParts = [];
+      };
+
+      allNodes.forEach(node => {
+        const tag = node.tagName?.toLowerCase() || '';
+        const texto = (node.textContent || '').trim();
+        if (!texto) return;
+
+        const esHeading = ['h1','h2','h3','h4','h5','h6'].includes(tag);
+        if (esHeading) {
+          flushHeading(); // guardar el anterior
+          const textoNorm = normalizarH(texto);
+          // Ver si este heading coincide con alguna etiqueta del editor (exacta o contenida)
+          let matchedLabel = '';
+          for (const etq of etiquetasDelEditor) {
+            const eN = normalizarH(etq.texto);
+            if (textoNorm === eN || textoNorm.startsWith(eN) || eN.startsWith(textoNorm)) {
+              matchedLabel = etq.texto; // usar el texto del editor como clave
+              break;
+            }
+          }
+          // También guardarlo con su propio texto para lookup flexible
+          headingKey = matchedLabel || texto.toUpperCase();
+          if (matchedLabel && matchedLabel !== texto.toUpperCase()) {
+            // Guardar también la versión original del Word para el lookup flexible
+            wordData[texto.toUpperCase()] = ''; // placeholder, se llenará con párrafos
+          }
+        } else if (tag === 'p' || tag === 'ul' || tag === 'ol') {
+          if (headingKey) {
+            headingParts.push(texto);
+          }
+        } else if (tag === 'table') {
+          flushHeading(); // una tabla cierra la sección de heading anterior
+        }
+      });
+      flushHeading(); // guardar el último heading
+
+      console.log("Datos desde headings HTML:", Object.keys(wordData));
       
       // Extraer TODOS los pares clave-valor de las tablas HTML
       const todasLasFilas = Array.from(htmlDoc.querySelectorAll("tr"));
@@ -718,9 +885,22 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
             wordData[lastKey] = (wordData[lastKey] || '') + '\n' + textos[1].trim();
           }
         }
-        // Fila con 1 celda: continuación de rowspan de la clave anterior
-        else if (textos.length === 1 && textos[0].trim().length > 0 && lastKey) {
-          wordData[lastKey] = (wordData[lastKey] || '') + '\n' + textos[0].trim();
+        // Fila con 1 celda: puede ser un heading de sección (CARACTERIZACIÓN, OBJETIVOS, etc.)
+        // O continuación de rowspan de la clave anterior
+        else if (textos.length === 1 && textos[0].trim().length > 0) {
+          const t0Upper = textos[0].trim().toUpperCase();
+          // Si es un heading corto (< 80 chars) que coincide con una etiqueta del editor → nuevo lastKey
+          const esEtiquetaEditor = etiquetasDelEditor.some(e => {
+            const eNorm = e.texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+            const t0Norm = t0Upper.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+            return t0Norm === eNorm || t0Norm.startsWith(eNorm) || eNorm.startsWith(t0Norm);
+          });
+          if (esEtiquetaEditor && t0Upper.length < 80) {
+            lastKey = t0Upper;
+            console.log("  >> Heading de sección (1 celda): [" + t0Upper + "]");
+          } else if (lastKey) {
+            wordData[lastKey] = (wordData[lastKey] || '') + '\n' + textos[0].trim();
+          }
         }
         // Fila con 3 celdas: puede ser seccion | sub-header | valor
         // Ejemplo: BIBLIOGRAFÍA - FUENTES DE CONSULTA | BIBLIOGRAFÍA BÁSICA | B.B.1 Nederr...
@@ -765,10 +945,79 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
         }
       });
 
-      // Tambien buscar en el texto plano, linea por linea
+      // ====================================================
+      // EXTRACCIÓN MULTI-PÁRRAFO: Para secciones como CARACTERIZACIÓN,
+      // OBJETIVOS, COMPETENCIAS que tienen contenido extenso en el Word.
+      // Busca headings conocidos del editor en el texto plano y captura
+      // TODO el texto hasta el siguiente heading conocido.
+      // ====================================================
+      const normalizar = (s: string) => s.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+      const etiquetasEditorSet = new Set(etiquetasDelEditor.map(e => e.texto));
+      const etiquetasEditorNorm = new Set(etiquetasDelEditor.map(e => normalizar(e.texto)));
+
+      // Etiquetas que son secciones con contenido multi-párrafo (NO son datos de una sola celda)
+      const seccionesMultiParrafo = new Set([
+        "CARACTERIZACION", "CARACTERIZACION DE LA ASIGNATURA",
+        "OBJETIVOS DE LA ASIGNATURA", "OBJETIVOS",
+        "COMPETENCIAS",
+        "RESULTADOS DE APRENDIZAJE", "RESULTADOS DE APRENDIZAJE DE LA ASIGNATURA",
+        "CONTENIDOS DE LA ASIGNATURA", "CONTENIDO DE LA ASIGNATURA",
+        "METODOLOGIA", "METODOLOGIA DE LA ASIGNATURA",
+        "PROCEDIMIENTOS DE EVALUACION",
+        "BIBLIOGRAFIA - FUENTES DE CONSULTA", "BIBLIOGRAFIA BASICA", "BIBLIOGRAFIA COMPLEMENTARIA",
+      ]);
+
+      const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+
+      // Paso A: Buscar secciones multi-párrafo en el texto plano
+      for (const etq of etiquetasDelEditor) {
+        if (wordData[etq.texto]) continue; // ya tiene dato de tablas
+        const etqNormStr = normalizar(etq.texto);
+        if (!seccionesMultiParrafo.has(etqNormStr)) continue;
+
+        for (let li = 0; li < lineas.length; li++) {
+          const lineaNorm = normalizar(lineas[li]);
+
+          // La línea debe ser EXACTAMENTE (o empezar con) el heading de la sección
+          if (lineaNorm !== etqNormStr && !lineaNorm.startsWith(etqNormStr)) continue;
+
+          // Capturar TODO lo que viene después hasta la siguiente sección conocida
+          const partes: string[] = [];
+          // Si hay texto después del heading en la misma línea, incluirlo
+          const restoMismaLinea = lineas[li].substring(etq.texto.length).trim();
+          if (restoMismaLinea.length > 2 && !etiquetasEditorNorm.has(normalizar(restoMismaLinea))) {
+            partes.push(restoMismaLinea);
+          }
+          // Recoger las líneas siguientes hasta encontrar otro heading del editor
+          for (let lj = li + 1; lj < lineas.length; lj++) {
+            const siguienteNorm = normalizar(lineas[lj]);
+            // Si la siguiente línea es OTRA etiqueta del editor, detenerse
+            if (etiquetasEditorNorm.has(siguienteNorm)) break;
+            // También detenerse si la línea comienza con algún heading conocido
+            let esOtroHeading = false;
+            for (const eOtra of etiquetasDelEditor) {
+              const otraNorm = normalizar(eOtra.texto);
+              if (otraNorm !== etqNormStr && siguienteNorm.startsWith(otraNorm) && otraNorm.length >= 4) {
+                esOtroHeading = true;
+                break;
+              }
+            }
+            if (esOtroHeading) break;
+            partes.push(lineas[lj]);
+          }
+
+          const contenidoCompleto = partes.join("\n").trim();
+          if (contenidoCompleto.length > 2) {
+            wordData[etq.texto] = contenidoCompleto;
+            console.log("  [multi-parrafo] " + etq.texto + " -> " + contenidoCompleto.substring(0, 100) + " (" + contenidoCompleto.length + " chars)");
+          }
+          break; // encontrado, no seguir buscando esta etiqueta
+        }
+      }
+
+      // Paso B: Buscar etiquetas restantes linea por linea (lógica original)
       // CUIDADO: Solo buscar etiquetas largas y significativas para evitar falsos positivos
       // NO buscar etiquetas cortas como "DESCRIPCIÓN", "DOCENTE", "NIVEL" etc. que generan basura
-      // No listar aquí encabezados que deben rellenarse desde texto (bibliografía, contenidos…)
       const etiquetasCortas = new Set([
         "DESCRIPCIÓN", "DESCRIPCION", "UNIDADES TEMÁTICAS", "UNIDADES TEMATICAS",
         "PROGRAMA ANALÍTICO DE ASIGNATURA", "PROGRAMA ANALITICO DE ASIGNATURA",
@@ -776,11 +1025,9 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
         "CARRERA", "CODIGO", "MATERIA", "CREDITOS", "HORAS", "SEMESTRE", "MODALIDAD",
         "DIRECTOR/A ACADÉMICO/A", "COORDINADOR/A DE CARRERA", "DECANO/A DE FACULTAD",
       ]);
-      const etiquetasEditorSet = new Set(etiquetasDelEditor.map(e => e.texto));
 
-      const lineas = textoCompleto.split("\n").map(l => l.trim()).filter(l => l.length > 0);
       for (const etq of etiquetasDelEditor) {
-        // SKIP etiquetas que ya tienen dato de las tablas HTML
+        // SKIP etiquetas que ya tienen dato (de tablas O del paso multi-párrafo)
         if (wordData[etq.texto]) continue;
         // SKIP etiquetas cortas o estructurales que generan falsos positivos
         if (etiquetasCortas.has(etq.texto)) continue;
@@ -1273,26 +1520,41 @@ const handleSmartSync = async (event: React.ChangeEvent<HTMLInputElement>) => {
     ));
 
     // Resumen
-    let msg = "Sincronizacion completada (" + metodo + ")\n\n";
-    msg += "Celdas llenadas: " + celdasLlenadas + "\n";
-    msg += "Datos encontrados en Word: " + Object.keys(wordData).length + "\n\n";
+    let msg = "✅ Sincronización completada\n\n";
+    msg += "📋 Celdas llenadas: " + celdasLlenadas + "\n";
+    msg += "📄 Claves extraídas del Word: " + Object.keys(wordData).filter(k => wordData[k]).length + "\n\n";
 
     if (matchesOk.length > 0) {
-      msg += "Matches exitosos:\n";
+      msg += "✅ Campos llenados:\n";
       matchesOk.forEach(e => { msg += "  + " + e + "\n"; });
+      msg += "\n";
     }
 
-    if (celdasLlenadas === 0) {
-      msg += "\nNo se lleno ninguna celda.\n\n";
-      msg += "Claves del Word:\n";
-      Object.keys(wordData).slice(0, 15).forEach(k => { msg += "  - " + k + "\n"; });
-      msg += "\nEtiquetas del editor:\n";
-      etiquetasDelEditor.slice(0, 15).forEach(e => { msg += "  - " + e.texto + "\n"; });
+    // Mostrar siempre las claves del Word para diagnóstico
+    const clavesConDato = Object.keys(wordData).filter(k => wordData[k] && wordData[k].length > 0);
+    if (clavesConDato.length > 0) {
+      msg += "📑 Datos encontrados en el Word:\n";
+      clavesConDato.slice(0, 12).forEach(k => {
+        msg += "  • " + k + ": " + String(wordData[k]).substring(0, 60).replace(/\n/g, ' ') + "...\n";
+      });
+      if (clavesConDato.length > 12) msg += "  ... y " + (clavesConDato.length - 12) + " más\n";
+    } else {
+      msg += "⚠️ NO se encontraron datos en el Word.\n";
+      msg += "Verifica que el documento tenga contenido en:\n";
+      msg += "  - Tablas con formato: ETIQUETA | Valor\n";
+      msg += "  - O use estilos de Título (Heading) en Word\n";
+      msg += "  - O use etiquetas [NOMBRE] en el texto\n\n";
+    }
+
+    if (celdasLlenadas === 0 && clavesConDato.length > 0) {
+      msg += "\n⚠️ Se encontraron datos pero no coincidieron con las etiquetas del editor.\n";
+      msg += "Etiquetas del editor:\n";
+      etiquetasDelEditor.slice(0, 10).forEach(e => { msg += "  - " + e.texto + "\n"; });
       msg += "\nAbra consola del navegador (F12) para mas detalles.\n";
       msg += "O use etiquetas [NOMBRE] en el Word para match directo.";
     }
 
-    alert(msg);
+    console.log(msg);
 
   } catch (error: any) {
     console.error("Error en sincronizacion:", error);
@@ -1342,11 +1604,12 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
     "BIBLIOGRAFIA BASICA": ["BIBLIOGRAFIA BASICA", "BIBLIOGRAFIA"],
     "BIBLIOGRAFIA COMPLEMENTARIA": ["BIBLIOGRAFIA COMPLEMENTARIA"],
     "CONTENIDO DE LA ASIGNATURA": ["CONTENIDOS DE LA ASIGNATURA", "CONTENIDO DE LA ASIGNATURA", "CONTENIDO", "UNIDADES TEMÁTICAS"],
-    "CARACTERIZACION DE LA ASIGNATURA": ["CARACTERIZACION DE LA ASIGNATURA", "CARACTERIZACION"],
-    "PROCEDIMIENTOS DE EVALUACION": ["PROCEDIMIENTOS DE EVALUACION", "EVALUACION"],
-    "OBJETIVOS DE LA ASIGNATURA": ["OBJETIVOS DE LA ASIGNATURA", "OBJETIVOS"],
-    "COMPETENCIAS": ["COMPETENCIAS"],
-    "METODOLOGIA": ["METODOLOGIA"],
+    "CARACTERIZACION DE LA ASIGNATURA": ["CARACTERIZACION DE LA ASIGNATURA", "CARACTERIZACION", "DESCRIPCION DE LA ASIGNATURA"],
+    "CARACTERIZACION": ["CARACTERIZACION", "CARACTERIZACION DE LA ASIGNATURA", "DESCRIPCION DE LA ASIGNATURA"],
+    "PROCEDIMIENTOS DE EVALUACION": ["PROCEDIMIENTOS DE EVALUACION", "EVALUACION", "SISTEMA DE EVALUACION"],
+    "OBJETIVOS DE LA ASIGNATURA": ["OBJETIVOS DE LA ASIGNATURA", "OBJETIVOS", "OBJETIVO GENERAL", "OBJETIVO DE LA ASIGNATURA"],
+    "COMPETENCIAS": ["COMPETENCIAS", "COMPETENCIAS DE LA ASIGNATURA", "COMPETENCIAS GENERICAS", "COMPETENCIAS ESPECIFICAS"],
+    "METODOLOGIA": ["METODOLOGIA", "ESTRATEGIAS METODOLOGICAS", "METODOLOGIA DE LA ASIGNATURA"],
     "ASIGNATURA": ["ASIGNATURA"],
     "NIVEL": ["NIVEL"],
     "CODIGO": ["CODIGO"],
@@ -1520,6 +1783,7 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
       }
       
       alert("¡ProgramaAnalitico guardado exitosamente!")
+      setLastSavedTime(new Date().toLocaleString());
     } catch (error: any) {
       console.error("Error al guardar:", error)
       alert(`Error al guardar: ${error.message}`)
@@ -1539,6 +1803,8 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
   };
 
   const handleLoadProgramaAnalitico = (ProgramaAnaliticoId: string) => {
+    setIsLoadingPrograma(true)
+    try {
     console.log("🔍 handleLoadProgramaAnalitico - ID recibido:", ProgramaAnaliticoId);
     console.log("📚 savedprogramas disponibles:", savedprogramas.length);
     
@@ -1555,6 +1821,12 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
     console.log("📖 ProgramaAnalitico encontrado:", ProgramaAnaliticoToLoad ? "SÍ" : "NO");
     
     if (ProgramaAnaliticoToLoad) {
+      const savedDate = (ProgramaAnaliticoToLoad as any).updated_at || (ProgramaAnaliticoToLoad as any).updatedAt || (ProgramaAnaliticoToLoad as any).created_at;
+      if (savedDate) {
+        setLastSavedTime(new Date(savedDate).toLocaleString());
+      } else {
+        setLastSavedTime(null);
+      }
       console.log("✅ Cargando ProgramaAnalitico:", ProgramaAnaliticoToLoad.nombre);
       
       let rawData = (ProgramaAnaliticoToLoad as any).datos_tabla || (ProgramaAnaliticoToLoad as any).datos_programa;
@@ -1687,6 +1959,9 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
     } else {
       console.error("❌ No se encontró el ProgramaAnalitico con ID:", id);
       console.log("📋 IDs disponibles:", savedprogramas.map(s => s.id));
+    }
+    } finally {
+      setIsLoadingPrograma(false)
     }
   };
 
@@ -1831,7 +2106,7 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
       const meta = { 
         subject: findMeta("Nombre de la asignatura") || findMeta("Materia") || "Sin Nombre", 
         period: findMeta("Periodo") || "", 
-        level: findMeta("Nivel") || "" 
+        level: formatearNivelOrdinal(findMeta("Nivel") || "") 
       };
 
       console.log("--- MODO: REBANADO DE MEGA-TABLA ---");
@@ -2116,6 +2391,20 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
     handleUpdateActiveTabRows(updated);
   };
 
+  const handleSetTextAlign = (alignment: 'left' | 'center' | 'right' | 'justify') => {
+    if (selectedCells.length === 0) return;
+    const updated = tableData.map(row => ({
+      ...row,
+      cells: row.cells.map(cell => {
+        if (selectedCells.includes(cell.id)) {
+          return { ...cell, textAlign: alignment }
+        }
+        return cell;
+      })
+    }));
+    handleUpdateActiveTabRows(updated);
+  };
+
   const mergeCells = () => {
     if (selectedCells.length < 2 || !activeTab) return alert("Selecciona 2+ celdas.");
     let posFirst=null, minR=Infinity, maxR=-1, minC=Infinity, maxC=-1, content=[];
@@ -2141,228 +2430,7 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
     }
   };
 
-  const handlePrintToPdf = async () => {
-    if (!activeProgramaAnalitico) return;
-
-    // Portrait A4 en pt
-    const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
-    const pageWidth  = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 40;
-
-    // Datos de cabecera
-    const programaTitle = activeProgramaAnalitico.name || '';
-    const periodoObj = periodos.find((p: any) =>
-      String(p.id) === String(periodoParam) || p.nombre === (activeProgramaAnalitico as any).periodo
-    );
-    const periodoName = periodoObj?.nombre || (activeProgramaAnalitico as any).periodo || '';
-
-    // --- LOGO UNESUM (con timeout para no congelar) ---
-    let logoImg: HTMLImageElement | null = null;
-    try {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      await Promise.race([
-        new Promise<void>((resolve, reject) => {
-          img.onload  = () => { logoImg = img; resolve(); };
-          img.onerror = () => reject(new Error('logo-error'));
-          img.src = '/images/unesum-logo-official.png';
-        }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
-      ]);
-    } catch { /* logo no disponible */ }
-
-    // --- CABECERA (se repite en cada página via didDrawPage) ---
-    const addHeader = () => {
-      if (logoImg) doc.addImage(logoImg, 'PNG', margin, 10, 50, 50);
-      doc.setFontSize(12); doc.setFont('helvetica', 'bold');
-      doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 30, { align: 'center' });
-      doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-      doc.text('Creada mediante Ley Orgánica 2001-38, publicada en el Registro Oficial No. 261 del 7 de febrero del 2001', pageWidth / 2, 46, { align: 'center' });
-      doc.setLineWidth(1); doc.line(margin, 58, pageWidth - margin, 58);
-      doc.setFontSize(11); doc.setFont('helvetica', 'bold');
-      doc.text('PROGRAMA ANALÍTICO', pageWidth / 2, 72, { align: 'center' });
-      if (programaTitle || periodoName) {
-        doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-        const sub = [programaTitle, periodoName].filter(Boolean).join('   –   ');
-        doc.text(sub, pageWidth / 2, 86, { align: 'center' });
-      }
-    };
-
-    addHeader();
-    let finalY = 100;
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // buildBody: convierte las filas del editor en filas para jspdf-autotable.
-    //
-    // REGLA CLAVE: jspdf-autotable tiene un bug con rowSpan ("row -1" → bucle infinito).
-    // Solución: nunca emitimos rowSpan. En su lugar usamos una cuadrícula (grid):
-    //   · La celda real ocupa su posición [r][c].
-    //   · Las posiciones "tapadas" por su rowSpan en filas siguientes se emiten como
-    //     celdas vacías con el MISMO colSpan, de modo que la tabla mantiene
-    //     el número correcto de columnas en cada fila y no se desalinea.
-    // ────────────────────────────────────────────────────────────────────────────
-    const MAX_COLS = 16;
-
-    const buildBody = (tabRows: any[]): any[][] => {
-      if (!tabRows?.length) return [];
-
-      // Expandir celdas muy largas en varias filas para evitar "page height" overflow
-      const expanded: any[] = [];
-      for (const row of tabRows) {
-        const active = (row.cells || []).filter(
-          (c: any) => (c?.rowSpan ?? 1) > 0 && (c?.colSpan ?? 1) > 0
-        );
-        const totalCols = active.reduce((s: number, c: any) => s + (c.colSpan ?? 1), 0);
-        const big = active.find(
-          (c: any) => (c?.colSpan ?? 1) >= totalCols && String(c?.content ?? '').length > 800
-        );
-        if (big) {
-          const text = String(big.content ?? '');
-          const parts = text.match(/[\s\S]{1,800}(\s|$)/g) || [text];
-          for (const chunk of parts)
-            expanded.push({ ...row, cells: [{ ...big, content: chunk.trim(), rowSpan: 1 }] });
-        } else {
-          expanded.push(row);
-        }
-      }
-
-      const rowCount = expanded.length;
-      // occ[r][c]     → ¿está ocupada esta posición?
-      // csOf[r][c]    → colSpan del bloque que ocupa esta posición
-      const occ:  boolean[][] = Array.from({ length: rowCount }, () => Array(MAX_COLS).fill(false));
-      const csOf: number[][]  = Array.from({ length: rowCount }, () => Array(MAX_COLS).fill(1));
-      const grid: (any | null)[][] = Array.from({ length: rowCount }, () => Array(MAX_COLS).fill(null));
-
-      const nextFree = (r: number, from: number) => {
-        let c = from;
-        while (c < MAX_COLS && occ[r]?.[c]) c++;
-        return c;
-      };
-
-      for (let r = 0; r < rowCount; r++) {
-        let ptr = nextFree(r, 0);
-        for (const cell of expanded[r].cells) {
-          if ((cell.rowSpan ?? 1) <= 0 || (cell.colSpan ?? 1) <= 0) continue;
-          ptr = nextFree(r, ptr);
-          if (ptr >= MAX_COLS) break;
-
-          const rs = Math.max(1, Math.min(cell.rowSpan ?? 1, rowCount - r));
-          const cs = Math.max(1, Math.min(cell.colSpan ?? 1, MAX_COLS - ptr));
-
-          // Marcar como ocupado y guardar colSpan para filas de continuación
-          for (let ur = r; ur < r + rs; ur++)
-            for (let uc = ptr; uc < ptr + cs; uc++) {
-              occ[ur][uc] = true;
-              csOf[ur][uc] = cs;
-            }
-
-          const styles: any = {};
-          if (cell.backgroundColor) styles.fillColor = cell.backgroundColor;
-          if (cell.textColor)        styles.textColor  = cell.textColor;
-          if (cell.textAlign)        styles.halign     = cell.textAlign;
-          if (cell.isHeader) {
-            styles.fontStyle = styles.fontStyle || 'bold';
-            if (!styles.fillColor) styles.fillColor = [220, 220, 220];
-          }
-
-          const entry: any = { content: String(cell.content ?? '') };
-          if (cs > 1) entry.colSpan = cs;
-          if (Object.keys(styles).length) entry.styles = styles;
-          grid[r][ptr] = entry;
-          ptr += cs;
-        }
-      }
-
-      let lastCol = 1;
-      for (let r = 0; r < rowCount; r++)
-        for (let c = 0; c < MAX_COLS; c++)
-          if (occ[r]?.[c]) lastCol = Math.max(lastCol, c + 1);
-
-      return Array.from({ length: rowCount }, (_, r) => {
-        const out: any[] = [];
-        let c = 0;
-        while (c < lastCol) {
-          const entry = grid[r][c];
-          if (entry !== null) {
-            // Celda real
-            out.push(entry);
-            c += Math.max(1, entry.colSpan ?? 1);
-          } else if (occ[r][c]) {
-            // Continuación de rowSpan: emitir celda vacía con el colSpan correcto
-            // para que la tabla no pierda columnas en esta fila
-            const cs = csOf[r][c];
-            const empty: any = { content: '' };
-            if (cs > 1) empty.colSpan = cs;
-            out.push(empty);
-            c += cs;
-          } else {
-            out.push({ content: '' });
-            c++;
-          }
-        }
-        return out;
-      });
-    };
-
-    // --- PESTAÑAS ---
-    for (const tab of activeProgramaAnalitico.tabs) {
-      const body = buildBody(tab.rows);
-      if (body.length === 0) continue;
-
-      autoTable(doc, {
-        body,
-        startY: finalY,
-        theme: 'grid',
-        styles: {
-          fontSize: 8,
-          cellPadding: 3,
-          lineColor: [160, 160, 160],
-          lineWidth: 0.3,
-          overflow: 'linebreak',
-          halign: 'left',
-          valign: 'middle',
-          textColor: [0, 0, 0],
-        },
-        tableWidth: pageWidth - margin * 2,
-        margin: { left: margin, right: margin, top: 100 },
-        rowPageBreak: 'auto',
-        pageBreak: 'auto',
-        didDrawPage: (data) => {
-          if (data.pageNumber > 1) addHeader();
-        },
-      });
-
-      finalY = (doc as any).lastAutoTable?.finalY ?? finalY + 8;
-
-      // Ceder el hilo al navegador entre pestañas para no congelar la UI
-      await new Promise<void>(r => setTimeout(r, 0));
-    }
-
-    // --- SECCIÓN VISADO ---
-    const signatureHeight = 120;
-    if (finalY + signatureHeight > pageHeight - margin) {
-      doc.addPage(); addHeader(); finalY = 100;
-    }
-    doc.setFontSize(11); doc.setFont('helvetica', 'bold');
-    doc.text('VISADO', pageWidth / 2, finalY + 20, { align: 'center' });
-
-    const VISADO_COLS = ['DECANO/A DE FACULTAD', 'DIRECTOR/A ACADÉMICO/A', 'COORDINADOR/A DE CARRERA', 'DOCENTE'];
-    autoTable(doc, {
-      body: [
-        [{ content: '', colSpan: 1 }, { content: '', colSpan: 1 }, { content: '', colSpan: 1 }, { content: '', colSpan: 1 }],
-        VISADO_COLS.map(label => ({ content: label, styles: { halign: 'center', fontStyle: 'bold', fontSize: 8 } })),
-      ],
-      startY: finalY + 30,
-      theme: 'plain',
-      styles: { fontSize: 9, halign: 'center', valign: 'middle', cellPadding: 4, minCellHeight: 40 },
-      tableWidth: pageWidth - margin * 2,
-      margin: { left: margin, right: margin },
-    });
-
-    const slug = programaTitle.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 40) || 'Programa_Analitico';
-    doc.save(`PA_${slug}.pdf`);
-  };
+  // handlePrintToPdf removido
 
   // ==============================
   // LIMPIAR: Borrar celdas editables (dejar solo etiquetas/headers y datos de BD)
@@ -2487,9 +2555,43 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
     handleInicioNuevoPrograma()
   }
 
-  const programasFiltered = selectedPeriod 
-    ? savedprogramas.filter(s => matchPeriodo(s.periodo, selectedPeriod) || !s.periodo)
-    : savedprogramas;
+  const programasFiltered = (() => {
+    let list = savedprogramas;
+    if (selectedPeriod) {
+      list = list.filter(s => matchPeriodo(s.periodo, selectedPeriod) || !s.periodo);
+    }
+    if (asignaturaIdParam) {
+      list = list.filter(s => 
+        coincidenciaAsignaturaFlexible(
+          s,
+          asignaturaIdParam,
+          asignaturaInfo?.nombre ?? null,
+          asignaturaInfo?.codigo ?? null
+        )
+      );
+    }
+    return list;
+  })();
+
+  const selectorProgramasFiltered = (() => {
+    let list = savedprogramas;
+    if (selectedPeriod) {
+      list = list.filter(s => matchPeriodo(s.periodo, selectedPeriod) || !s.periodo);
+    }
+    if (asignaturaIdParam) {
+      list = list.filter(s => 
+        s.asignatura_id === null || 
+        s.asignatura_id === undefined ||
+        coincidenciaAsignaturaFlexible(
+          s,
+          asignaturaIdParam,
+          asignaturaInfo?.nombre ?? null,
+          asignaturaInfo?.codigo ?? null
+        )
+      );
+    }
+    return list;
+  })();
   // --- LÓGICA DE INTELIGENCIA Y ESCALABILIDAD ---
 
   // 1. Limpia el nombre del periodo (Ej: "Primer Periodo PII 2026" -> "PII 2026")
@@ -2519,7 +2621,7 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
         return formatPeriodoSimple(selectedPeriod) || cell.content || "";
       }
       if (etiqueta === "NIVEL") {
-        return asignaturaInfo.nivel?.nombre || "";
+        return formatearNivelOrdinal(asignaturaInfo.nivel?.nombre || "");
       }
     }
     return cell.content || "";
@@ -2549,14 +2651,33 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                   <CardTitle className="flex items-center justify-between text-emerald-800">
                     <span>Editor de Programa Analítico</span>
                     <div className="flex gap-2">
+                      <Button
+                        onClick={() => router.push(`/dashboard/comision/asignaturas${selectedPeriod ? `?periodo=${selectedPeriod}` : ""}`)}
+                        variant="outline"
+                        size="sm"
+                        className="border-gray-400 text-gray-700 hover:bg-gray-50"
+                      >
+                        <span className="flex items-center gap-1">
+                          <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                          Retroceder
+                        </span>
+                      </Button>
+
+                      <Button
+                        onClick={() => router.push('/dashboard/comision')}
+                        variant="outline"
+                        size="sm"
+                        className="border-gray-400 text-gray-700 hover:bg-gray-50"
+                      >
+                        <Home className="h-4 w-4 mr-2" />
+                        Menú Principal
+                      </Button>
+
                       <Button onClick={handleNewProgramaAnalitico} className="bg-emerald-600 hover:bg-emerald-700">
                         <Plus className="h-4 w-4 mr-2" /> Nuevo
                       </Button>
                       <Button onClick={handleSaveToDB} disabled={!activeProgramaAnalitico} className="bg-blue-600 hover:bg-blue-700">
                         <Save className="h-4 w-4 mr-2" /> Guardar
-                      </Button>
-                      <Button onClick={handlePrintToPdf} disabled={!activeProgramaAnalitico} variant="outline">
-                        <Printer className="h-4 w-4 mr-2" /> Imprimir
                       </Button>
                     </div>
                   </CardTitle>
@@ -2614,21 +2735,63 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                         <h3 className="font-semibold mb-3">O seleccione uno existente:</h3>
                         {isListLoading ? (
                           <p className="text-center py-4">Cargando...</p>
-                        ) : programasFiltered.length > 0 ? (
-                          <div className="space-y-2 max-h-96 overflow-y-auto">
-                            {programasFiltered.map(s => (
-                              <div key={s.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
-                                <div className="flex-1">
-                                  <p className="font-medium">{s.nombre}</p>
-                                  <p className="text-sm text-gray-500">{s.periodo} - {s.materias}</p>
+                        ) : selectorProgramasFiltered.length > 0 ? (() => {
+                          const grouped = selectorProgramasFiltered.reduce((acc, p) => {
+                            let level = "Sin Nivel";
+                            let dt = p.datos_tabla as any;
+                            if (typeof dt === "string") { try { dt = JSON.parse(dt); } catch {} }
+                            if (dt?.metadata?.level) level = dt.metadata.level;
+                            if (!acc[level]) acc[level] = [];
+                            acc[level].push(p);
+                            return acc;
+                          }, {} as Record<string, SavedProgramaAnaliticoRecord[]>);
+                          
+                          return (
+                            <div className="space-y-4">
+                              <Accordion type="multiple" className="w-full space-y-4">
+                                {Object.entries(grouped)
+                                  .filter(([nivel]) => nivel.toLowerCase() !== "sin nivel")
+                                  .map(([nivel, programasList]) => (
+                                    <AccordionItem value={nivel} key={nivel} className="border border-white/50 rounded-xl bg-white/60 backdrop-blur-md overflow-hidden shadow-sm">
+                                      <AccordionTrigger className="bg-emerald-50/40 hover:bg-emerald-100/50 px-4 py-3 hover:no-underline transition-all font-semibold text-emerald-900">
+                                        Nivel: {nivel} ({programasList.length})
+                                      </AccordionTrigger>
+                                      <AccordionContent className="p-2 space-y-2">
+                                        {programasList.map(s => (
+                                          <div key={s.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-emerald-50 transition-colors">
+                                            <div className="flex-1">
+                                              <p className="font-medium text-emerald-900">{s.nombre}</p>
+                                              <p className="text-sm text-emerald-700">{s.periodo} - {s.materias}</p>
+                                            </div>
+                                            <Button onClick={() => { handleLoadProgramaAnalitico(s.id.toString()); setShowProgramaAnaliticoSelector(false); }} className="bg-emerald-600 hover:bg-emerald-700">
+                                              Seleccionar
+                                            </Button>
+                                          </div>
+                                        ))}
+                                      </AccordionContent>
+                                    </AccordionItem>
+                                  ))}
+                              </Accordion>
+
+                              {grouped["Sin Nivel"] && grouped["Sin Nivel"].length > 0 && (
+                                <div className="space-y-2 pt-4 border-t border-dashed border-gray-200">
+                                  <h4 className="text-xs font-semibold text-emerald-700 bg-emerald-50/50 px-3 py-1 rounded inline-block mb-2">Programas sin nivel asignado:</h4>
+                                  {grouped["Sin Nivel"].map(s => (
+                                    <div key={s.id} className="flex items-center justify-between p-3 border border-emerald-100 rounded-lg hover:bg-emerald-50 transition-colors bg-white/90 shadow-sm">
+                                      <div className="flex-1">
+                                        <p className="font-medium text-emerald-900">{s.nombre}</p>
+                                        <p className="text-sm text-emerald-700">{s.periodo} - {s.materias}</p>
+                                      </div>
+                                      <Button onClick={() => { handleLoadProgramaAnalitico(s.id.toString()); setShowProgramaAnaliticoSelector(false); }} className="bg-emerald-600 hover:bg-emerald-700">
+                                        Seleccionar
+                                      </Button>
+                                    </div>
+                                  ))}
                                 </div>
-                                <Button onClick={() => { handleLoadProgramaAnalitico(s.id.toString()); setShowProgramaAnaliticoSelector(false); }} className="bg-emerald-600 hover:bg-emerald-700">
-                                  Seleccionar
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
+                              )}
+                            </div>
+                          );
+                        })() : (
                           <p className="text-center text-gray-500 py-4">No hay ProgramaAnalitico disponibles</p>
                         )}
                       </div>
@@ -2638,58 +2801,155 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
               )}
 
               {/* Tabla de ProgramaAnalitico Creados */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>ProgramaAnalitico Creados</CardTitle>
+              <Card className="border border-gray-100 shadow-md">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 border-b">
+                  <div>
+                    <CardTitle className="text-xl font-bold text-gray-800">Programas Analíticos Creados</CardTitle>
+                    <p className="text-sm text-gray-500 mt-1">Listado de programas académicos diseñados por la comisión.</p>
+                  </div>
+                  {asignaturaIdParam && asignaturaInfo && !isLoadingPrograma && (
+                    <div className="flex items-center gap-2 bg-emerald-50 text-emerald-800 px-3 py-1.5 rounded-full text-xs font-semibold border border-emerald-200 shadow-sm transition-all hover:bg-emerald-100">
+                      <span>Materia: {asignaturaInfo.codigo} - {asignaturaInfo.nombre}</span>
+                      <button 
+                        onClick={() => {
+                          const params = new URLSearchParams(searchParams.toString());
+                          params.delete("asignatura");
+                          params.delete("nueva");
+                          params.delete("id");
+                          router.push(`${pathname}?${params.toString()}`);
+                        }}
+                        className="hover:bg-emerald-200/50 rounded-full p-0.5 transition-colors text-emerald-600"
+                        title="Quitar filtro de materia"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent>
                   {isListLoading ? (
                     <p className="text-center py-8">Cargando...</p>
-                  ) : programasFiltered.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-sm font-semibold">Nombre</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold">Periodo</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold">Materia</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold">Fecha</th>
-                            <th className="px-4 py-3 text-center text-sm font-semibold">Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {programasFiltered.map(s => (
-                            <tr key={s.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  <FileText className="h-4 w-4 text-emerald-600" />
-                                  <span className="font-medium">{s.nombre}</span>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">{s.periodo}</td>
-                              <td className="px-4 py-3">{s.materias}</td>
-                              <td className="px-4 py-3 text-sm text-gray-500">
-                                {new Date(s.created_at).toLocaleDateString()}
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center justify-center gap-2">
-                                  <Button variant="outline" size="sm" onClick={() => handleEditProgramaAnalitico(s.id)} className="text-blue-600 hover:text-blue-700">
-                                    <Pencil className="h-4 w-4 mr-1" /> Modificar
-                                  </Button>
-                                  <Button variant="outline" size="sm" onClick={() => handleDuplicateProgramaAnalitico(s.id)} className="text-emerald-600 hover:text-emerald-700">
-                                    <Copy className="h-4 w-4 mr-1" /> Duplicar
-                                  </Button>
-                                  <Button variant="outline" size="sm" onClick={() => handleDeleteProgramaAnalitico(s.id)} className="text-red-600 hover:text-red-700">
-                                    <Trash2 className="h-4 w-4 mr-1" /> Eliminar
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
+                  ) : programasFiltered.length > 0 ? (() => {
+                    const grouped = programasFiltered.reduce((acc, p) => {
+                      let level = "Sin Nivel";
+                      let dt = p.datos_tabla as any;
+                      if (typeof dt === "string") { try { dt = JSON.parse(dt); } catch {} }
+                      if (dt?.metadata?.level) level = dt.metadata.level;
+                      if (!acc[level]) acc[level] = [];
+                      acc[level].push(p);
+                      return acc;
+                    }, {} as Record<string, SavedProgramaAnaliticoRecord[]>);
+                    
+                    return (
+                      <div className="space-y-4">
+                        <div className="overflow-x-auto">
+                          <Accordion type="multiple" className="w-full space-y-4">
+                            {Object.entries(grouped)
+                              .filter(([nivel]) => nivel.toLowerCase() !== "sin nivel")
+                              .map(([nivel, programasList]) => (
+                                <AccordionItem value={nivel} key={nivel} className="border border-white/50 rounded-xl bg-white/60 backdrop-blur-md overflow-hidden shadow-sm">
+                                  <AccordionTrigger className="bg-emerald-50/40 hover:bg-emerald-100/50 px-4 py-3 hover:no-underline transition-all font-semibold text-emerald-900">
+                                    Nivel: {nivel} ({programasList.length} Programa{programasList.length !== 1 ? 's' : ''})
+                                  </AccordionTrigger>
+                                  <AccordionContent className="p-0">
+                                    <table className="w-full">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-4 py-3 text-left text-sm font-semibold">Nombre</th>
+                                          <th className="px-4 py-3 text-left text-sm font-semibold">Periodo</th>
+                                          <th className="px-4 py-3 text-left text-sm font-semibold">Materia</th>
+                                          <th className="px-4 py-3 text-left text-sm font-semibold">Fecha</th>
+                                          <th className="px-4 py-3 text-center text-sm font-semibold">Acciones</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y">
+                                        {programasList.map(s => (
+                                          <tr key={s.id} className="hover:bg-gray-50">
+                                            <td className="px-4 py-3">
+                                              <div className="flex items-center gap-2">
+                                                <FileText className="h-4 w-4 text-emerald-600" />
+                                                <span className="font-medium">{s.nombre}</span>
+                                              </div>
+                                            </td>
+                                            <td className="px-4 py-3">{s.periodo}</td>
+                                            <td className="px-4 py-3">{s.materias}</td>
+                                            <td className="px-4 py-3 text-sm text-gray-500">
+                                              {new Date(s.created_at).toLocaleDateString()}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                              <div className="flex items-center justify-center gap-2">
+                                                <Button variant="outline" size="sm" onClick={() => handleEditProgramaAnalitico(s.id)} className="text-blue-600 hover:text-blue-700">
+                                                  <Pencil className="h-4 w-4 mr-1" /> Modificar
+                                                </Button>
+                                                <Button variant="outline" size="sm" onClick={() => handleDuplicateProgramaAnalitico(s.id)} className="text-emerald-600 hover:text-emerald-700">
+                                                  <Copy className="h-4 w-4 mr-1" /> Duplicar
+                                                </Button>
+                                                <Button variant="outline" size="sm" onClick={() => handleDeleteProgramaAnalitico(s.id)} className="text-red-600 hover:text-red-700">
+                                                  <Trash2 className="h-4 w-4 mr-1" /> Eliminar
+                                                </Button>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              ))}
+                          </Accordion>
+                        </div>
+
+                        {grouped["Sin Nivel"] && grouped["Sin Nivel"].length > 0 && (
+                          <div className="pt-4 border-t border-dashed border-gray-200">
+                            <h4 className="text-xs font-semibold text-emerald-700 bg-emerald-50/50 px-3 py-1 rounded inline-block mb-2">Programas sin nivel asignado:</h4>
+                            <div className="border border-emerald-100 rounded-lg overflow-hidden bg-white/90 shadow-sm">
+                              <table className="w-full">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-4 py-3 text-left text-sm font-semibold">Nombre</th>
+                                    <th className="px-4 py-3 text-left text-sm font-semibold">Periodo</th>
+                                    <th className="px-4 py-3 text-left text-sm font-semibold">Materia</th>
+                                    <th className="px-4 py-3 text-left text-sm font-semibold">Fecha</th>
+                                    <th className="px-4 py-3 text-center text-sm font-semibold">Acciones</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 bg-white">
+                                  {grouped["Sin Nivel"].map(s => (
+                                    <tr key={s.id} className="hover:bg-gray-50">
+                                      <td className="px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                          <FileText className="h-4 w-4 text-emerald-600" />
+                                          <span className="font-medium text-gray-800">{s.nombre}</span>
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3 text-gray-600">{s.periodo}</td>
+                                      <td className="px-4 py-3 text-gray-600">{s.materias}</td>
+                                      <td className="px-4 py-3 text-sm text-gray-500">
+                                        {new Date(s.created_at).toLocaleDateString()}
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        <div className="flex items-center justify-center gap-2">
+                                          <Button variant="outline" size="sm" onClick={() => handleEditProgramaAnalitico(s.id)} className="text-blue-600 hover:text-blue-700">
+                                            <Pencil className="h-4 w-4 mr-1" /> Modificar
+                                          </Button>
+                                          <Button variant="outline" size="sm" onClick={() => handleDuplicateProgramaAnalitico(s.id)} className="text-emerald-600 hover:text-emerald-700">
+                                            <Copy className="h-4 w-4 mr-1" /> Duplicar
+                                          </Button>
+                                          <Button variant="outline" size="sm" onClick={() => handleDeleteProgramaAnalitico(s.id)} className="text-red-600 hover:text-red-700">
+                                            <Trash2 className="h-4 w-4 mr-1" /> Eliminar
+                                          </Button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })() : (
                     <div className="text-center py-12">
                       <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
                       <p className="text-gray-500">No hay ProgramaAnalitico creados aún</p>
@@ -2704,16 +2964,54 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
           ) : (
             <>
               <Card className="mb-6 border-t-4 border-t-emerald-600">
-                <CardHeader>
-                  <CardTitle className="flex flex-wrap items-center justify-between gap-4 text-emerald-800">
-                    <span className="truncate">{activeProgramaAnalitico.name}</span>
-                    <div className="flex-shrink-0 flex items-center gap-2">
-                       <Button onClick={handleInicioNuevoPrograma} variant="outline" size="sm"> <Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
-                       <Button onClick={handleSaveToDB} className="bg-blue-600 hover:bg-blue-700" size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> Guardar</>}</Button>
-                       <Button onClick={handlePrintToPdf} variant="outline" size="sm" disabled={!activeTab}><FileDown className="h-4 w-4 mr-2" /> Exportar PDF</Button>
-                       <Button onClick={handleClearSync} variant="outline" size="sm" disabled={!activeTab} className="text-orange-600 hover:text-orange-700 border-orange-200 hover:bg-orange-50"><Eraser className="h-4 w-4 mr-2" /> Limpiar</Button>
+                <CardHeader className="pb-3 border-b">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        {lastSavedTime && (
+                          <span className="text-xs text-gray-500 flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
+                            🕒 Guardado el: {lastSavedTime}
+                          </span>
+                        )}
+                      </div>
+                      <CardTitle className="text-xl font-bold text-gray-800">
+                        {activeProgramaAnalitico.name}
+                      </CardTitle>
+                      {asignaturaInfo && (
+                        <p className="text-sm font-semibold text-emerald-800 flex items-center gap-1.5 mt-1 bg-emerald-50/50 px-3 py-1 rounded-lg border border-emerald-100/50 w-fit">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Materia Seleccionada: <span className="font-bold text-emerald-950">{asignaturaInfo.codigo} - {asignaturaInfo.nombre}</span>
+                        </p>
+                      )}
                     </div>
-                  </CardTitle>
+                    <div className="flex items-center gap-2">
+                        <Button
+                          onClick={() => router.push(`/dashboard/comision/asignaturas${selectedPeriod ? `?periodo=${selectedPeriod}` : ""}`)}
+                          variant="outline"
+                          size="sm"
+                          className="border-gray-400 text-gray-700 hover:bg-gray-50"
+                        >
+                          <span className="flex items-center gap-1">
+                            <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                            Retroceder
+                          </span>
+                        </Button>
+
+                        <Button
+                          onClick={() => router.push('/dashboard/comision')}
+                          variant="outline"
+                          size="sm"
+                          className="border-gray-400 text-gray-700 hover:bg-gray-50"
+                        >
+                          <Home className="h-4 w-4 mr-2" />
+                          Menú Principal
+                        </Button>
+
+                        <Button onClick={handleInicioNuevoPrograma} variant="outline" size="sm"> <Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
+                        <Button onClick={handleSaveToDB} className="bg-blue-600 hover:bg-blue-700" size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> Guardar</>}</Button>
+                        <Button onClick={handleClearSync} variant="outline" size="sm" disabled={!activeTab} className="text-orange-600 hover:text-orange-700 border-orange-200 hover:bg-orange-50"><Eraser className="h-4 w-4 mr-2" /> Limpiar</Button>
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-1 gap-4 mt-4 border-t pt-4">
@@ -2804,6 +3102,82 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                        <Button size="sm" onClick={removeSelectedColumn} className="bg-red-50 text-red-600 border-red-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Minus className="h-3 w-3 mr-1"/>Col</Button>
                        <div className="w-px h-6 bg-emerald-200 mx-1"></div>
                        <Button size="sm" onClick={toggleVerticalText} className="bg-white text-emerald-700 border-emerald-200" disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} title="Rotar Texto Verticalmente"><ArrowUpFromLine className="h-4 w-4 mr-1" /> Vertical</Button>
+
+                       <div className="w-px h-6 bg-emerald-200 mx-1"></div>
+
+                       <Button 
+
+                         size="sm" 
+
+                         onClick={() => handleSetTextAlign('left')} 
+
+                         disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}
+
+                         title="Alinear a la izquierda"
+
+                         className={`p-2 transition-all duration-200 hover:scale-105 ${selectedCellAlign === 'left' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'}`}
+
+                       >
+
+                         <AlignLeft className="h-4 w-4" />
+
+                       </Button>
+
+                       <Button 
+
+                         size="sm" 
+
+                         onClick={() => handleSetTextAlign('center')} 
+
+                         disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}
+
+                         title="Centrar"
+
+                         className={`p-2 transition-all duration-200 hover:scale-105 ${selectedCellAlign === 'center' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'}`}
+
+                       >
+
+                         <AlignCenter className="h-4 w-4" />
+
+                       </Button>
+
+                       <Button 
+
+                         size="sm" 
+
+                         onClick={() => handleSetTextAlign('right')} 
+
+                         disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}
+
+                         title="Alinear a la derecha"
+
+                         className={`p-2 transition-all duration-200 hover:scale-105 ${selectedCellAlign === 'right' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'}`}
+
+                       >
+
+                         <AlignRight className="h-4 w-4" />
+
+                       </Button>
+
+                       <Button 
+
+                         size="sm" 
+
+                         onClick={() => handleSetTextAlign('justify')} 
+
+                         disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}
+
+                         title="Justificar"
+
+                         className={`p-2 transition-all duration-200 hover:scale-105 ${selectedCellAlign === 'justify' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'}`}
+
+                       >
+
+                         <AlignJustify className="h-4 w-4" />
+
+                       </Button>
+
+                       <div className="w-px h-6 bg-emerald-200 mx-1"></div>
                        <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2 || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
                        <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
                        <div className="w-px h-6 bg-emerald-200 mx-1"></div>
@@ -2896,7 +3270,19 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
             }
 
             // --- ALINEACIÓN ---
-            let justifyContent = (isHeader || isSeparator || isVertical) ? 'justify-center' : 'justify-start';
+            const isVisadoTab = activeTab?.title.toUpperCase().includes('VISADO') || activeTab?.title.toUpperCase().includes('LEGALIZACIÓN') || activeTab?.title.toUpperCase().includes('LEGALIZACION');
+
+            const justifyContent = (() => {
+              if (cell.textAlign === 'center') return 'justify-center';
+              if (cell.textAlign === 'right') return 'justify-end';
+              if (cell.textAlign === 'justify') return 'justify-between';
+              if (cell.textAlign === 'left') return 'justify-start';
+              if (isFormRow && cellIndex === 2) {
+                const labelUpper = (row.cells[0].content || '').toUpperCase().trim();
+                if (labelUpper === 'NIVEL') return 'justify-center';
+              }
+              return (isHeader || isSeparator || isVertical || isVisadoTab) ? 'justify-center' : 'justify-start';
+            })();
 
             const docenteFlag = cell.docenteEditable;
             const configModeClass = configModeDocente
@@ -2915,14 +3301,15 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                   ${configModeDocente ? configModeClass : (
                     isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"
                   )}
+                  ${!configModeDocente && cell.isLocked ? "bg-amber-50/60" : ""}
                   ${!configModeDocente && isSelected ? "ring-2 ring-inset ring-emerald-500 z-10" : ""}
                   ${!configModeDocente && isReadOnly ? "bg-gray-100/50 cursor-not-allowed" : ""}
-                  ${!configModeDocente && !isReadOnly ? "cursor-pointer" : ""}
+                  ${!configModeDocente && !isReadOnly && !cell.isLocked ? "cursor-pointer" : ""}
                 `}
                 style={{
                   backgroundColor: configModeDocente
                     ? (docenteFlag === true ? '#f0fdf4' : docenteFlag === false ? '#fef2f2' : '#f9fafb')
-                    : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff')),
+                    : (cell.isLocked ? '#fffbeb' : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'))),
                   color: cell.textColor,
                   width: widthStyle,
                   minWidth: minWidthStyle,
@@ -2933,7 +3320,7 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                 colSpan={cell.colSpan || 1}
                 onClick={(e) => handleCellClick(cell.id, e)}
                 onDoubleClick={() => {
-                  if (configModeDocente) return;
+                  if (configModeDocente || cell.isLocked) return;
                   // Abrir modal grande para ver/editar contenido
                   setModalCell({ id: cell.id, content: displayContent, isEditable: cell.isEditable && !isReadOnly });
                   setEditContent(displayContent);
@@ -2945,7 +3332,13 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                     writingMode: isVertical ? 'vertical-rl' : undefined,
                     transform: isVertical ? 'rotate(180deg)' : undefined,
                     minHeight: isVertical ? '120px' : 'auto',
-                    textAlign: isHeader ? 'center' : 'left'
+                    textAlign: cell.textAlign ? (cell.textAlign as any) : (() => {
+                      if (isFormRow && cellIndex === 2) {
+                        const labelUpper = (row.cells[0].content || '').toUpperCase().trim();
+                        if (labelUpper === 'NIVEL') return 'center';
+                      }
+                      return (isHeader || isVisadoTab) ? 'center' : 'left';
+                    })()
                   }}
                 >
                   {editingCell === cell.id ? (
@@ -2965,7 +3358,7 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                       {displayContent || <span className="opacity-0">.</span>}
                     </div>
                   )}
-                  {configModeDocente && (
+                  {configModeDocente ? (
                     <div className="absolute top-0 right-0 p-0.5">
                       {docenteFlag === true ? (
                         <Unlock className="h-3 w-3 text-green-600" />
@@ -2975,6 +3368,8 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                         <span className="text-[8px] text-gray-400">?</span>
                       )}
                     </div>
+                  ) : (
+                    cell.isLocked && <Lock className="h-3 w-3 text-amber-600 absolute top-1 right-1 opacity-70 pointer-events-none" />
                   )}
                 </div>
               </td>

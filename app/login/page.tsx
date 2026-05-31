@@ -128,11 +128,14 @@ export default function LoginPage() {
             alt="Campus UNESUM"
             fill
             priority
+            unoptimized
+            quality={100}
             className="object-cover object-[center_30%]"
+            style={{ filter: 'contrast(1.1) brightness(1.05) saturate(1.1)' }}
             sizes="100vw"
           />
           <div
-            className="absolute inset-0 bg-gradient-to-br from-emerald-900/55 via-teal-900/40 to-emerald-950/60"
+            className="absolute inset-0 bg-gradient-to-br from-emerald-900/5 via-teal-900/5 to-emerald-950/5"
             aria-hidden
           />
         </div>
@@ -141,7 +144,7 @@ export default function LoginPage() {
           <MainHeader />
         </div>
         <main className="relative z-10 flex min-h-[calc(100dvh-4.25rem)] items-center justify-center px-4 py-10">
-          <div className="w-full max-w-md rounded-2xl border border-white/25 bg-white/95 p-8 shadow-2xl backdrop-blur-md">
+          <div className="w-full max-w-md rounded-2xl border border-white/25 bg-white/95 p-8 shadow-2xl">
 
             {/* Bienvenida */}
             <div className="text-center mb-6">
@@ -242,31 +245,35 @@ export default function LoginPage() {
               fill
               className="object-cover object-center"
               priority
+              unoptimized
+              quality={100}
+              style={{ filter: 'contrast(1.15) brightness(1.1) saturate(1.15)' }}
             />
             {/* Overlay muy suave solo en la parte inferior para el texto */}
-            <div className="absolute inset-0 bg-gradient-to-t from-emerald-900/70 via-transparent to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-emerald-900/20 via-emerald-900/5 to-transparent" />
 
-            {/* Texto en la parte inferior */}
+            {/* Texto en la parte inferior (caja semitransparente para legibilidad) */}
             <div className="absolute bottom-0 left-0 right-0 p-8 z-10">
-              
-              <p className="text-lg font-black text-white drop-shadow-lg mb-4 tracking-wide uppercase">
-                Sistema de{" "}
-                <span className="text-emerald-300 drop-shadow-lg">Gestión Académica</span>
-              </p>
-              <div className="flex flex-wrap gap-2 mb-4">
-                {[
-                  "Mallas Curriculares",
-                  "Syllabus Docente",
-                  "Gestión de Firmas",
-                  "Control de Roles",
-                  "Programas Analíticos",
-                ].map((tag) => (
-                  <span key={tag} className="text-[11px] bg-green-700/15 border border-white/25 text-white/90 px-2.5 py-1 rounded-full backdrop-blur-sm font-medium">
-                    {tag}
-                  </span>
-                ))}
+              <div className="max-w-3xl mx-auto bg-black/40 rounded-2xl p-6">
+                <p className="text-lg font-black text-white mb-4 tracking-wide uppercase" style={{textShadow: '0 2px 10px rgba(0,0,0,0.85)'}}>
+                  Sistema de{" "}
+                  <span className="text-emerald-200">Gestión Académica</span>
+                </p>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {[
+                    "Mallas Curriculares",
+                    "Syllabus Docente",
+                    "Gestión de Firmas",
+                    "Control de Roles",
+                    "Programas Analíticos",
+                  ].map((tag) => (
+                    <span key={tag} className="text-[11px] bg-white/10 border border-white/20 text-white px-2.5 py-1 rounded-full font-medium">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-xs text-emerald-200/90">© {new Date().getFullYear()} UNESUM — Todos los derechos reservados</p>
               </div>
-              <p className="text-xs text-emerald-300/80">© {new Date().getFullYear()} UNESUM — Todos los derechos reservados</p>
             </div>
           </div>
 

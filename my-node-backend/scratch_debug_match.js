@@ -1,0 +1,35 @@
+const { Client } = require('pg');
+
+const dbUrl = "postgresql://neondb_owner:npg_F4IVyrtCQqh7@ep-rapid-mud-ae623rtp-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
+
+async function run() {
+  const client = new Client({ connectionString: dbUrl });
+  await client.connect();
+
+  const res = await client.query('SELECT id, datos_syllabus FROM syllabus_docente ORDER BY id DESC LIMIT 1');
+  if (res.rows.length > 0) {
+    let data = res.rows[0].datos_syllabus;
+    if (typeof data === 'string') data = JSON.parse(data);
+    
+    const tabEst = data.tabs.find(t =>
+      ['ESTRUCTURA', 'ASIGNATURA', 'CONTENIDO', 'UNIDAD'].some(k => t.title.toUpperCase().includes(k))
+    );
+    
+    for (let r = 0; r < Math.min(6, tabEst.rows.length); r++) {
+      const row = tabEst.rows[r];
+      console.log(`Checking row ${r}...`);
+      let matched = false;
+      row.cells.forEach((c, idx) => {
+        const t = (c.content || '').toUpperCase();
+        if (t.includes('PRESENCIAL') || t.includes('PFAE') || t.includes('TA') || t.includes('AUTÓNOMO') || t.includes('AUTONOM') || t.includes('SINCRÓN') || t.includes('SINCRONIC')) {
+          console.log(`  Cell ${idx} matches! content='${t}'`);
+          matched = true;
+        }
+      });
+      if (matched) break;
+    }
+  }
+  await client.end();
+}
+
+run().catch(console.error);

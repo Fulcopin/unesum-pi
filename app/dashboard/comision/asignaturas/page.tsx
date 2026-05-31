@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { 
   BookOpen, 
   CheckCircle2, 
@@ -38,6 +39,13 @@ interface Asignatura {
   estado: string;
   nivel: string | null;
   organizacion: string | null;
+  horas?: {
+    horasDocencia: number;
+    horasPractica: number;
+    horasAutonoma: number;
+    horasVinculacion: number;
+    horasPracticaPreprofesional: number;
+  } | null;
   tiene_syllabus: boolean;
   syllabus_id?: number;
   syllabus_source?: string;
@@ -87,6 +95,13 @@ interface AsignaturaConDocentes {
   nombre: string;
   codigo: string;
   nivel: string;
+  horas?: {
+    horasDocencia: number;
+    horasPractica: number;
+    horasAutonoma: number;
+    horasVinculacion: number;
+    horasPracticaPreprofesional: number;
+  } | null;
   docentes: DocenteEstado[];
   stats: {
     total_docentes: number;
@@ -119,6 +134,18 @@ export default function AsignaturasComisionPage() {
   const [seguimiento, setSeguimiento] = useState<SeguimientoData | null>(null);
   const [loadingSeguimiento, setLoadingSeguimiento] = useState(false);
   const [expandedAsignaturas, setExpandedAsignaturas] = useState<Set<number>>(new Set());
+  const [nivelesExpandidosDocs, setNivelesExpandidosDocs] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (estructura && carreraSeleccionada) {
+      const carrera = estructura.carreras.find(c => c.id === carreraSeleccionada);
+      if (carrera) {
+        const grupos: { [key: string]: boolean } = {};
+        carrera.asignaturas.forEach(a => { grupos[a.nivel || 'Sin nivel'] = true; });
+        setNivelesExpandidosDocs(Object.keys(grupos));
+      }
+    }
+  }, [estructura, carreraSeleccionada]);
 
   useEffect(() => {
     cargarPeriodos();
@@ -602,126 +629,140 @@ export default function AsignaturasComisionPage() {
         <TabsContent value="documentos">
           {carreraActual && (
         <div className="space-y-4">
-          {agruparPorNivel(carreraActual.asignaturas).map((grupo) => (
-            <Card key={grupo.nivel}>
-              <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50">
-                <CardTitle className="flex items-center gap-2 text-blue-900">
-                  <GraduationCap className="h-5 w-5" />
-                  {grupo.nivel}
-                </CardTitle>
-                <CardDescription>
-                  {grupo.asignaturas.length} asignatura{grupo.asignaturas.length !== 1 ? 's' : ''}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-4">
-                <div className="space-y-2">
-                  {grupo.asignaturas.map((asignatura) => (
-                    <div
-                      key={asignatura.id}
-                      className="p-4 border rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="font-semibold text-lg text-gray-900">
-                              {asignatura.nombre}
-                            </h3>
-                            <Badge variant="outline">{asignatura.codigo}</Badge>
-                          </div>
-                          
-                          <div className="flex items-center gap-4 text-sm text-gray-600">
-                            <div className="flex items-center gap-1">
-                              {asignatura.tiene_syllabus ? (
-                                <CheckCircle2 className="h-4 w-4 text-green-600" />
-                              ) : (
-                                <XCircle className="h-4 w-4 text-gray-400" />
-                              )}
-                              <span>Syllabus</span>
+          <div className="flex justify-end gap-3 mb-2">
+            <Button variant="outline" size="sm" onClick={() => setNivelesExpandidosDocs(agruparPorNivel(carreraActual.asignaturas).map(g => g.nivel))}>
+              Expandir todo
+            </Button>
+            <Button variant="outline" size="sm" className="border-emerald-500 text-emerald-700 hover:bg-emerald-50" onClick={() => setNivelesExpandidosDocs([])}>
+              Colapsar todo
+            </Button>
+          </div>
+          <Accordion type="multiple" className="w-full space-y-4" value={nivelesExpandidosDocs} onValueChange={setNivelesExpandidosDocs}>
+            {agruparPorNivel(carreraActual.asignaturas).map((grupo) => (
+              <AccordionItem key={grupo.nivel} value={grupo.nivel} className="border border-white/50 rounded-xl bg-white/60 backdrop-blur-md overflow-hidden shadow-sm">
+                <AccordionTrigger className="bg-emerald-50/40 hover:bg-emerald-100/50 px-5 py-4 hover:no-underline transition-all">
+                  <div className="flex items-center justify-between w-full pr-4">
+                    <div className="flex flex-col items-start gap-1">
+                      <div className="flex items-center gap-2 text-emerald-900 font-bold text-lg">
+                        <GraduationCap className="h-5 w-5 text-emerald-700" />
+                        {grupo.nivel}
+                      </div>
+                      <span className="text-sm font-normal text-gray-500 text-left">
+                        {grupo.asignaturas.length} asignatura{grupo.asignaturas.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="p-4 pt-4 border-t border-gray-100 bg-white">
+                  <div className="space-y-2">
+                    {grupo.asignaturas.map((asignatura) => (
+                      <div
+                        key={asignatura.id}
+                        className="p-4 border rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h3 className="font-semibold text-lg text-gray-900">
+                                {asignatura.nombre}
+                              </h3>
+                              <Badge variant="outline">{asignatura.codigo}</Badge>
                             </div>
                             
-                            <div className="flex items-center gap-1">
-                              {asignatura.tiene_programa ? (
-                                <CheckCircle2 className="h-4 w-4 text-green-600" />
-                              ) : (
-                                <XCircle className="h-4 w-4 text-gray-400" />
-                              )}
-                              <span>Programa Analítico</span>
+                            <div className="flex items-center gap-4 text-sm text-gray-600">
+                              <div className="flex items-center gap-1">
+                                {asignatura.tiene_syllabus ? (
+                                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                ) : (
+                                  <XCircle className="h-4 w-4 text-gray-400" />
+                                )}
+                                <span>Syllabus</span>
+                              </div>
+                              
+                              <div className="flex items-center gap-1">
+                                {asignatura.tiene_programa ? (
+                                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                ) : (
+                                  <XCircle className="h-4 w-4 text-gray-400" />
+                                )}
+                                <span>Programa Analítico</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        
-                        <div className="flex gap-2 flex-wrap">
-                          {asignatura.tiene_syllabus && asignatura.syllabus_source === 'comision' ? (
-                            <>
-                              <Link href={`/dashboard/comision/editor-syllabus?id=${asignatura.syllabus_id}&asignatura=${asignatura.id}&periodo=${periodoSeleccionado}&source=comision`}>
-                                <Button size="sm" variant="outline" className="border-green-300 text-green-700 bg-green-50">
-                                  <Pencil className="h-4 w-4 mr-1" />
-                                  Ver / Editar
-                                </Button>
-                              </Link>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="border-red-300 text-red-600 hover:bg-red-50"
-                                onClick={() => setConfirmEliminar({ id: asignatura.syllabus_id!, nombre: asignatura.nombre, asignaturaId: asignatura.id, tipo: 'syllabus', source: 'comision' })}
-                              >
-                                <Trash2 className="h-4 w-4 mr-1" />
-                                Eliminar
-                              </Button>
-                            </>
-                          ) : (
-                            <Button 
-                              size="sm" 
-                              variant="default"
-                              onClick={() => verificarYCrearSyllabus(asignatura.id, asignatura.nombre)}
-                              disabled={!periodoSeleccionado}
-                            >
-                              <Plus className="h-4 w-4 mr-1" />
-                              {asignatura.tiene_syllabus ? 'Editar Syllabus' : 'Crear Syllabus'}
-                            </Button>
-                          )}
                           
-                          {asignatura.tiene_programa ? (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="border-red-300 text-red-600 hover:bg-red-50"
-                                onClick={() => setConfirmEliminar({ id: asignatura.programa_id!, nombre: asignatura.nombre, asignaturaId: asignatura.id, tipo: 'programa' })}
+                          <div className="flex gap-2 flex-wrap">
+                            {asignatura.tiene_syllabus && asignatura.syllabus_source === 'comision' ? (
+                              <>
+                                <Link href={`/dashboard/comision/editor-syllabus?id=${asignatura.syllabus_id}&asignatura=${asignatura.id}&periodo=${periodoSeleccionado}&source=comision`}>
+                                  <Button size="sm" variant="outline" className="border-green-300 text-green-700 bg-green-50">
+                                    <Pencil className="h-4 w-4 mr-1" />
+                                    Ver Syllabus
+                                  </Button>
+                                </Link>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-red-300 text-red-600 hover:bg-red-50"
+                                  onClick={() => setConfirmEliminar({ id: asignatura.syllabus_id!, nombre: asignatura.nombre, asignaturaId: asignatura.id, tipo: 'syllabus', source: 'comision' })}
+                                >
+                                  <Trash2 className="h-4 w-4 mr-1" />
+                                  Eliminar Syllabus
+                                </Button>
+                              </>
+                            ) : (
+                              <Button 
+                                size="sm" 
+                                variant="default"
+                                onClick={() => verificarYCrearSyllabus(asignatura.id, asignatura.nombre)}
+                                disabled={!periodoSeleccionado}
                               >
-                                <Trash2 className="h-4 w-4 mr-1" />
-                                Eliminar Programa
+                                <Plus className="h-4 w-4 mr-1" />
+                                {asignatura.tiene_syllabus ? 'Editar Syllabus' : 'Crear Syllabus'}
                               </Button>
-                              <Link href={`/dashboard/comision/crear-programa-analitico?id=${asignatura.programa_id}&asignatura=${asignatura.id}&periodo=${periodoSeleccionado}`}>
-                                <Button size="sm" variant="outline" className="border-green-300 text-green-700 bg-green-50">
-                                  <CheckCircle2 className="h-4 w-4 mr-1" />
-                                  Ver Programa
+                            )}
+                            
+                            {asignatura.tiene_programa ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-red-300 text-red-600 hover:bg-red-50"
+                                  onClick={() => setConfirmEliminar({ id: asignatura.programa_id!, nombre: asignatura.nombre, asignaturaId: asignatura.id, tipo: 'programa' })}
+                                >
+                                  <Trash2 className="h-4 w-4 mr-1" />
+                                  Eliminar Programa
+                                </Button>
+                                <Link href={`/dashboard/comision/crear-programa-analitico?id=${asignatura.programa_id}&asignatura=${asignatura.id}&periodo=${periodoSeleccionado}`}>
+                                  <Button size="sm" variant="outline" className="border-green-300 text-green-700 bg-green-50">
+                                    <CheckCircle2 className="h-4 w-4 mr-1" />
+                                    Ver Programa
+                                  </Button>
+                                </Link>
+                              </>
+                            ) : (
+                              <Link href={`/dashboard/comision/crear-programa-analitico?asignatura=${asignatura.id}&periodo=${periodoSeleccionado}&nueva=true`}>
+                                <Button size="sm" variant="default" disabled={!periodoSeleccionado}>
+                                  <Plus className="h-4 w-4 mr-1" />
+                                  Crear Programa
                                 </Button>
                               </Link>
-                            </>
-                          ) : (
-                            <Link href={`/dashboard/comision/crear-programa-analitico?asignatura=${asignatura.id}&periodo=${periodoSeleccionado}&nueva=true`}>
-                              <Button size="sm" variant="default" disabled={!periodoSeleccionado}>
-                                <Plus className="h-4 w-4 mr-1" />
-                                Crear Programa
-                              </Button>
-                            </Link>
-                          )}
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                  
-                  {grupo.asignaturas.length === 0 && (
-                    <div className="text-center py-8 text-gray-500">
-                      <BookOpen className="h-10 w-10 mx-auto mb-3 text-gray-400" />
-                      <p>No hay asignaturas en este nivel</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                    ))}
+                    
+                    {grupo.asignaturas.length === 0 && (
+                      <div className="text-center py-8 text-gray-500">
+                        <BookOpen className="h-10 w-10 mx-auto mb-3 text-gray-400" />
+                        <p>No hay asignaturas en este nivel</p>
+                      </div>
+                    )}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
           
           {carreraActual.asignaturas.length === 0 && (
             <Card>
@@ -800,6 +841,20 @@ export default function AsignaturasComisionPage() {
               </div>
 
               {/* Asignaturas agrupadas por nivel */}
+              <div className="flex justify-end gap-3 mb-4 mt-6">
+                <Button variant="outline" size="sm" onClick={() => {
+                  if (seguimiento) {
+                    setExpandedAsignaturas(new Set(seguimiento.asignaturas.map(a => a.id)));
+                  }
+                }}>
+                  Expandir todo
+                </Button>
+                <Button variant="outline" size="sm" className="border-emerald-500 text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                  setExpandedAsignaturas(new Set());
+                }}>
+                  Colapsar todo
+                </Button>
+              </div>
               {(() => {
                 // Agrupar asignaturas del seguimiento por nivel
                 const grupos: Record<string, AsignaturaConDocentes[]> = {};

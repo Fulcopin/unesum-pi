@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import {
   ArrowLeft, Users, GraduationCap, CheckCircle2, XCircle,
   ChevronDown, ChevronRight, Eye, Search, AlertCircle,
@@ -70,6 +71,7 @@ export default function DocumentosDocentesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandidos, setExpandidos] = useState<Set<number>>(new Set());
+  const [nivelesExpandidos, setNivelesExpandidos] = useState<string[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [filtro, setFiltro] = useState<"todos" | "con_syllabus" | "sin_syllabus" | "con_programa" | "sin_programa">("todos");
 
@@ -114,6 +116,11 @@ export default function DocumentosDocentesPage() {
       if (json.data?.asignaturas?.length <= 8) {
         setExpandidos(new Set(json.data.asignaturas.map((a: AsignaturaConDocentes) => a.id)));
       }
+      const tempGrupos: Record<string, boolean> = {};
+      (json.data?.asignaturas || []).forEach((a: AsignaturaConDocentes) => {
+        tempGrupos[a.nivel || "Sin nivel"] = true;
+      });
+      setNivelesExpandidos(Object.keys(tempGrupos));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -131,8 +138,12 @@ export default function DocumentosDocentesPage() {
   const expandirTodas = () => {
     if (!data) return;
     setExpandidos(new Set(data.asignaturas.map(a => a.id)));
+    setNivelesExpandidos(nivelesOrdenados);
   };
-  const colapsarTodas = () => setExpandidos(new Set());
+  const colapsarTodas = () => {
+    setExpandidos(new Set());
+    setNivelesExpandidos([]);
+  };
 
   // ── Selección ──
   const toggleSel = (key: SelKey) =>
@@ -455,16 +466,20 @@ export default function DocumentosDocentesPage() {
 
               {/* ── Lista por nivel → materia → docentes ── */}
               <div className="space-y-4">
-                {nivelesOrdenados.map(nivel => (
-                  <div key={nivel}>
-                    {/* Cabecera de nivel */}
-                    <div className="flex items-center gap-2 mb-2 px-1">
-                      <GraduationCap className="h-4 w-4 text-emerald-700" />
-                      <h2 className="font-semibold text-emerald-900 text-sm">{nivel}</h2>
-                      <span className="text-xs text-gray-400">({grupos[nivel].length} materias)</span>
-                    </div>
+                <Accordion type="multiple" className="space-y-4" value={nivelesExpandidos} onValueChange={setNivelesExpandidos}>
+                  {nivelesOrdenados.map(nivel => (
+                    <AccordionItem key={nivel} value={nivel} className="border-none bg-[#f1fdf7] rounded-xl overflow-hidden shadow-sm">
+                      {/* Cabecera de nivel */}
+                      <AccordionTrigger className="flex items-center justify-between px-5 py-4 hover:no-underline hover:bg-[#e7f9f0] transition-colors">
+                        <div className="flex items-center gap-3">
+                          <GraduationCap className="h-5 w-5 text-emerald-600" />
+                          <h2 className="font-semibold text-emerald-800 text-base">{nivel}</h2>
+                          <span className="text-sm font-normal text-emerald-600/70">({grupos[nivel].length} materias)</span>
+                        </div>
+                      </AccordionTrigger>
 
-                    <div className="space-y-2">
+                      <AccordionContent className="pt-2 pb-5 px-5">
+                        <div className="space-y-3">
                       {grupos[nivel].map(asig => {
                         const expanded = expandidos.has(asig.id);
                         const completo = asig.stats.total_docentes > 0
@@ -673,9 +688,11 @@ export default function DocumentosDocentesPage() {
                           </Card>
                         );
                       })}
-                    </div>
-                  </div>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
                 ))}
+              </Accordion>
 
                 {asignaturasFiltradas.length === 0 && (
                   <Card>

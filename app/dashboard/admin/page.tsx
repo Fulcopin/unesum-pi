@@ -38,18 +38,18 @@ export default function AdminDashboard() {
       description: "Ver y descargar tu sello digital personal de identidad para firmar documentos",
       icon: QrCode,
       href: "/dashboard/admin/mi-qr",
-      color: "bg-emerald-600",
+      color: "bg-purple-500",
     },
     {
       title: "Gestión de Usuarios",
       description: "Registrar y administrar todos los usuarios del sistema (docentes, decanos, comisión, dirección, etc.)",
       icon: UserPlus,
       href: "/dashboard/admin/usuarios",
-      color: "bg-blue-600",
+      color: "bg-orange-500",
     },
     {
       title: "Gestión de Roles",
-      description: "Crear y administrar los roles del sistema",
+      description: "Crear y administrar los roles del sistema de las personas que manipulan el programa",
       icon: Users,
       href: "/dashboard/admin/users",
       color: "bg-cyan-500",
@@ -179,10 +179,10 @@ export default function AdminDashboard() {
     },
     {
       title: "Cronograma Institucional",
-      description: "Crear y gestionar el calendario de actividades para docentes y personal",
+      description: "Gestionar actividades para docentes y personal",
       icon: Calendar,
       href: "/dashboard/admin/cronograma",
-      color: "bg-blue-600",
+      color: "bg-orange-500",
     },
     {
       title: "Planificación Académica",
@@ -198,7 +198,7 @@ export default function AdminDashboard() {
       href: "/dashboard/admin/materias",
       color: "bg-cyan-500",
     },
-    
+
     /* {
        title: "Asistente IA",
        description: "Consulta documentos curriculares con IA · Subir PDFs, gestionar índice y hacer preguntas",
@@ -226,9 +226,8 @@ export default function AdminDashboard() {
               return (
                 <Card
                   key={module.href}
-                  className={`hover:shadow-lg transition-shadow cursor-pointer ${
-                    esDestacado ? 'border-indigo-300 bg-indigo-50 md:col-span-2 lg:col-span-3' : ''
-                  }`}
+                  className={`hover:shadow-lg transition-shadow cursor-pointer ${esDestacado ? 'border-indigo-300 bg-indigo-50 md:col-span-2 lg:col-span-3' : ''
+                    }`}
                 >
                   <CardHeader className="pb-3">
                     <div className="flex items-center gap-3">
@@ -244,11 +243,10 @@ export default function AdminDashboard() {
                     <CardDescription className="mb-4">{module.description}</CardDescription>
                     <Link href={module.href}>
                       <Button
-                        className={`w-full ${
-                          esDestacado
-                            ? 'bg-indigo-700 hover:bg-indigo-800 text-base py-5'
-                            : 'bg-emerald-600 hover:bg-emerald-700'
-                        }`}
+                        className={`w-full ${esDestacado
+                          ? 'bg-indigo-700 hover:bg-indigo-800 text-base py-5'
+                          : 'bg-emerald-600 hover:bg-emerald-700'
+                          }`}
                       >
                         {esDestacado ? 'Ver mis documentos pendientes →' : 'Acceder'}
                       </Button>

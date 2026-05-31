@@ -192,59 +192,7 @@ function VisorContent() {
       });
       if (!res.ok) throw new Error(`Error al cargar el syllabus (${res.status})`);
       const json = await res.json();
-      
-      const cleanedData = json.data;
-      if (cleanedData && cleanedData.datos_syllabus && Array.isArray(cleanedData.datos_syllabus.tabs)) {
-        const targetLabels = [
-          'TOTAL HORAS DE LA ASIGNATURA',
-          'TOTAL HORAS DE ASIGNATURA',
-          'TOTAL HORAS ASIGNATURA'
-        ];
-        cleanedData.datos_syllabus.tabs = cleanedData.datos_syllabus.tabs.map((tab: any) => {
-          if (!Array.isArray(tab.rows)) return tab;
-          const processedRows: any[] = [];
-          const seenLabels = new Set<string>();
-          tab.rows.forEach((row: any) => {
-            if (!row.cells || row.cells.length === 0) {
-              processedRows.push(row);
-              return;
-            }
-            const labelCell = row.cells.find((c: any) => {
-              const text = (c.content || '').trim().toUpperCase().replace(/:$/, '').trim();
-              return targetLabels.includes(text);
-            });
-            if (labelCell) {
-              const normLabel = (labelCell.content || '').trim().toUpperCase().replace(/:$/, '').trim();
-              if (seenLabels.has(normLabel)) {
-                // Merge value into the existing row
-                const existingRow = processedRows.find(r => 
-                  r.cells.some((c: any) => ((c.content || '').trim().toUpperCase().replace(/:$/, '').trim()) === normLabel)
-                );
-                if (existingRow) {
-                  const newValCell = row.cells.find((c: any, idx: number) => 
-                    idx > 0 && c.content?.trim() !== '' && c.content?.trim() !== ':'
-                  );
-                  if (newValCell && newValCell.content) {
-                    const targetValCell = existingRow.cells.find((c: any, idx: number) => 
-                      idx > 0 && c.content?.trim() !== ':'
-                    );
-                    if (targetValCell && (!targetValCell.content?.trim() || targetValCell.content?.trim() === '0')) {
-                      targetValCell.content = newValCell.content;
-                    }
-                  }
-                }
-                return;
-              } else {
-                seenLabels.add(normLabel);
-              }
-            }
-            processedRows.push(row);
-          });
-          return { ...tab, rows: processedRows };
-        });
-      }
-
-      setData(cleanedData);
+      setData(json.data);
       setTabActivo(0);
     } catch (e: any) {
       setError(e.message);

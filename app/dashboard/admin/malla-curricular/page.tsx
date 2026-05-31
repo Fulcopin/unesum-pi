@@ -419,7 +419,7 @@ export default function MallaCurricularPage() {
                   <p>No hay asignaturas registradas en esta malla</p>
                 </div>
               ) : (
-                <Accordion type="multiple" defaultValue={nivelesOrdenados.slice(0, 2)} className="space-y-6">
+                <Accordion type="multiple" className="space-y-6">
                   {nivelesOrdenados.map((nivelNombre, index) => {
                     const totalHorasNivel = asignaturasPorNivel[nivelNombre].reduce((sum, asig) => sum + calcularTotalHoras(asig), 0);
                     const nivelObj = niveles.find(n => n.nombre === nivelNombre);
@@ -436,22 +436,9 @@ export default function MallaCurricularPage() {
                       <AccordionItem key={nivelNombre} value={nivelNombre} className="bg-white border border-emerald-100 rounded-xl shadow-sm [&[data-state=open]]:shadow-md transition-all">
                         {/* Header del Nivel */}
                         <AccordionTrigger className="bg-gradient-to-r from-emerald-700 to-emerald-600 px-6 py-3 hover:no-underline rounded-t-xl data-[state=closed]:rounded-b-xl border-b border-emerald-800/50 hover:brightness-105 transition-all text-white group">
-                          <div className="flex items-center justify-between w-full pr-4">
-                            <div className="flex items-center gap-4">
-                              <div className="bg-white/20 text-white w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg shadow-inner border border-white/30 backdrop-blur-sm">
-                                {nivelCodigo}
-                              </div>
-                              <div className="text-left text-white">
-                                <div className="text-lg font-bold tracking-wide">{displayNivelNombre}</div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3 group-hover:opacity-90">
-                              <span className="bg-emerald-800/50 border border-emerald-500/30 text-white px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm hidden sm:inline-block">
-                                {asignaturasPorNivel[nivelNombre].length} {asignaturasPorNivel[nivelNombre].length === 1 ? 'asignatura' : 'asignaturas'}
-                              </span>
-                              <span className="bg-emerald-500 border border-emerald-400 text-white px-3 py-1 rounded-full text-xs font-bold shadow-sm">
-                                {totalHorasNivel}h totales
-                              </span>
+                          <div className="flex items-center gap-4">
+                            <div className="text-left text-white">
+                              <div className="text-lg font-bold tracking-wide">{displayNivelNombre}</div>
                             </div>
                           </div>
                         </AccordionTrigger>

@@ -11,8 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion"
-import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Home, Loader2, Lock } from "lucide-react"
+import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Home, Lock } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import * as mammoth from "mammoth"
 import jsPDF from "jspdf"
@@ -37,24 +36,20 @@ interface TableCell {
 
 interface TableRow { id: string; cells: TableCell[]; }
 interface TabData { id: string; title: string; rows: TableRow[]; }
-interface ProgramaAnaliticoData { id: string | number; name: string; description: string; tabs: TabData[]; metadata: { subject?: string; period?: string; level?: string; createdAt: string; updatedAt: string; }; }
-interface SavedProgramaAnaliticoRecord { id: number; nombre: string; periodo: string; materias: string; asignatura_id?: number; datos_tabla: ProgramaAnaliticoData; created_at: string; updated_at: string; }
+interface SyllabusData { id: string | number; name: string; description: string; tabs: TabData[]; metadata: { subject?: string; period?: string; level?: string; createdAt: string; updatedAt: string; }; }
+interface SavedSyllabusRecord { id: number; nombre: string; periodo: string; materias: string; datos_syllabus: SyllabusData; created_at: string; updated_at: string; }
 
-export default function EditorProgramaAnaliticoPage() {
+export default function EditorSyllabusPage() {
   const { token, getToken, user } = useAuth()
   const router = useRouter()
   // --- ESTADOS ---
-  const [programas, setprogramas] = useState<ProgramaAnaliticoData[]>([])
-  const [activeProgramaAnaliticoId, setActiveProgramaAnaliticoId] = useState<string | number | null>(null)
+  const [syllabi, setSyllabi] = useState<SyllabusData[]>([])
+  const [activeSyllabusId, setActiveSyllabusId] = useState<string | number | null>(null)
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
-  const [savedprogramas, setSavedprogramas] = useState<SavedProgramaAnaliticoRecord[]>([])
+  const [savedSyllabi, setSavedSyllabi] = useState<SavedSyllabusRecord[]>([])
   const [periodos, setPeriodos] = useState<any[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState<string>("")
-  const [carreras, setCarreras] = useState<any[]>([])
-  const [asignaturas, setAsignaturas] = useState<any[]>([])
-  const [selectedCarrera, setSelectedCarrera] = useState<string>("")
-  const [selectedAsignatura, setSelectedAsignatura] = useState<string>("")
-  const [showProgramaAnaliticoSelector, setShowProgramaAnaliticoSelector] = useState(false)
+  const [showSyllabusSelector, setShowSyllabusSelector] = useState(false)
   
   const [editingTabId, setEditingTabId] = useState<string | null>(null)
   const [tempTabTitle, setTempTabTitle] = useState("")
@@ -64,55 +59,63 @@ export default function EditorProgramaAnaliticoPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [tempName, setTempName] = useState("")
+  
+  const [selectedCells, setSelectedCells] = useState<string[]>([])
   const [editingCell, setEditingCell] = useState<string | null>(null)
   const [editContent, setEditContent] = useState("")
-  const [selectedCells, setSelectedCells] = useState<string[]>([])
+  const [cellLockState, setCellLockState] = useState<Record<string, boolean>>({})
+  
+  // --- MODO EDICIÓN DE SYLLABUS DE COMISIÓN (para bloquear celdas a docentes) ---
+  const [editingComisionId, setEditingComisionId] = useState<number | null>(null)
+  const [comisionSyllabusList, setComisionSyllabusList] = useState<any[]>([])
+  const [showComisionSelector, setShowComisionSelector] = useState(false)
+  const [isLoadingComision, setIsLoadingComision] = useState(false)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // --- DATOS DERIVADOS ---
-  const activeProgramaAnalitico = programas.find((s) => s.id === activeProgramaAnaliticoId);
-  const activeTab = activeProgramaAnalitico?.tabs.find(t => t.id === activeTabId);
+  const activeSyllabus = syllabi.find((s) => s.id === activeSyllabusId);
+  const activeTab = activeSyllabus?.tabs.find(t => t.id === activeTabId);
   const tableData = activeTab ? activeTab.rows : [];
+  const lockedCellCount = Object.values(cellLockState).filter(Boolean).length;
+
+  const buildCellLockState = (tabs: TabData[] = []) => {
+    const nextState: Record<string, boolean> = {}
+    tabs.forEach((tab) => {
+      (tab.rows || []).forEach((row) => {
+        (row.cells || []).forEach((cell) => {
+          nextState[cell.id] = !!cell.isLocked
+        })
+      })
+    })
+    return nextState
+  }
 
   // --- CARGA INICIAL ---
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [programasData, periodosData, carrerasData, todasAsignaturasData] = await Promise.all([
-          apiRequest("/api/programa-analitico").catch(err => {
-            console.error("Error en /api/programa-analitico:", err);
+        const [syllabiData, periodosData] = await Promise.all([
+          apiRequest("/api/syllabi").catch(err => {
+            console.error("Error en /api/syllabi:", err);
             return { data: [] };
           }),
           apiRequest("/api/periodo").catch(err => {
             console.error("Error en /api/periodo:", err);
             return { data: [] };
-          }),
-          apiRequest("/api/carreras").catch(err => {
-            console.error("Error en /api/carreras:", err);
-            return { data: [] };
-          }),
-          apiRequest("/api/asignaturas").catch(err => {
-            console.error("Error en /api/asignaturas:", err);
-            return { data: [] };
           })
         ]);
         
-        const programasArray = Array.isArray(programasData?.data) ? programasData.data : (Array.isArray(programasData) ? programasData : []);
+        const syllabiArray = Array.isArray(syllabiData?.data) ? syllabiData.data : (Array.isArray(syllabiData) ? syllabiData : []);
         const periodosArray = Array.isArray(periodosData?.data) ? periodosData.data : (Array.isArray(periodosData) ? periodosData : []);
-        const carrerasArray = Array.isArray(carrerasData?.data) ? carrerasData.data : (Array.isArray(carrerasData) ? carrerasData : []);
-        const todasAsignaturasArray = Array.isArray(todasAsignaturasData?.data) ? todasAsignaturasData.data : (Array.isArray(todasAsignaturasData) ? todasAsignaturasData : []);
         
-        setSavedprogramas(programasArray);
+        setSavedSyllabi(syllabiArray);
         setPeriodos(periodosArray);
-        setCarreras(carrerasArray);
-        setAsignaturas(todasAsignaturasArray); // Cargar TODAS las asignaturas al inicio
         
         console.log('✅ Datos cargados:', {
-          programas: programasArray.length,
+          syllabi: syllabiArray.length,
           periodos: periodosArray.length,
-          carreras: carrerasArray.length,
-          asignaturas: todasAsignaturasArray.length
+          periodosData: periodosArray
         });
       } catch (error) { 
         console.error("❌ Error al cargar datos:", error); 
@@ -122,38 +125,41 @@ export default function EditorProgramaAnaliticoPage() {
     fetchData();
   }, []);
   
-  // Cargar asignaturas cuando se selecciona una carrera
   useEffect(() => {
-    const fetchAsignaturas = async () => {
-      if (!selectedCarrera) {
-        setAsignaturas([]);
-        setSelectedAsignatura("");
-        return;
-      }
-      
-      try {
-        const response = await apiRequest(`/api/asignaturas?carrera_id=${selectedCarrera}`);
-        const asignaturasArray = Array.isArray(response?.data) ? response.data : (Array.isArray(response) ? response : []);
-        setAsignaturas(asignaturasArray);
-        console.log('✅ Asignaturas cargadas:', asignaturasArray.length);
-      } catch (error) {
-        console.error("Error al cargar asignaturas:", error);
-        setAsignaturas([]);
-      }
-    };
-    
-    fetchAsignaturas();
-  }, [selectedCarrera]);
-  
-  useEffect(() => {
-    if (activeProgramaAnalitico && activeProgramaAnalitico.tabs.length > 0) {
-      if (!activeProgramaAnalitico.tabs.find(t => t.id === activeTabId)) {
-        setActiveTabId(activeProgramaAnalitico.tabs[0].id);
+    if (activeSyllabus && activeSyllabus.tabs.length > 0) {
+      if (!activeSyllabus.tabs.find(t => t.id === activeTabId)) {
+        setActiveTabId(activeSyllabus.tabs[0].id);
       }
     } else {
       setActiveTabId(null);
     }
-  }, [activeProgramaAnalitico, activeTabId]);
+  }, [activeSyllabus, activeTabId]);
+
+  const handlePeriodChange = (periodNombre: string) => {
+    setSelectedPeriod(periodNombre);
+    if (activeSyllabusId || isListLoading || savedSyllabi.length === 0) return;
+    const syllabiDelPeriodo = savedSyllabi.filter(s => s.periodo === periodNombre);
+    if (syllabiDelPeriodo.length === 0) return;
+    const syllabusToLoad = syllabiDelPeriodo[0];
+    let editorData = syllabusToLoad.datos_syllabus;
+    if (!editorData) return;
+
+    // Clonar para evitar mutación directa en savedSyllabi
+    editorData = JSON.parse(JSON.stringify(editorData));
+    editorData.id = syllabusToLoad.id;
+    if (!editorData.tabs || editorData.tabs.length === 0) {
+      editorData.tabs = (editorData as any).rows
+        ? [{ id: `tab-${Date.now()}`, title: 'General', rows: (editorData as any).rows }]
+        : [{ id: `tab-${Date.now()}`, title: 'General', rows: [] }];
+    }
+    if (!editorData.name) editorData.name = syllabusToLoad.nombre;
+
+    setSyllabi([editorData]);
+    setActiveSyllabusId(editorData.id);
+    setActiveTabId(editorData.tabs[0]?.id || null);
+    setCellLockState(buildCellLockState(editorData.tabs));
+    setEditingComisionId(null);
+  };
 
   // --- API ---
   const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
@@ -173,23 +179,22 @@ export default function EditorProgramaAnaliticoPage() {
   }
 
   const handleSaveToDB = async () => {
-    if (!activeProgramaAnalitico) return alert("No hay un ProgramaAnalitico activo para guardar.")
+    if (!activeSyllabus) return alert("No hay un syllabus activo para guardar.")
     if (!selectedPeriod) return alert("Por favor, seleccione un periodo antes de guardar.")
-    // ✅ El admin NO necesita asignatura - sube programas GENERALES para que la comisión los use
     
     setIsSaving(true)
     try {
       const datosParaGuardar = {
         version: "2.0",
-        name: activeProgramaAnalitico.name || 'ProgramaAnalitico',
-        metadata: activeProgramaAnalitico.metadata,
-        tabs: activeProgramaAnalitico.tabs.map(tab => ({
+        metadata: activeSyllabus.metadata,
+        tabs: activeSyllabus.tabs.map(tab => ({
           id: tab.id,
           title: tab.title,
           rows: tab.rows.map(row => ({
             id: row.id,
             cells: row.cells.map(cell => ({
               ...cell,
+              isLocked: cell.id in cellLockState ? !!cellLockState[cell.id] : !!cell.isLocked,
               styles: {
                 ...(cell.backgroundColor ? { backgroundColor: cell.backgroundColor } : {}),
                 ...(cell.textColor ? { textColor: cell.textColor } : {}),
@@ -202,23 +207,59 @@ export default function EditorProgramaAnaliticoPage() {
       };
 
       const payload = {
-        nombre: activeProgramaAnalitico.name || 'ProgramaAnalitico',
+        nombre: activeSyllabus.name || 'Syllabus',
         periodo: selectedPeriod,
-        materias: activeProgramaAnalitico.name || 'ProgramaAnalitico',
-        datos_tabla: datosParaGuardar,
-        ...(selectedAsignatura && { asignatura_id: parseInt(selectedAsignatura) })
+        materias: activeSyllabus.name || 'Syllabus',
+        datos_syllabus: datosParaGuardar
       }
       
-      const isUpdate = activeProgramaAnalitico.id !== null && activeProgramaAnalitico.id !== undefined && !String(activeProgramaAnalitico.id).startsWith('ProgramaAnalitico-')
-      const endpoint = isUpdate ? `/api/programa-analitico/${activeProgramaAnalitico.id}` : "/api/programa-analitico"
+      const isUpdate = activeSyllabus.id !== null && activeSyllabus.id !== undefined && !String(activeSyllabus.id).startsWith('syllabus-')
+
+      // === GUARDAR EN SYLLABUS DE COMISIÓN (para que los bloqueos lleguen al docente) ===
+      if (editingComisionId) {
+        const result = await apiRequest(`/api/comision-academica/syllabus/${editingComisionId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ datos_syllabus: datosParaGuardar })
+        })
+        const savedRecord = result.data
+        let savedData = savedRecord.datos_syllabus
+        if (typeof savedData === 'string') { try { savedData = JSON.parse(savedData) } catch(e) {} }
+        savedData = savedData || datosParaGuardar
+        savedData.id = `comision-${editingComisionId}`
+        savedData.name = activeSyllabus.name
+        if (savedData.tabs) {
+          savedData.tabs = savedData.tabs.map((t: any) => ({
+            ...t,
+            rows: (t.rows || []).map((r: any) => ({
+              ...r,
+              cells: (r.cells || []).map((c: any) => ({
+                ...c,
+                backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
+                textColor: c.styles?.textColor || c.textColor,
+                textAlign: c.styles?.textAlign || c.textAlign,
+                textOrientation: c.styles?.textOrientation || c.textOrientation,
+                isEditable: true
+              }))
+            }))
+          }))
+        }
+        setCellLockState(buildCellLockState(savedData.tabs || []))
+        setSyllabi((prev) => prev.map((s) => (s.id === activeSyllabusId ? savedData : s)))
+        const savedLockedCount = Object.values(buildCellLockState(savedData.tabs || [])).filter(Boolean).length
+        alert(`✅ Bloqueos guardados en el syllabus de comisión. Celdas bloqueadas: ${savedLockedCount}.`)
+        return
+      }
+
+      // === GUARDAR NORMAL EN TABLA SYLLABI ===
+      const endpoint = isUpdate ? `/api/syllabi/${activeSyllabus.id}` : "/api/syllabi"
       const method = isUpdate ? "PUT" : "POST"
 
       const result = await apiRequest(endpoint, { method, body: JSON.stringify(payload) })
-      const savedRecord = result.data as SavedProgramaAnaliticoRecord;
+      const savedRecord = result.data as SavedSyllabusRecord;
       
-      const savedUIData = savedRecord.datos_tabla;
+      const savedUIData = savedRecord.datos_syllabus;
       savedUIData.id = savedRecord.id;
-      savedUIData.name = savedRecord.nombre || activeProgramaAnalitico.name;
+      savedUIData.name = savedRecord.nombre || activeSyllabus.name;
       
       if (savedUIData.tabs) {
           savedUIData.tabs = savedUIData.tabs.map((t: any) => ({
@@ -237,16 +278,18 @@ export default function EditorProgramaAnaliticoPage() {
           }));
       }
 
-      setprogramas((prev) => prev.map((s) => (s.id === activeProgramaAnaliticoId ? savedUIData : s)))
-      setActiveProgramaAnaliticoId(savedUIData.id)
+            setCellLockState(buildCellLockState(savedUIData.tabs || []))
+
+      setSyllabi((prev) => prev.map((s) => (s.id === activeSyllabusId ? savedUIData : s)))
+      setActiveSyllabusId(savedUIData.id)
       
       if (isUpdate) {
-        setSavedprogramas(prev => prev.map(s => s.id === savedRecord.id ? savedRecord : s));
+        setSavedSyllabi(prev => prev.map(s => s.id === savedRecord.id ? savedRecord : s));
       } else {
-        setSavedprogramas(prev => [savedRecord, ...prev]);
+        setSavedSyllabi(prev => [savedRecord, ...prev]);
       }
       
-      alert("¡ProgramaAnalitico guardado exitosamente!")
+      alert("¡Syllabus guardado exitosamente!")
     } catch (error: any) {
       console.error("Error al guardar:", error)
       alert(`Error al guardar: ${error.message}`)
@@ -255,41 +298,40 @@ export default function EditorProgramaAnaliticoPage() {
     }
   }
 
-  const updateProgramaAnalitico = (id: string | number, updates: Partial<ProgramaAnaliticoData>) => {
-    setprogramas(p => p.map(s => s.id === id ? { ...s, ...updates, metadata: { ...s.metadata, ...(updates.metadata || {}), updatedAt: new Date().toISOString() } } : s))
+  const updateSyllabus = (id: string | number, updates: Partial<SyllabusData>) => {
+    setSyllabi(p => p.map(s => s.id === id ? { ...s, ...updates, metadata: { ...s.metadata, ...(updates.metadata || {}), updatedAt: new Date().toISOString() } } : s))
   }
 
   const handleMetadataChange = (field: 'period' | 'subject' | 'level', value: string) => {
-    if (!activeProgramaAnalitico) return;
-    const updatedMetadata = { ...activeProgramaAnalitico.metadata, [field]: value };
-    updateProgramaAnalitico(activeProgramaAnalitico.id, field === 'subject' ? { metadata: updatedMetadata, name: value } : { metadata: updatedMetadata });
+    if (!activeSyllabus) return;
+    const updatedMetadata = { ...activeSyllabus.metadata, [field]: value };
+    updateSyllabus(activeSyllabus.id, field === 'subject' ? { metadata: updatedMetadata, name: value } : { metadata: updatedMetadata });
   };
 
-  const handleLoadProgramaAnalitico = (ProgramaAnaliticoId: string, sourceList?: SavedProgramaAnaliticoRecord[]) => {
-    console.log("🔍 handleLoadProgramaAnalitico - ID recibido:", ProgramaAnaliticoId);
-    console.log("📚 savedprogramas disponibles:", savedprogramas.length);
+  const handleLoadSyllabus = (syllabusId: string) => {
+    console.log("🔍 handleLoadSyllabus - ID recibido:", syllabusId);
+    console.log("📚 savedSyllabi disponibles:", savedSyllabi.length);
     
-    if (!ProgramaAnaliticoId) {
-      console.error("❌ No se proporcionó ProgramaAnaliticoId");
+    if (!syllabusId) {
+      console.error("❌ No se proporcionó syllabusId");
       return;
     }
     
-    const id = parseInt(ProgramaAnaliticoId, 10);
+    const id = parseInt(syllabusId, 10);
     console.log("🔢 ID parseado:", id);
     
-    // Usar sourceList si se provee (evita race condition con estado async)
-    const list = sourceList ?? savedprogramas;
-    const ProgramaAnaliticoToLoad = list.find(s => Number(s.id) === id);
-    console.log("📖 ProgramaAnalitico encontrado:", ProgramaAnaliticoToLoad ? "SÍ" : "NO");
+    // Comparar convirtiendo ambos a número
+    const syllabusToLoad = savedSyllabi.find(s => Number(s.id) === id);
+    console.log("📖 Syllabus encontrado:", syllabusToLoad ? "SÍ" : "NO");
     
-    if (ProgramaAnaliticoToLoad) {
-      console.log("✅ Cargando ProgramaAnalitico:", ProgramaAnaliticoToLoad.nombre);
-      console.log("📊 Estructura datos_tabla:", JSON.stringify(ProgramaAnaliticoToLoad.datos_tabla, null, 2));
+    if (syllabusToLoad) {
+      console.log("✅ Cargando syllabus:", syllabusToLoad.nombre);
+      console.log("📊 Estructura datos_syllabus:", JSON.stringify(syllabusToLoad.datos_syllabus, null, 2));
       
-      let editorData = ProgramaAnaliticoToLoad.datos_tabla;
+      let editorData = syllabusToLoad.datos_syllabus;
       
       // 🔧 FIX CRÍTICO: Convertir formato de validación a formato de editor
-      if ((editorData as any).tipo === 'ProgramaAnalitico_validado' && (editorData as any).titulos && !editorData.tabs) {
+      if ((editorData as any).tipo === 'syllabus_validado' && (editorData as any).titulos && !editorData.tabs) {
         console.log("🔄 Convirtiendo formato de validación a formato de editor...");
         console.log("   Títulos encontrados:", (editorData as any).titulos.length);
         
@@ -316,17 +358,17 @@ export default function EditorProgramaAnaliticoPage() {
         
         editorData = {
           version: "2.0",
-          name: ProgramaAnaliticoToLoad.nombre,
+          name: syllabusToLoad.nombre,
           metadata: {
             ...editorData.metadata,
-            subject: ProgramaAnaliticoToLoad.nombre,
-            period: ProgramaAnaliticoToLoad.periodo,
+            subject: syllabusToLoad.nombre,
+            period: syllabusToLoad.periodo,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           },
           tabs: [{
             id: `tab-${Date.now()}`,
-            title: "ProgramaAnalitico Importado",
+            title: "Syllabus Importado",
             rows: rows
           }]
         } as any;
@@ -334,7 +376,7 @@ export default function EditorProgramaAnaliticoPage() {
         console.log("✅ Conversión completada - Filas creadas:", rows.length);
       }
       
-      editorData.id = ProgramaAnaliticoToLoad.id;
+      editorData.id = syllabusToLoad.id;
       
       // ✅ VALIDACIÓN Y NORMALIZACIÓN DE LA ESTRUCTURA
       if (!editorData.tabs || editorData.tabs.length === 0) {
@@ -366,7 +408,7 @@ export default function EditorProgramaAnaliticoPage() {
       
       // Asegurar que el nombre esté presente
       if (!editorData.name) {
-        editorData.name = ProgramaAnaliticoToLoad.nombre;
+        editorData.name = syllabusToLoad.nombre;
       }
       
       // Normalizar celdas: extraer estilos y marcar como editables
@@ -385,38 +427,101 @@ export default function EditorProgramaAnaliticoPage() {
         }))
       }));
       
-      setprogramas([editorData]);
-      setActiveProgramaAnaliticoId(editorData.id);
+      setSyllabi([editorData]);
+      setActiveSyllabusId(editorData.id);
       setActiveTabId(editorData.tabs[0]?.id || null);
+      setCellLockState(buildCellLockState(editorData.tabs));
+      setEditingComisionId(null);
       
       // Establecer el periodo seleccionado
-      setSelectedPeriod(ProgramaAnaliticoToLoad.periodo);
-      
-      // 🔥 NUEVO: Establecer asignatura si existe
-      if (ProgramaAnaliticoToLoad.asignatura_id) {
-        setSelectedAsignatura(ProgramaAnaliticoToLoad.asignatura_id.toString());
-        console.log("✅ Asignatura establecida:", ProgramaAnaliticoToLoad.asignatura_id);
-        
-        // Buscar la carrera de esta asignatura para cargar el selector
-        const asignaturaData = asignaturas.find((a: any) => a.id === ProgramaAnaliticoToLoad.asignatura_id);
-        if (asignaturaData?.carrera_id) {
-          setSelectedCarrera(asignaturaData.carrera_id.toString());
-          console.log("✅ Carrera establecida:", asignaturaData.carrera_id);
-        }
-      }
-      
-      console.log("✅ ProgramaAnalitico cargado exitosamente");
+      setSelectedPeriod(syllabusToLoad.periodo);
+      console.log("✅ Syllabus cargado exitosamente");
       console.log("   - ID:", editorData.id);
       console.log("   - Nombre:", editorData.name);
-      console.log("   - Periodo:", ProgramaAnaliticoToLoad.periodo);
-      console.log("   - Asignatura ID:", ProgramaAnaliticoToLoad.asignatura_id);
+      console.log("   - Periodo:", syllabusToLoad.periodo);
       console.log("   - Tabs:", editorData.tabs.length);
       console.log("   - Filas en tab activo:", editorData.tabs[0]?.rows?.length || 0);
     } else {
-      console.error("❌ No se encontró el ProgramaAnalitico con ID:", id);
-      console.log("📋 IDs disponibles:", savedprogramas.map(s => s.id));
+      console.error("❌ No se encontró el syllabus con ID:", id);
+      console.log("📋 IDs disponibles:", savedSyllabi.map(s => s.id));
     }
   };
+
+  // --- CARGAR LISTA DE SYLLABI DE COMISIÓN ---
+  const loadComisionSyllabusList = async () => {
+    setIsLoadingComision(true)
+    try {
+      const data = await apiRequest('/api/comision-academica/syllabus')
+      const list = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : [])
+      setComisionSyllabusList(list)
+      setShowComisionSelector(true)
+    } catch (e: any) {
+      alert(`Error al cargar syllabi de comisión: ${e.message}`)
+    } finally {
+      setIsLoadingComision(false)
+    }
+  }
+
+  // --- CARGAR UN SYLLABUS DE COMISIÓN EN EL EDITOR ---
+  const handleLoadComisionSyllabus = async (record: any) => {
+    setIsLoadingComision(true)
+    try {
+      const response = await apiRequest(`/api/comision-academica/syllabus/${record.id}`)
+      const fullRecord = response?.data || record
+
+      let datos = fullRecord.datos_syllabus
+      if (typeof datos === 'string') { try { datos = JSON.parse(datos) } catch(e) {} }
+      if (!datos) { alert('Este syllabus no tiene datos de editor'); return }
+
+      let tabs = datos.tabs
+      if (!tabs && (datos as any).rows) {
+        tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: (datos as any).rows }]
+      }
+      if (!tabs) tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: [] }]
+
+      // Normalizar celdas (preservar isLocked)
+      tabs = tabs.map((t: any) => ({
+        ...t,
+        rows: (t.rows || []).map((r: any) => ({
+          ...r,
+          cells: (r.cells || []).map((c: any) => ({
+            ...c,
+            backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
+            textColor: c.styles?.textColor || c.textColor,
+            textAlign: c.styles?.textAlign || c.textAlign,
+            textOrientation: c.styles?.textOrientation || c.textOrientation,
+            isEditable: true
+            // isLocked se preserva vía spread de ...c
+          }))
+        }))
+      }))
+
+      const editorData: SyllabusData = {
+        id: `comision-${fullRecord.id}`,
+        name: fullRecord.nombre || fullRecord.nombre_archivo || 'Syllabus Comisión',
+        description: '',
+        tabs,
+        metadata: {
+          subject: fullRecord.nombre || '',
+          period: fullRecord.periodo || '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      }
+
+      setSyllabi([editorData])
+      setActiveSyllabusId(editorData.id)
+      setActiveTabId(tabs[0]?.id || null)
+      setCellLockState(buildCellLockState(tabs))
+      setEditingComisionId(Number(fullRecord.id))
+      setShowComisionSelector(false)
+      if (fullRecord.periodo) setSelectedPeriod(String(fullRecord.periodo))
+    } catch (e: any) {
+      alert(`Error al cargar syllabus de comisión: ${e.message}`)
+    } finally {
+      setIsLoadingComision(false)
+    }
+  }
 
   // --- NUEVA FUNCIÓN: Upload con validación para comisión académica ---
   const handleUploadConValidacion = async (file: File) => {
@@ -435,14 +540,14 @@ export default function EditorProgramaAnaliticoPage() {
       formData.append('file', file);
       formData.append('nombre', file.name.replace(/\.docx?$/i, ''));
       formData.append('periodo', periodoNombre);
-      formData.append('materias', activeProgramaAnalitico?.metadata?.subject || 'Sin especificar');
+      formData.append('materias', activeSyllabus?.metadata?.subject || 'Sin especificar');
 
-      console.log(`📤 Enviando ProgramaAnalitico para validación - Periodo: ${periodoNombre}`);
+      console.log(`📤 Enviando syllabus para validación - Periodo: ${periodoNombre}`);
 
       // Enviar al endpoint de validación
       const currentToken = token || getToken();
       const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-      const response = await fetch(`${API_URL}/programa-analitico/upload-validado`, {
+      const response = await fetch(`${API_URL}/syllabi/upload-validado`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${currentToken}`
@@ -456,23 +561,22 @@ export default function EditorProgramaAnaliticoPage() {
         // ✅ VALIDACIÓN EXITOSA
         const validacion = result.data?.validacion || {};
         alert(
-          `✅ ProgramaAnalitico validado y guardado exitosamente\n\n` +
+          `✅ Syllabus validado y guardado exitosamente\n\n` +
           `Coincidencia: ${validacion.porcentaje_coincidencia || 100}%\n` +
           `Mínimo requerido: 95%\n` +
           `Campos requeridos: ${validacion.total_requeridos || 0}\n` +
           `Campos encontrados: ${validacion.encontrados || 0}`
         );
         
-        // Recargar la lista de programas guardados
+        // Recargar la lista de syllabi guardados
         try {
-          const programasData = await apiRequest("/api/programa-analitico");
-          const programasArray = Array.isArray(programasData?.data) ? programasData.data : [];
-          setSavedprogramas(programasArray);
+          const syllabiData = await apiRequest("/api/syllabi");
+          const syllabiArray = Array.isArray(syllabiData?.data) ? syllabiData.data : [];
+          setSavedSyllabi(syllabiArray);
           
-          // Cargar el ProgramaAnalitico recién guardado
-          // Se pasa programasArray directamente para evitar race condition con el estado async
+          // Cargar el syllabus recién guardado
           if (result.data?.id) {
-            handleLoadProgramaAnalitico(result.data.id.toString(), programasArray);
+            handleLoadSyllabus(result.data.id.toString());
           }
         } catch (err) {
           console.error("Error recargando lista:", err);
@@ -483,7 +587,7 @@ export default function EditorProgramaAnaliticoPage() {
         const faltantes = detalles.faltantes || [];
         const extras = detalles.extras || [];
         
-        let mensaje = `❌ El ProgramaAnalitico NO cumple con la estructura requerida\n\n`;
+        let mensaje = `❌ El syllabus NO cumple con la estructura requerida\n\n`;
         mensaje += `📊 Coincidencia: ${detalles.porcentaje_coincidencia || 0}% (mínimo requerido: 95%)\n`;
         mensaje += `📋 Total requeridos: ${detalles.total_requeridos || 0}\n`;
         mensaje += `✅ Encontrados: ${detalles.encontrados || 0}\n\n`;
@@ -511,14 +615,14 @@ export default function EditorProgramaAnaliticoPage() {
       }
     } catch (error: any) {
       console.error('❌ Error en validación:', error);
-      alert(`❌ Error al validar el ProgramaAnalitico:\n${error.message || 'Error desconocido'}\n\nPor favor, verifique que existe una plantilla de referencia para este periodo.`);
+      alert(`❌ Error al validar el syllabus:\n${error.message || 'Error desconocido'}\n\nPor favor, verifique que existe una plantilla de referencia para este periodo.`);
     } finally {
       setIsLoading(false);
     }
   };
 
   // --- IMPORTACIÓN MAESTRA V8: HEURÍSTICA DE ESTRUCTURA Y VERTICALIDAD ---
-  const handleProgramaAnaliticoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSyllabusUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     if (fileInputRef.current) fileInputRef.current.value = ""; 
@@ -574,7 +678,7 @@ export default function EditorProgramaAnaliticoPage() {
              const rowsRaw = Array.from(element.querySelectorAll("tr"));
              const tableContent = rowsRaw.map(r => r.textContent).join(" ").toUpperCase();
              // Filtro de tablas basura
-             const isJunkTable = (tableContent.includes("UNIVERSIDAD") || tableContent.includes("ProgramaAnalitico")) && rowsRaw.length < 6;
+             const isJunkTable = (tableContent.includes("UNIVERSIDAD") || tableContent.includes("SYLLABUS")) && rowsRaw.length < 6;
 
              if (isJunkTable) return; 
              
@@ -628,7 +732,7 @@ export default function EditorProgramaAnaliticoPage() {
         }
 
         // 2. SI ES TEXTO
-        const isIgnored = text.length < 3 || textUpper.includes("UNIVERSIDAD") || textUpper.includes("ProgramaAnalitico") || tagName === "IMG";
+        const isIgnored = text.length < 3 || textUpper.includes("UNIVERSIDAD") || textUpper.includes("SYLLABUS") || tagName === "IMG";
 
         if (!isIgnored) {
             const startsWithNumber = /^\d/.test(text); 
@@ -675,17 +779,19 @@ export default function EditorProgramaAnaliticoPage() {
         return alert("No se encontraron datos válidos.");
       }
 
-      const newData: ProgramaAnaliticoData = {
-        id: `ProgramaAnalitico-${Date.now()}`,
+      const newData: SyllabusData = {
+        id: `syllabus-${Date.now()}`,
         name: meta.subject || file.name.replace(/\.docx?$/i, ''),
         description: "Importado",
         metadata: { ...meta, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
         tabs: newTabs,
       };
       
-      setprogramas([newData]);
-      setActiveProgramaAnaliticoId(newData.id);
+      setSyllabi([newData]);
+      setActiveSyllabusId(newData.id);
       setActiveTabId(newTabs[0]?.id || null);
+      setCellLockState(buildCellLockState(newTabs));
+      setEditingComisionId(null);
 
     } catch (e) { console.error(e); alert("Error crítico."); } 
     finally { setIsLoading(false); }
@@ -693,9 +799,9 @@ export default function EditorProgramaAnaliticoPage() {
 
   // --- MÉTODOS DE EDICIÓN ---
   const handleUpdateActiveTabRows = (newRows: TableRow[]) => {
-    if (!activeProgramaAnalitico || !activeTabId) return;
-    const updatedTabs = activeProgramaAnalitico.tabs.map(tab => tab.id === activeTabId ? { ...tab, rows: newRows } : tab);
-    updateProgramaAnalitico(activeProgramaAnalitico.id, { tabs: updatedTabs });
+    if (!activeSyllabus || !activeTabId) return;
+    const updatedTabs = activeSyllabus.tabs.map(tab => tab.id === activeTabId ? { ...tab, rows: newRows } : tab);
+    updateSyllabus(activeSyllabus.id, { tabs: updatedTabs });
   };
 
   const startRenamingTab = (tab: TabData) => {
@@ -704,14 +810,14 @@ export default function EditorProgramaAnaliticoPage() {
   }
 
   const saveTabRename = () => {
-    if (!activeProgramaAnalitico || !editingTabId) return;
-    const updatedTabs = activeProgramaAnalitico.tabs.map(tab => tab.id === editingTabId ? { ...tab, title: tempTabTitle || "Sin Título" } : tab);
-    updateProgramaAnalitico(activeProgramaAnalitico.id, { tabs: updatedTabs });
+    if (!activeSyllabus || !editingTabId) return;
+    const updatedTabs = activeSyllabus.tabs.map(tab => tab.id === editingTabId ? { ...tab, title: tempTabTitle || "Sin Título" } : tab);
+    updateSyllabus(activeSyllabus.id, { tabs: updatedTabs });
     setEditingTabId(null);
   }
 
   const addTab = () => {
-    if (!activeProgramaAnalitico) return;
+    if (!activeSyllabus) return;
     const newTab: TabData = {
       id: `tab-${Date.now()}`,
       title: `Nueva Sección`,
@@ -719,17 +825,17 @@ export default function EditorProgramaAnaliticoPage() {
         { id: `r1-${Date.now()}`, cells: [{id: `c11-${Date.now()}`, content: "", isHeader: false, rowSpan:1, colSpan:1, isEditable:true}, {id: `c12-${Date.now()}`, content: "", isHeader: false, rowSpan:1, colSpan:1, isEditable:true}] },
       ]
     };
-    const updatedTabs = [...activeProgramaAnalitico.tabs, newTab];
-    updateProgramaAnalitico(activeProgramaAnalitico.id, { tabs: updatedTabs });
+    const updatedTabs = [...activeSyllabus.tabs, newTab];
+    updateSyllabus(activeSyllabus.id, { tabs: updatedTabs });
     setActiveTabId(newTab.id);
   };
   
   const removeTab = (tabIdToRemove: string) => {
-    if (!activeProgramaAnalitico) return;
-    if (activeProgramaAnalitico.tabs.length <= 1) return alert("Debe quedar al menos una sección.");
+    if (!activeSyllabus) return;
+    if (activeSyllabus.tabs.length <= 1) return alert("Debe quedar al menos una sección.");
     if (!window.confirm("¿Estás seguro de eliminar esta sección?")) return;
-    const updatedTabs = activeProgramaAnalitico.tabs.filter(t => t.id !== tabIdToRemove);
-    updateProgramaAnalitico(activeProgramaAnalitico.id, { tabs: updatedTabs });
+    const updatedTabs = activeSyllabus.tabs.filter(t => t.id !== tabIdToRemove);
+    updateSyllabus(activeSyllabus.id, { tabs: updatedTabs });
     if (activeTabId === tabIdToRemove) setActiveTabId(updatedTabs[0]?.id || null);
   };
 
@@ -792,19 +898,25 @@ export default function EditorProgramaAnaliticoPage() {
   
   const toggleLockCells = () => {
     if (selectedCells.length === 0) return;
-    // Determinar si la mayoría están bloqueadas para hacer toggle inteligente
-    const selected = tableData.flatMap(r => r.cells).filter(c => selectedCells.includes(c.id));
-    const todasBloqueadas = selected.every(c => c.isLocked === true);
+
+    const allLocked = selectedCells.every(id => !!cellLockState[id]);
     const updated = tableData.map(row => ({
       ...row,
-      cells: row.cells.map(cell => {
-        if (!selectedCells.includes(cell.id)) return cell;
-        return { ...cell, isLocked: !todasBloqueadas };
-      })
+      cells: row.cells.map(cell =>
+        selectedCells.includes(cell.id) ? { ...cell, isLocked: !allLocked } : cell
+      )
     }));
+
+    setCellLockState((prev) => {
+      const next = { ...prev };
+      selectedCells.forEach((id) => {
+        next[id] = !allLocked;
+      });
+      return next;
+    });
     handleUpdateActiveTabRows(updated);
   };
-  
+
   const toggleVerticalText = () => {
     if (selectedCells.length === 0) return;
     const updated = tableData.map(row => ({
@@ -845,30 +957,29 @@ export default function EditorProgramaAnaliticoPage() {
     }
   };
 
-  const handlePrintToPdf = async () => {
-    if (!activeProgramaAnalitico) return;
+  const handlePrintToPdf = async () => { 
+    if(!activeSyllabus || !activeTab) return;
+
+    // --- FIRMAS del documento (para sección VISADO al final) ---
+    let firmasData: any = null
+    if (activeSyllabusId) {
+      try {
+        const fr = await Promise.race([
+          apiRequest(`/api/firmas/syllabus/${activeSyllabusId}`),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+        ])
+        if ((fr as any).success) firmasData = (fr as any).data
+      } catch { /* firmas no disponibles o timeout */ }
+    }
 
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const marginL = 8;
-    const marginR = 8;
+    const marginL = 10;
+    const marginR = 10;
     const contentWidth = pageWidth - marginL - marginR;
 
-    // --- FIRMAS del documento (para sección VISADO) ---
-    let firmasData: any = null;
-    const docIdNum = typeof activeProgramaAnaliticoId === 'number' ? activeProgramaAnaliticoId : null;
-    if (docIdNum) {
-      try {
-        const fr = await Promise.race([
-          apiRequest(`/firmas/programa_analitico/${docIdNum}`),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
-        ]);
-        if ((fr as any).success) firmasData = (fr as any).data;
-      } catch { /* no disponible o timeout */ }
-    }
-
-    // --- LOGO UNESUM ---
+    // --- LOGO ---
     try {
       const logoImg = new Image();
       logoImg.crossOrigin = 'anonymous';
@@ -880,266 +991,148 @@ export default function EditorProgramaAnaliticoPage() {
         }),
         new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
       ]);
-      doc.addImage(logoImg, 'PNG', marginL, 3, 11, 11);
-    } catch { /* logo no disponible o timeout */ }
+      doc.addImage(logoImg, 'PNG', marginL, 3, 12, 12);
+    } catch { /* logo no disponible */ }
 
-    // --- ENCABEZADO: rectángulo azul de fondo ---
-    doc.setFillColor(25, 50, 95);
-    doc.rect(marginL, 2, contentWidth, 14, 'F');
-    doc.setFontSize(9);
+    // --- ENCABEZADO ---
+    doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(255, 255, 255);
-    doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 7, { align: 'center' });
+    doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 6, { align: 'center' });
     doc.setFontSize(8);
-    doc.text('PROGRAMA ANALÍTICO DE ASIGNATURA', pageWidth / 2, 12, { align: 'center' });
-
-    // --- NOMBRE DEL PROGRAMA Y PERIODO (banda gris claro) ---
-    const programaTitle = activeProgramaAnalitico.name || '';
-    const periodoName = periodos.find((p: any) => String(p.id) === selectedPeriod || p.nombre === (activeProgramaAnalitico as any).periodo)?.nombre
-      || (activeProgramaAnalitico as any).periodo || '';
-    doc.setFillColor(240, 244, 250);
-    doc.rect(marginL, 16, contentWidth, 7, 'F');
+    doc.text('SYLLABUS DE ASIGNATURA', pageWidth / 2, 11, { align: 'center' });
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(25, 50, 95);
-    const headerLine = [programaTitle, periodoName ? `Periodo: ${periodoName}` : ''].filter(Boolean).join('   |   ');
-    if (headerLine) doc.text(headerLine, pageWidth / 2, 20.5, { align: 'center' });
+    doc.text(`${activeSyllabus.name} — ${activeTab.title}`, pageWidth / 2, 15, { align: 'center' });
 
-    let currentY = 25;
+    let currentY = 20;
 
-    // --- CONTENIDO POR CADA PESTAÑA ---
-    for (const tab of activeProgramaAnalitico.tabs) {
-      if (!tab.rows || tab.rows.length === 0) continue;
+    const body = activeTab.rows.map(r => r.cells.map(c => ({ content: c.content, rowSpan: c.rowSpan, colSpan: c.colSpan, _raw: c })));
+    autoTable(doc, { body: body as any, startY: currentY, theme: 'grid', margin: { left: marginL, right: marginR }, didParseCell: d => { 
+       const c=(d.cell.raw as any)._raw as TableCell;
+       if(c){ if(c.isHeader){d.cell.styles.fontStyle='bold';d.cell.styles.fillColor='#F3F4F6'} if(c.backgroundColor)d.cell.styles.fillColor=c.backgroundColor; }
+    } });
 
-      if (currentY + 15 > pageHeight - 8) {
-        doc.addPage();
-        currentY = 8;
-      }
+    currentY = (doc as any).lastAutoTable?.finalY || currentY + 10;
 
-      // Título de sección: barra coloreada
-      const tabTitleH = 5;
-      doc.setFillColor(59, 100, 160);
-      doc.rect(marginL, currentY, contentWidth, tabTitleH, 'F');
-      doc.setFontSize(6.5);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(255, 255, 255);
-      doc.text(tab.title.toUpperCase(), marginL + 2, currentY + 3.5);
-      currentY += tabTitleH + 0.5;
-
-      let maxCols = 0;
-      for (const row of tab.rows) {
-        const vis = row.cells.filter((c: any) => c.rowSpan > 0 && c.colSpan > 0);
-        const logCols = vis.reduce((sum: number, c: any) => sum + (c.colSpan || 1), 0);
-        if (logCols > maxCols) maxCols = logCols;
-      }
-      if (maxCols === 0) continue;
-
-      // Detectar columna PERIODO para darle ancho fijo y centrado
-      let periodoColStart = -1;
-      let periodoColSpan = 1;
-      outerBlock: for (const row of tab.rows) {
-        let logCol = 0;
-        for (const cell of row.cells.filter((c: any) => c.rowSpan > 0 && c.colSpan > 0)) {
-          if ((cell.content || '').toUpperCase().includes('PERIODO')) {
-            periodoColStart = logCol;
-            periodoColSpan = cell.colSpan || 1;
-            break outerBlock;
-          }
-          logCol += cell.colSpan || 1;
-        }
-      }
-
-      const colStyles: Record<number, any> = {};
-      if (periodoColStart >= 0 && maxCols > 1) {
-        const periodoW = Math.round(contentWidth * 0.22);
-        const restCols = maxCols - periodoColSpan;
-        const restW = restCols > 0 ? Math.round((contentWidth - periodoW) / restCols) : contentWidth;
-        for (let i = 0; i < maxCols; i++) {
-          if (i >= periodoColStart && i < periodoColStart + periodoColSpan) {
-            colStyles[i] = { cellWidth: periodoW / periodoColSpan, halign: 'center' };
-          } else {
-            colStyles[i] = { cellWidth: restW };
-          }
-        }
-      }
-
-      // rowSpan siempre 1 para evitar el warning "row -1" de jspdf-autotable
-      const body: any[][] = [];
-
-      for (const row of tab.rows) {
-        const pdfRow: any[] = [];
-        let currentLogCol = 0;
-
-        for (const cell of row.cells) {
-          if (currentLogCol >= maxCols) break;
-          const isGhost = (cell.rowSpan ?? 1) <= 0 || (cell.colSpan ?? 1) <= 0;
-
-          if (isGhost) {
-            pdfRow.push({
-              content: '',
-              rowSpan: 1,
-              colSpan: 1,
-              styles: {
-                fillColor: [255, 255, 255],
-                textColor: [30, 30, 30],
-                fontSize: 6,
-                cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
-              }
-            });
-            currentLogCol++;
-          } else {
-            let cellSpan = cell.colSpan || 1;
-            if (currentLogCol + cellSpan > maxCols) cellSpan = Math.max(1, maxCols - currentLogCol);
-
-            const isPeriodoCell = periodoColStart >= 0 && currentLogCol >= periodoColStart && currentLogCol < periodoColStart + periodoColSpan;
-
-            pdfRow.push({
-              content: (cell.content || '').replace(/\r\n/g, '\n'),
-              rowSpan: 1,
-              colSpan: cellSpan,
-              styles: {
-                fontStyle: cell.isHeader ? 'bold' as const : 'normal' as const,
-                fillColor: cell.isHeader ? [220, 229, 242] : (cell.backgroundColor || [255, 255, 255]),
-                textColor: cell.isHeader ? [25, 50, 95] : [30, 30, 30],
-                fontSize: cell.isHeader ? 6.5 : 6,
-                cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
-                halign: (cell.isHeader || isPeriodoCell) ? 'center' as const : 'left' as const,
-                valign: 'top' as const,
-                overflow: 'linebreak' as const,
-              }
-            });
-            currentLogCol += cellSpan;
-          }
-        }
-
-        if (pdfRow.length > 0) body.push(pdfRow);
-      }
-
-      if (body.length > 0) {
-        autoTable(doc, {
-          body: body as any,
-          startY: currentY,
-          theme: 'grid',
-          styles: {
-            fontSize: 6,
-            cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
-            lineColor: [180, 190, 210],
-            lineWidth: 0.12,
-            overflow: 'linebreak',
-            halign: 'left',
-            valign: 'top',
-            textColor: [30, 30, 30],
-            minCellHeight: 3,
-          },
-          margin: { left: marginL, right: marginR, top: 8 },
-        });
-
-        const finalY = (doc as any).lastAutoTable?.finalY ?? (doc as any).previousAutoTable?.finalY ?? currentY + 8;
-        currentY = finalY + 2;
-      }
-
-      // Ceder el hilo al navegador entre pestañas para no congelar la UI
-      await new Promise<void>(r => setTimeout(r, 0));
-    }
-
-    // ─── SECCIÓN VISADO ───────────────────────────────────────────────
-    const VISADO_ETAPAS = [
+    // ─── SECCIÓN VISADO ────────────────────────────────────────────────────
+    const VISADO_ETAPAS_ADM = [
       { etapa: 'decano',             label: 'DECANO/A DE FACULTAD' },
       { etapa: 'director_academico', label: 'DIRECTOR/A ACADÉMICO/A' },
       { etapa: 'coordinador',        label: 'COORDINADOR/A DE CARRERA' },
       { etapa: 'docente',            label: 'DOCENTE' },
-    ];
-    const VTITLE_H = 5, VHEADER_H = 7, VSIGN_H = 36;
-    const VTOTAL = VTITLE_H + VHEADER_H + VSIGN_H + 3;
-    if (currentY + VTOTAL > pageHeight - 5) { doc.addPage(); currentY = 8; }
-    currentY += 3;
+    ]
+    const VTITLE_H = 5, VHEADER_H = 7, VSIGN_H = 36
+    const VTOTAL = VTITLE_H + VHEADER_H + VSIGN_H + 3
 
-    doc.setFillColor(25, 50, 95);
-    doc.rect(marginL, currentY, contentWidth, VTITLE_H, 'F');
-    doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
-    doc.text('VISADO', marginL + 4, currentY + 3.5);
-    currentY += VTITLE_H;
+    if (currentY + VTOTAL > pageHeight - 5) { doc.addPage(); currentY = 8 }
+    currentY += 3
 
-    const colW = contentWidth / 4;
-    doc.setFillColor(220, 229, 242);
-    doc.rect(marginL, currentY, contentWidth, VHEADER_H, 'F');
-    doc.setDrawColor(180, 190, 210); doc.setLineWidth(0.12);
-    doc.rect(marginL, currentY, contentWidth, VHEADER_H);
-    VISADO_ETAPAS.forEach((cfg, i) => {
-      const x = marginL + i * colW;
-      if (i > 0) doc.line(x, currentY, x, currentY + VHEADER_H);
-      doc.setFontSize(5.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(25, 50, 95);
-      doc.text(doc.splitTextToSize(cfg.label, colW - 3), x + colW / 2, currentY + 4, { align: 'center' });
-    });
-    currentY += VHEADER_H;
-    doc.setDrawColor(180, 190, 210); doc.setLineWidth(0.12);
-    doc.rect(marginL, currentY, contentWidth, VSIGN_H);
-    VISADO_ETAPAS.forEach((cfg, i) => {
-      const x = marginL + i * colW;
-      if (i > 0) doc.line(x, currentY, x, currentY + VSIGN_H);
-      const eInfo = firmasData?.etapas?.find((e: any) => e.etapa === cfg.etapa);
-      if (eInfo?.firmado && eInfo.firma) {
-        doc.setFontSize(6); doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 30);
-        doc.text(doc.splitTextToSize(eInfo.firma.usuario_nombre || '', colW - 4), x + colW / 2, currentY + 6, { align: 'center' });
-        if (eInfo.firma.qr_data_url) { try { doc.addImage(eInfo.firma.qr_data_url, 'PNG', x + (colW - 16) / 2, currentY + 10, 16, 16); } catch {} }
-        doc.setFontSize(5.5); doc.setTextColor(80, 80, 80);
-        doc.text(`Fecha: ${new Date(eInfo.firma.firmado_at).toLocaleDateString('es-EC')}`, x + colW / 2, currentY + VSIGN_H - 3, { align: 'center' });
+    doc.setFillColor(25, 50, 95)
+    doc.rect(marginL, currentY, contentWidth, VTITLE_H, 'F')
+    doc.setFontSize(7)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(255, 255, 255)
+    doc.text('VISADO', marginL + 4, currentY + 3.5)
+    currentY += VTITLE_H
+
+    const vColW = contentWidth / 4
+
+    doc.setFillColor(220, 229, 242)
+    doc.rect(marginL, currentY, contentWidth, VHEADER_H, 'F')
+    doc.setDrawColor(180, 190, 210)
+    doc.setLineWidth(0.12)
+    doc.rect(marginL, currentY, contentWidth, VHEADER_H)
+    VISADO_ETAPAS_ADM.forEach((cfg, i) => {
+      const x = marginL + i * vColW
+      if (i > 0) doc.line(x, currentY, x, currentY + VHEADER_H)
+      doc.setFontSize(5.5)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(25, 50, 95)
+      const lns = doc.splitTextToSize(cfg.label, vColW - 3)
+      doc.text(lns, x + vColW / 2, currentY + 4, { align: 'center' })
+    })
+    currentY += VHEADER_H
+
+    doc.setDrawColor(180, 190, 210)
+    doc.setLineWidth(0.12)
+    doc.rect(marginL, currentY, contentWidth, VSIGN_H)
+    VISADO_ETAPAS_ADM.forEach((cfg, i) => {
+      const x = marginL + i * vColW
+      if (i > 0) doc.line(x, currentY, x, currentY + VSIGN_H)
+      const etapaInfo = firmasData?.etapas?.find((e: any) => e.etapa === cfg.etapa)
+      if (etapaInfo?.firmado && etapaInfo.firma) {
+        doc.setFontSize(6)
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(30, 30, 30)
+        const lns = doc.splitTextToSize(etapaInfo.firma.usuario_nombre || '', vColW - 4)
+        doc.text(lns, x + vColW / 2, currentY + 6, { align: 'center' })
+        if (etapaInfo.firma.qr_data_url) {
+          try {
+            const qrSz = 16
+            doc.addImage(etapaInfo.firma.qr_data_url, 'PNG', x + (vColW - qrSz) / 2, currentY + 10, qrSz, qrSz)
+          } catch {}
+        }
+        const fecha = `Fecha: ${new Date(etapaInfo.firma.firmado_at).toLocaleDateString('es-EC')}`
+        doc.setFontSize(5.5)
+        doc.setTextColor(80, 80, 80)
+        doc.text(fecha, x + vColW / 2, currentY + VSIGN_H - 3, { align: 'center' })
       } else {
-        doc.setFontSize(6); doc.setFont('helvetica', 'italic'); doc.setTextColor(150, 150, 150);
-        doc.text('Pendiente de firma', x + colW / 2, currentY + VSIGN_H / 2 + 3, { align: 'center' });
+        doc.setFontSize(6)
+        doc.setFont('helvetica', 'italic')
+        doc.setTextColor(150, 150, 150)
+        doc.text('Pendiente de firma', x + vColW / 2, currentY + VSIGN_H / 2 + 3, { align: 'center' })
       }
-    });
+    })
 
-    const slug = programaTitle.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').substring(0, 40) || 'Programa_Analitico';
-    doc.save(`PA_${slug}.pdf`);
+    doc.save(`${activeSyllabus.name}_${activeTab.title}.pdf`);
   }
 
   // --- FUNCIONES ADICIONALES ---
-  const handleDuplicateProgramaAnalitico = async (ProgramaAnaliticoId: number) => {
-    const ProgramaAnaliticoToClone = savedprogramas.find(s => s.id === ProgramaAnaliticoId);
-    if (!ProgramaAnaliticoToClone) return;
+  const handleDuplicateSyllabus = async (syllabusId: number) => {
+    const syllabusToClone = savedSyllabi.find(s => s.id === syllabusId);
+    if (!syllabusToClone) return;
     
     try {
-      const clonedData = JSON.parse(JSON.stringify(ProgramaAnaliticoToClone.datos_tabla));
-      clonedData.id = `ProgramaAnalitico-${Date.now()}`;
-      clonedData.name = `${ProgramaAnaliticoToClone.nombre} (Copia)`;
+      const clonedData = JSON.parse(JSON.stringify(syllabusToClone.datos_syllabus));
+      clonedData.id = `syllabus-${Date.now()}`;
+      clonedData.name = `${syllabusToClone.nombre} (Copia)`;
       clonedData.metadata.createdAt = new Date().toISOString();
       clonedData.metadata.updatedAt = new Date().toISOString();
       
       // Guardar automáticamente en el backend
       const payload = {
         nombre: clonedData.name,
-        periodo: ProgramaAnaliticoToClone.periodo,
-        materias: ProgramaAnaliticoToClone.materias,
-        datos_tabla: clonedData
+        periodo: syllabusToClone.periodo,
+        materias: syllabusToClone.materias,
+        datos_syllabus: clonedData
       };
       
-      const result = await apiRequest('/api/programa-analitico', { method: 'POST', body: JSON.stringify(payload) });
+      const result = await apiRequest('/api/syllabi', { method: 'POST', body: JSON.stringify(payload) });
       
-      // Recargar la lista de programas
-      const programasData = await apiRequest("/api/programa-analitico").catch(() => ({ data: [] }));
-      const programasArray = Array.isArray(programasData?.data) ? programasData.data : [];
-      setSavedprogramas(programasArray);
+      // Recargar la lista de syllabi
+      const syllabiData = await apiRequest("/api/syllabi").catch(() => ({ data: [] }));
+      const syllabiArray = Array.isArray(syllabiData?.data) ? syllabiData.data : [];
+      setSavedSyllabi(syllabiArray);
       
-      alert("ProgramaAnalitico duplicado exitosamente");
+      alert("Syllabus duplicado exitosamente");
     } catch (error: any) {
       alert(`Error al duplicar: ${error.message}`);
     }
   };
 
-  const handleDeleteProgramaAnalitico = async (ProgramaAnaliticoId: number) => {
-    if (!window.confirm("¿Está seguro de eliminar este ProgramaAnalitico? Esta acción no se puede deshacer.")) return;
+  const handleDeleteSyllabus = async (syllabusId: number) => {
+    if (!window.confirm("¿Está seguro de eliminar este syllabus? Esta acción no se puede deshacer.")) return;
     
     setIsLoading(true);
     try {
-      await apiRequest(`/api/programa-analitico/${ProgramaAnaliticoId}`, { method: 'DELETE' });
+      await apiRequest(`/api/syllabi/${syllabusId}`, { method: 'DELETE' });
       
-      // Recargar la lista de programas
-      const programasData = await apiRequest("/api/programa-analitico").catch(() => ({ data: [] }));
-      const programasArray = Array.isArray(programasData?.data) ? programasData.data : [];
-      setSavedprogramas(programasArray);
+      // Recargar la lista de syllabi
+      const syllabiData = await apiRequest("/api/syllabi").catch(() => ({ data: [] }));
+      const syllabiArray = Array.isArray(syllabiData?.data) ? syllabiData.data : [];
+      setSavedSyllabi(syllabiArray);
       
-      alert("ProgramaAnalitico eliminado exitosamente");
+      alert("Syllabus eliminado exitosamente");
     } catch (error: any) {
       alert(`Error al eliminar: ${error.message}`);
     } finally {
@@ -1147,20 +1140,21 @@ export default function EditorProgramaAnaliticoPage() {
     }
   };
 
-  const handleEditProgramaAnalitico = (ProgramaAnaliticoId: number) => {
-    console.log("Editando ProgramaAnalitico ID:", ProgramaAnaliticoId);
-    handleLoadProgramaAnalitico(ProgramaAnaliticoId.toString());
-    setShowProgramaAnaliticoSelector(false);
+  const handleEditSyllabus = (syllabusId: number) => {
+    console.log("Editando syllabus ID:", syllabusId);
+    handleLoadSyllabus(syllabusId.toString());
+    setShowSyllabusSelector(false);
   };
 
-  const handleNewProgramaAnalitico = () => {
-    setShowProgramaAnaliticoSelector(true);
+  const handleNewSyllabus = () => {
+    setCellLockState({});
+    setEditingComisionId(null);
+    setShowSyllabusSelector(true);
   };
 
-  const programasAdmin = savedprogramas.filter(s => !s.asignatura_id);
-  const programasFiltered = selectedPeriod 
-    ? programasAdmin.filter(s => s.periodo === selectedPeriod)
-    : programasAdmin;
+  const syllabiFiltered = selectedPeriod 
+    ? savedSyllabi.filter(s => s.periodo === selectedPeriod)
+    : savedSyllabi;
   
   return (
     <ProtectedRoute allowedRoles={["administrador", "comision_academica", "profesor"]}>
@@ -1168,42 +1162,45 @@ export default function EditorProgramaAnaliticoPage() {
         <MainHeader />
         <main className="max-w-7xl mx-auto px-6 py-8">
           
-          {!activeProgramaAnalitico ? (
+          {!activeSyllabus ? (
             <>
               {/* Pantalla Inicial */}
               <Card className="mb-6 border-t-4 border-t-emerald-600">
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between text-emerald-800">
-                    <span>Editor de Programa Analítico</span>
+                    <span>Editor de Syllabus</span>
                     <div className="flex gap-2">
-                      <Button onClick={() => setShowProgramaAnaliticoSelector(true)} className="bg-emerald-600 hover:bg-emerald-700">
+                      <Button onClick={handleNewSyllabus} className="bg-emerald-600 hover:bg-emerald-700">
                         <Plus className="h-4 w-4 mr-2" /> Nuevo
                       </Button>
-                      <Button onClick={handleSaveToDB} disabled={!activeProgramaAnalitico || isSaving} className="bg-blue-600 hover:bg-blue-700">
-                        {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-                        Guardar
+                      <Button onClick={loadComisionSyllabusList} disabled={isLoadingComision} className="bg-amber-600 hover:bg-amber-700">
+                        <Lock className="h-4 w-4 mr-2" /> {isLoadingComision ? "Cargando..." : "Bloquear Syllabus de Docentes"}
                       </Button>
-                      <Button onClick={handlePrintToPdf} disabled={!activeProgramaAnalitico} variant="outline">
+                      <Button onClick={handleSaveToDB} disabled={!activeSyllabus} className="bg-blue-600 hover:bg-blue-700">
+                        <Save className="h-4 w-4 mr-2" /> Guardar
+                      </Button>
+                      <Button onClick={handlePrintToPdf} disabled={!activeSyllabus} variant="outline">
                         <Printer className="h-4 w-4 mr-2" /> Imprimir
                       </Button>
                       <Button
-                        type="button"
-                        onClick={() => router.push('/dashboard')}
-                        variant="outline"
-                        className="border-gray-400 text-gray-700 hover:bg-gray-50 px-6"
-                        disabled={isSaving}
-                      >
-                        <Home className="h-4 w-4 mr-2" />
-                        MENÚ PRINCIPAL
-                      </Button>
+                      type="button"
+                      onClick={() => router.push('/dashboard/admin')}
+                      variant="outline"
+                      className="border-gray-400 text-gray-700 hover:bg-gray-50 px-6"
+                      disabled={isSaving}
+                    >
+                      <Home className="h-4 w-4 mr-2" />
+                      MENÚ PRINCIPAL
+                    </Button>
                     </div>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <div className="grid grid-cols-1 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                   
                     <div className="space-y-2">
                       <Label>Periodo</Label>
-                      <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                      <Select value={selectedPeriod} onValueChange={handlePeriodChange}>
                         <SelectTrigger>
                           <SelectValue placeholder="Seleccione el periodo" />
                         </SelectTrigger>
@@ -1220,105 +1217,44 @@ export default function EditorProgramaAnaliticoPage() {
                 </CardContent>
               </Card>
 
-              {/* Modal Selector de ProgramaAnalitico */}
-              {showProgramaAnaliticoSelector && (
+              {/* Modal Selector de Syllabus */}
+              {showSyllabusSelector && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                   <Card className="w-full max-w-3xl max-h-[80vh] overflow-y-auto">
                     <CardHeader>
                       <CardTitle className="flex items-center justify-between">
-                        <span>Seleccionar ProgramaAnalitico</span>
-                        <Button variant="ghost" size="icon" onClick={() => setShowProgramaAnaliticoSelector(false)}>
+                        <span>Seleccionar Syllabus</span>
+                        <Button variant="ghost" size="icon" onClick={() => setShowSyllabusSelector(false)}>
                           <X className="h-5 w-5" />
                         </Button>
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      {user?.rol === 'comision_academica' ? (
-                        <div className="p-3 bg-emerald-50 border border-emerald-100 rounded">
-                          <p className="text-sm text-emerald-800 mb-2">Seleccione una plantilla subida por el administrador para el periodo seleccionado.</p>
-                          <p className="text-xs text-gray-500">Si no aparece ninguna plantilla, verifique que el administrador haya subido programas para ese periodo.</p>
-                        </div>
-                      ) : (
-                        <>
-                          <Button onClick={() => fileInputRef.current?.click()} className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={isLoading}>
-                            {isLoading ? "Procesando..." : <><Upload className="h-4 w-4 mr-2" /> Subir Nuevo Word (.docx)</>}
-                          </Button>
-                          <input ref={fileInputRef} type="file" accept=".docx" onChange={(e) => { handleProgramaAnaliticoUpload(e); setShowProgramaAnaliticoSelector(false); }} className="hidden" />
-                        </>
-                      )}
-
+                      <Button onClick={() => fileInputRef.current?.click()} className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={isLoading}>
+                        {isLoading ? "Procesando..." : <><Upload className="h-4 w-4 mr-2" /> Subir Nuevo Word (.docx)</>}
+                      </Button>
+                      <input ref={fileInputRef} type="file" accept=".docx" onChange={(e) => { handleSyllabusUpload(e); setShowSyllabusSelector(false); }} className="hidden" />
+                      
                       <div className="border-t pt-4">
                         <h3 className="font-semibold mb-3">O seleccione uno existente:</h3>
                         {isListLoading ? (
                           <p className="text-center py-4">Cargando...</p>
-                        ) : programasFiltered.length > 0 ? (() => {
-                          const grouped = programasFiltered.reduce((acc, p) => {
-                            let level = "Sin Nivel";
-                            let dt = p.datos_tabla as any;
-                            if (typeof dt === "string") { try { dt = JSON.parse(dt); } catch {} }
-                            if (dt?.metadata?.level) level = dt.metadata.level;
-                            if (!acc[level]) acc[level] = [];
-                            acc[level].push(p);
-                            return acc;
-                          }, {} as Record<string, any[]>);
-                          
-                          return (
-                            <div className="space-y-4">
-                              <Accordion type="multiple" className="w-full space-y-4 max-h-96 overflow-y-auto">
-                                {Object.entries(grouped)
-                                  .filter(([nivel]) => nivel.toLowerCase() !== "sin nivel")
-                                  .map(([nivel, programasList]) => (
-                                    <AccordionItem value={nivel} key={nivel} className="border border-white/50 rounded-xl bg-white/60 backdrop-blur-md overflow-hidden shadow-sm">
-                                      <AccordionTrigger className="bg-emerald-50/40 hover:bg-emerald-100/50 px-4 py-3 hover:no-underline transition-all font-semibold text-emerald-900">
-                                        Nivel: {nivel} ({programasList.length})
-                                      </AccordionTrigger>
-                                      <AccordionContent className="p-2 space-y-2">
-                                        {programasList.map((s: any) => (
-                                          <div key={s.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-emerald-50 transition-colors">
-                                            <div className="flex-1">
-                                              <p className="font-medium text-emerald-900">{s.nombre}</p>
-                                              <p className="text-sm text-emerald-700">{s.periodo} - {s.materias}</p>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                              <Button onClick={() => { handleLoadProgramaAnalitico(s.id.toString()); setShowProgramaAnaliticoSelector(false); }} className="bg-emerald-600 hover:bg-emerald-700">
-                                                Seleccionar
-                                              </Button>
-                                              <Button variant="outline" size="sm" onClick={() => handleDeletePrograma(s.id)} className="text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50">
-                                                <Trash2 className="h-4 w-4" />
-                                              </Button>
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </AccordionContent>
-                                    </AccordionItem>
-                                  ))}
-                              </Accordion>
-
-                              {grouped["Sin Nivel"] && grouped["Sin Nivel"].length > 0 && (
-                                <div className="space-y-2 pt-4 border-t border-dashed border-gray-200 max-h-96 overflow-y-auto">
-                                  <h4 className="text-xs font-semibold text-emerald-700 bg-emerald-50/50 px-3 py-1 rounded inline-block mb-2">Programas sin nivel asignado:</h4>
-                                  {grouped["Sin Nivel"].map((s: any) => (
-                                    <div key={s.id} className="flex items-center justify-between p-3 border border-emerald-100 rounded-lg hover:bg-emerald-50 transition-colors bg-white/90 shadow-sm">
-                                      <div className="flex-1">
-                                        <p className="font-medium text-emerald-900">{s.nombre}</p>
-                                        <p className="text-sm text-emerald-700">{s.periodo} - {s.materias}</p>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <Button onClick={() => { handleLoadProgramaAnalitico(s.id.toString()); setShowProgramaAnaliticoSelector(false); }} className="bg-emerald-600 hover:bg-emerald-700">
-                                          Seleccionar
-                                        </Button>
-                                        <Button variant="outline" size="sm" onClick={() => handleDeletePrograma(s.id)} className="text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50">
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  ))}
+                        ) : syllabiFiltered.length > 0 ? (
+                          <div className="space-y-2 max-h-96 overflow-y-auto">
+                            {syllabiFiltered.map(s => (
+                              <div key={s.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
+                                <div className="flex-1">
+                                  <p className="font-medium">{s.nombre}</p>
+                                  <p className="text-sm text-gray-500">{s.periodo} - {s.materias}</p>
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })() : (
-                          <p className="text-center text-gray-500 py-4">No hay ProgramaAnalitico disponibles</p>
+                                <Button onClick={() => { handleLoadSyllabus(s.id.toString()); setShowSyllabusSelector(false); }} className="bg-emerald-600 hover:bg-emerald-700">
+                                  Seleccionar
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-center text-gray-500 py-4">No hay syllabus disponibles</p>
                         )}
                       </div>
                     </CardContent>
@@ -1326,43 +1262,84 @@ export default function EditorProgramaAnaliticoPage() {
                 </div>
               )}
 
-              {/* Tabla de ProgramaAnalitico Creados */}
+              {/* Modal Selector de Syllabus de COMISIÓN (para bloquear celdas a docentes) */}
+              {showComisionSelector && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <Card className="w-full max-w-3xl max-h-[80vh] overflow-y-auto">
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Lock className="h-5 w-5 text-amber-600" />
+                          <span>Seleccionar Syllabus de Comisión para Bloquear</span>
+                        </div>
+                        <Button variant="ghost" size="icon" onClick={() => setShowComisionSelector(false)}>
+                          <X className="h-5 w-5" />
+                        </Button>
+                      </CardTitle>
+                      <p className="text-sm text-amber-700 bg-amber-50 rounded p-2 mt-2">
+                        Selecciona el syllabus que verán los docentes. Podrás marcar celdas como bloqueadas para que los docentes no puedan editarlas.
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      {comisionSyllabusList.length === 0 ? (
+                        <p className="text-center text-gray-500 py-8">No hay syllabi de comisión disponibles</p>
+                      ) : (
+                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                          {comisionSyllabusList.map((s: any) => (
+                            <div key={s.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-amber-50">
+                              <div className="flex-1">
+                                <p className="font-medium">{s.nombre || s.nombre_archivo || 'Sin nombre'}</p>
+                                <p className="text-sm text-gray-500">Periodo: {s.periodo} | Asignatura ID: {s.asignatura_id || 'N/A'}</p>
+                              </div>
+                              <Button onClick={() => handleLoadComisionSyllabus(s)} className="bg-amber-600 hover:bg-amber-700">
+                                <Lock className="h-4 w-4 mr-1" /> Abrir y Bloquear
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              {/* Tabla de Syllabus Creados */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Programa Analitico Creados</CardTitle>
+                  <CardTitle>Syllabus Creados</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {isListLoading ? (
                     <p className="text-center py-8">Cargando...</p>
-                  ) : programasFiltered.length > 0 ? (
-                    <div className="overflow-x-auto border border-white/50 rounded-xl bg-white/60 backdrop-blur-md overflow-hidden shadow-sm">
-                      <table className="w-full border-collapse">
-                        <thead className="bg-emerald-50/50">
+                  ) : syllabiFiltered.length > 0 ? (
+                    <div className="overflow-x-auto">
+                       <table className="w-full">
+                        <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-emerald-950">Nombre</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold text-emerald-950">Periodo</th>
-                            <th className="px-4 py-3 text-center text-sm font-semibold text-emerald-950">Acciones</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold">Nombre</th>
+                            <th className="px-4 py-3 text-left text-sm font-semibold">Periodo</th>
+                            <th className="px-4 py-3 text-center text-sm font-semibold">Acciones</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {programasFiltered.map((s: any) => (
-                            <tr key={s.id} className="hover:bg-emerald-50/20 transition-all duration-150">
+                        <tbody className="divide-y">
+                          {syllabiFiltered.map(s => (
+                            <tr key={s.id} className="hover:bg-gray-50">
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
                                   <FileText className="h-4 w-4 text-emerald-600" />
-                                  <span className="font-semibold text-emerald-900">{s.nombre}</span>
+                                  <span className="font-medium">{s.nombre}</span>
                                 </div>
                               </td>
-                              <td className="px-4 py-3 text-gray-700 font-medium">{s.periodo}</td>
+                              <td className="px-4 py-3">{s.periodo}</td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center justify-center gap-2">
-                                  <Button variant="outline" size="sm" onClick={() => handleEditProgramaAnalitico(s.id)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-200">
+                                  <Button variant="outline" size="sm" onClick={() => handleEditSyllabus(s.id)} className="text-blue-600 hover:text-blue-700">
                                     <Pencil className="h-4 w-4 mr-1" /> Modificar
                                   </Button>
-                                  <Button variant="outline" size="sm" onClick={() => handleDuplicateProgramaAnalitico(s.id)} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-200">
+                                  <Button variant="outline" size="sm" onClick={() => handleDuplicateSyllabus(s.id)} className="text-emerald-600 hover:text-emerald-700">
                                     <Copy className="h-4 w-4 mr-1" /> Duplicar
                                   </Button>
-                                  <Button variant="outline" size="sm" onClick={() => handleDeleteProgramaAnalitico(s.id)} className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200">
+                                  <Button variant="outline" size="sm" onClick={() => handleDeleteSyllabus(s.id)} className="text-red-600 hover:text-red-700">
                                     <Trash2 className="h-4 w-4 mr-1" /> Eliminar
                                   </Button>
                                 </div>
@@ -1375,9 +1352,9 @@ export default function EditorProgramaAnaliticoPage() {
                   ) : (
                     <div className="text-center py-12">
                       <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-500">No hay ProgramaAnalitico creados aún</p>
-                      <Button onClick={handleNewProgramaAnalitico} className="mt-4 bg-emerald-600 hover:bg-emerald-700">
-                        <Plus className="h-4 w-4 mr-2" /> Crear Primer ProgramaAnalitico
+                      <p className="text-gray-500">No hay syllabus creados aún</p>
+                      <Button onClick={handleNewSyllabus} className="mt-4 bg-emerald-600 hover:bg-emerald-700">
+                        <Plus className="h-4 w-4 mr-2" /> Crear Primer Syllabus
                       </Button>
                     </div>
                   )}
@@ -1395,22 +1372,22 @@ export default function EditorProgramaAnaliticoPage() {
                           <Input
                             value={tempName}
                             onChange={e => setTempName(e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter') { setprogramas(p => p.map(s => s.id === activeProgramaAnaliticoId ? { ...s, name: tempName } : s)); setEditingName(false); } if (e.key === 'Escape') setEditingName(false); }}
+                            onKeyDown={e => { if (e.key === 'Enter') { setSyllabi(p => p.map(s => s.id === activeSyllabusId ? { ...s, name: tempName } : s)); setEditingName(false); } if (e.key === 'Escape') setEditingName(false); }}
                             className="h-8 text-sm font-semibold"
                             autoFocus
                           />
-                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => { setprogramas(p => p.map(s => s.id === activeProgramaAnaliticoId ? { ...s, name: tempName } : s)); setEditingName(false); }}><Check className="h-4 w-4 text-green-600" /></Button>
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => { setSyllabi(p => p.map(s => s.id === activeSyllabusId ? { ...s, name: tempName } : s)); setEditingName(false); }}><Check className="h-4 w-4 text-green-600" /></Button>
                           <Button size="sm" variant="ghost" className="p-1 h-7 w-7" onClick={() => setEditingName(false)}><X className="h-4 w-4 text-red-500" /></Button>
                         </>
                       ) : (
                         <>
-                          <span className="truncate">{activeProgramaAnalitico.name}</span>
-                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7 flex-shrink-0" title="Renombrar" onClick={() => { setTempName(activeProgramaAnalitico.name); setEditingName(true); }}><Pencil className="h-4 w-4" /></Button>
+                          <span className="truncate">{activeSyllabus.name}</span>
+                          <Button size="sm" variant="ghost" className="p-1 h-7 w-7 flex-shrink-0" title="Renombrar" onClick={() => { setTempName(activeSyllabus.name); setEditingName(true); }}><Pencil className="h-4 w-4" /></Button>
                         </>
                       )}
                     </div>
                     <div className="flex-shrink-0 flex items-center gap-2">
-                       <Button onClick={() => { setActiveProgramaAnaliticoId(null); setprogramas([]); }} variant="outline" size="sm" className="border-gray-400 text-gray-700 hover:bg-gray-50">
+                       <Button onClick={() => { setActiveSyllabusId(null); setSyllabi([]); setEditingComisionId(null); setCellLockState({}); }} variant="outline" size="sm" className="border-gray-400 text-gray-700 hover:bg-gray-50">
                          <span className="flex items-center gap-1">
                            <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
                            Retroceder
@@ -1420,11 +1397,22 @@ export default function EditorProgramaAnaliticoPage() {
                          <Home className="h-4 w-4 mr-2" />
                          Menú Principal
                        </Button>
-                       <Button onClick={handleSaveToDB} className="bg-blue-600 hover:bg-blue-700" size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> Guardar</>}</Button>
+                       <Button onClick={handleSaveToDB} className={editingComisionId ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"} size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> {editingComisionId ? "Guardar Bloqueos" : "Guardar"}</>}</Button>
                        <Button onClick={handlePrintToPdf} variant="outline" size="sm" disabled={!activeTab}><Printer className="h-4 w-4 mr-2" /> Imprimir</Button>
                     </div>
                   </CardTitle>
                 </CardHeader>
+                {(editingComisionId || lockedCellCount > 0) && (
+                  <div className="mx-4 mb-2 flex items-center gap-2 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 text-sm text-amber-800">
+                    <Lock className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                    <span>
+                      {editingComisionId
+                        ? <><strong>Modo bloqueo (comisión #{editingComisionId})</strong> — </>
+                        : <><strong>Bloqueo en syllabus general</strong> — </>}
+                      Celdas bloqueadas: <strong>{lockedCellCount}</strong>. Selecciona celdas y presiona <strong>Bloquear</strong>. Los docentes no podrán editar esas celdas. Luego guarda.
+                    </span>
+                  </div>
+                )}
                 <CardContent>
                   <div className="grid grid-cols-1 gap-4 mt-4 border-t pt-4">
                     <div className="space-y-2">
@@ -1448,7 +1436,7 @@ export default function EditorProgramaAnaliticoPage() {
 
               <div className="mb-6 select-none">
                 <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-emerald-100">
-                  {activeProgramaAnalitico.tabs.map(tab => (
+                  {activeSyllabus.tabs.map(tab => (
                     <div key={tab.id} className="relative group">
                       {editingTabId === tab.id ? (
                         <div className="flex items-center bg-white border border-emerald-500 rounded px-1 shadow-sm h-10">
@@ -1487,7 +1475,7 @@ export default function EditorProgramaAnaliticoPage() {
                        <Button size="sm" onClick={mergeCells} disabled={selectedCells.length < 2} variant="outline"><Merge className="h-4 w-4 mr-1" />Unir</Button>
                        <Button size="sm" onClick={clearSelectedCells} disabled={!selectedCells.length} variant="outline"><Trash2 className="h-4 w-4 mr-1" />Limpiar</Button>
                        <div className="w-px h-6 bg-emerald-200 mx-1"></div>
-                       <Button size="sm" onClick={toggleLockCells} disabled={!selectedCells.length} className="bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100" title="Bloquear/Desbloquear celda para docentes"><Lock className="h-4 w-4 mr-1" />Bloquear</Button>
+                       <Button size="sm" onClick={toggleLockCells} disabled={!selectedCells.length} className="bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100" title="Bloquear/Desbloquear celdas para docentes"><Lock className="h-4 w-4 mr-1" />Bloquear</Button>
                     </div>
 
                     <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white">
@@ -1524,6 +1512,7 @@ export default function EditorProgramaAnaliticoPage() {
                                   if (cell.rowSpan === 0 || cell.colSpan === 0) return null;
                                   
                                   const isSelected = selectedCells.includes(cell.id);
+                                  const isLockedForDocente = !!cellLockState[cell.id] || !!cell.isLocked;
                                   const isHeader = cell.isHeader;
                                   const isSeparator = cell.content.trim() === ':';
                                   const isVertical = cell.textOrientation === 'vertical';
@@ -1558,11 +1547,13 @@ export default function EditorProgramaAnaliticoPage() {
                                         border border-gray-200 
                                         relative transition-all duration-75 ease-in-out
                                         ${isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"}
-                                        ${cell.isLocked ? "bg-amber-50/60" : ""}
+                                        ${isLockedForDocente ? "bg-amber-50/60" : ""}
                                         ${isSelected ? "ring-2 ring-inset ring-emerald-500 z-10" : ""}
                                       `}
                                       style={{ 
-                                        backgroundColor: cell.isLocked ? '#fffbeb' : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff')),
+                                        backgroundColor: isLockedForDocente
+                                          ? '#fffbeb'
+                                          : cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'),
                                         color: cell.textColor, 
                                         width: widthStyle,
                                         minWidth: minWidthStyle, 
@@ -1603,7 +1594,7 @@ export default function EditorProgramaAnaliticoPage() {
                                           </div>
                                         )}
                                       </div>
-                                      {cell.isLocked && (
+                                      {isLockedForDocente && (
                                         <div className="absolute top-0.5 right-0.5" title="Bloqueado para docentes">
                                           <Lock className="h-3 w-3 text-amber-500" />
                                         </div>

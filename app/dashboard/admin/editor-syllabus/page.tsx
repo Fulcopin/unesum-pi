@@ -16,7 +16,6 @@ import { useAuth } from "@/contexts/auth-context"
 import * as mammoth from "mammoth"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
-import { FirmasPanel } from "@/components/firmas/firmas-panel"
 
 // --- INTERFACES DE DATOS ---
 interface TableCell { 
@@ -32,7 +31,7 @@ interface TableCell {
   fontSize?: string; 
   fontWeight?: string; 
   textAlign?: string;
-  textOrientation?: 'horizontal' | 'vertical'; 
+  textOrientation?: 'horizontal' | 'vertical'; fontFamily?: string; 
 }
 
 interface TableRow { id: string; cells: TableCell[]; }
@@ -136,15 +135,17 @@ export default function EditorSyllabusPage() {
     }
   }, [activeSyllabus, activeTabId]);
 
-  // Auto-cargar syllabus cuando se selecciona un periodo (solo si no hay uno activo)
-  useEffect(() => {
-    if (!selectedPeriod || activeSyllabusId || isListLoading || savedSyllabi.length === 0) return;
-    const syllabiDelPeriodo = savedSyllabi.filter(s => s.periodo === selectedPeriod);
+  const handlePeriodChange = (periodNombre: string) => {
+    setSelectedPeriod(periodNombre);
+    if (activeSyllabusId || isListLoading || savedSyllabi.length === 0) return;
+    const syllabiDelPeriodo = savedSyllabi.filter(s => s.periodo === periodNombre);
     if (syllabiDelPeriodo.length === 0) return;
     const syllabusToLoad = syllabiDelPeriodo[0];
     let editorData = syllabusToLoad.datos_syllabus;
     if (!editorData) return;
 
+    // Clonar para evitar mutación directa en savedSyllabi
+    editorData = JSON.parse(JSON.stringify(editorData));
     editorData.id = syllabusToLoad.id;
     if (!editorData.tabs || editorData.tabs.length === 0) {
       editorData.tabs = (editorData as any).rows
@@ -158,7 +159,7 @@ export default function EditorSyllabusPage() {
     setActiveTabId(editorData.tabs[0]?.id || null);
     setCellLockState(buildCellLockState(editorData.tabs));
     setEditingComisionId(null);
-  }, [selectedPeriod, isListLoading, savedSyllabi.length, activeSyllabusId]);
+  };
 
   // --- API ---
   const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
@@ -695,14 +696,21 @@ export default function EditorSyllabusPage() {
                   const isHeader = td.tagName === "TH" || hasBold || (rowsRaw.length > 3 && rIdx <= 1);
 
                   // DETECCIÓN DE VERTICAL (PALABRAS CLAVE)
-                  // Solo estas palabras EXACTAS deben ser verticales
-                  const verticalKeywords = ["PRESENCIAL", "SINCRÓNICA", "SINCRONICA", "PFAE", "TA"];
+                  const verticalKeywords = [
+                    "PRESENCIAL", "SINCRÓNICA", "SINCRONICA", "PFAE", "TA",
+                    "HD. PRESENCIAL", "HD. SINCRÓNICA", "HD. SINCRONICA",
+                    "HD PRESENCIAL", "HD SINCRÓNICA", "HD SINCRONICA"
+                  ];
                   
                   let guessVertical = false;
-                  // Comparación exacta: solo si el contenido ES exactamente una de estas palabras
                   if (isHeader) {
                       const contentTrimmed = contentUpper.trim();
-                      guessVertical = verticalKeywords.includes(contentTrimmed);
+                      guessVertical = verticalKeywords.includes(contentTrimmed) || 
+                                      contentTrimmed.includes("HD. PRESENCIAL") || 
+                                      contentTrimmed.includes("HD. SINCRÓNICA") ||
+                                      contentTrimmed.includes("HD. SINCRONICA") ||
+                                      contentTrimmed.includes("HD PRESENCIAL") ||
+                                      contentTrimmed.includes("HD SINCRÓNICA");
                   }
                   return {
                     id: `cell-${newTabs.length}-${rIdx}-${cIdx}-${Date.now()}`,
@@ -1192,7 +1200,7 @@ export default function EditorSyllabusPage() {
                    
                     <div className="space-y-2">
                       <Label>Periodo</Label>
-                      <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                      <Select value={selectedPeriod} onValueChange={handlePeriodChange}>
                         <SelectTrigger>
                           <SelectValue placeholder="Seleccione el periodo" />
                         </SelectTrigger>
@@ -1305,13 +1313,11 @@ export default function EditorSyllabusPage() {
                     <p className="text-center py-8">Cargando...</p>
                   ) : syllabiFiltered.length > 0 ? (
                     <div className="overflow-x-auto">
-                      <table className="w-full">
+                       <table className="w-full">
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="px-4 py-3 text-left text-sm font-semibold">Nombre</th>
                             <th className="px-4 py-3 text-left text-sm font-semibold">Periodo</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold">Materia</th>
-                            <th className="px-4 py-3 text-left text-sm font-semibold">Fecha</th>
                             <th className="px-4 py-3 text-center text-sm font-semibold">Acciones</th>
                           </tr>
                         </thead>
@@ -1325,10 +1331,6 @@ export default function EditorSyllabusPage() {
                                 </div>
                               </td>
                               <td className="px-4 py-3">{s.periodo}</td>
-                              <td className="px-4 py-3">{s.materias}</td>
-                              <td className="px-4 py-3 text-sm text-gray-500">
-                                {new Date(s.created_at).toLocaleDateString()}
-                              </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center justify-center gap-2">
                                   <Button variant="outline" size="sm" onClick={() => handleEditSyllabus(s.id)} className="text-blue-600 hover:text-blue-700">
@@ -1385,7 +1387,16 @@ export default function EditorSyllabusPage() {
                       )}
                     </div>
                     <div className="flex-shrink-0 flex items-center gap-2">
-                       <Button onClick={() => { setActiveSyllabusId(null); setSyllabi([]); setEditingComisionId(null); setCellLockState({}); }} variant="outline" size="sm"> <Plus className="h-4 w-4 mr-2" /> Nuevo</Button>
+                       <Button onClick={() => { setActiveSyllabusId(null); setSyllabi([]); setEditingComisionId(null); setCellLockState({}); }} variant="outline" size="sm" className="border-gray-400 text-gray-700 hover:bg-gray-50">
+                         <span className="flex items-center gap-1">
+                           <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                           Retroceder
+                         </span>
+                       </Button>
+                       <Button onClick={() => router.push('/dashboard/admin')} variant="outline" size="sm" className="border-gray-400 text-gray-700 hover:bg-gray-50">
+                         <Home className="h-4 w-4 mr-2" />
+                         Menú Principal
+                       </Button>
                        <Button onClick={handleSaveToDB} className={editingComisionId ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"} size="sm" disabled={isSaving}>{isSaving ? "Guardando..." : <><Save className="h-4 w-4 mr-2" /> {editingComisionId ? "Guardar Bloqueos" : "Guardar"}</>}</Button>
                        <Button onClick={handlePrintToPdf} variant="outline" size="sm" disabled={!activeTab}><Printer className="h-4 w-4 mr-2" /> Imprimir</Button>
                     </div>
@@ -1525,9 +1536,20 @@ export default function EditorSyllabusPage() {
                                     }
                                   }
                                   
+                                  const isFirstSectionValue = isFormRow && index === 2;
+
+                                  
+                                  const isHeaderForAlign = isHeader && !isFirstSectionValue;
+
+
+                                  
                                   // --- ALINEACIÓN: CENTRAR TÍTULOS Y VERTICALES ---
+
+                                  
                                   let justifyContent = 'justify-start'; 
-                                  if (isHeader || isSeparator || isVertical) justifyContent = 'justify-center';
+
+                                  
+                                  if (isHeaderForAlign || isSeparator || isVertical) justifyContent = 'justify-center';
                                   
                                   return (
                                     <td 
@@ -1535,14 +1557,14 @@ export default function EditorSyllabusPage() {
                                       className={`
                                         border border-gray-200 
                                         relative transition-all duration-75 ease-in-out
-                                        ${isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"}
+                                        ${isHeaderForAlign ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"}
                                         ${isLockedForDocente ? "bg-amber-50/60" : ""}
                                         ${isSelected ? "ring-2 ring-inset ring-emerald-500 z-10" : ""}
                                       `}
-                                      style={{ 
+                                      style={{
                                         backgroundColor: isLockedForDocente
                                           ? '#fffbeb'
-                                          : cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'),
+                                          : cell.backgroundColor || (isHeaderForAlign ? '#f9fafb' : '#ffffff'), fontFamily: cell.fontFamily || undefined, fontSize: cell.fontSize || undefined,
                                         color: cell.textColor, 
                                         width: widthStyle,
                                         minWidth: minWidthStyle, 
@@ -1558,10 +1580,11 @@ export default function EditorSyllabusPage() {
                                       <div 
                                         className={`w-full h-full flex items-center ${justifyContent} p-2`}
                                         style={{
-                                            writingMode: isVertical ? 'vertical-rl' : undefined,
+                                            fontSize: cell.fontSize || undefined,
+                                             writingMode: isVertical ? 'vertical-rl' : undefined,
                                             transform: isVertical ? 'rotate(180deg)' : undefined,
-                                            minHeight: isVertical ? '120px' : 'auto', 
-                                            textAlign: isHeader ? 'center' : 'left' 
+                                            minHeight: isVertical ? '120px' : 'auto',
+                                            textAlign: isHeaderForAlign ? 'center' : 'left' 
                                         }}
                                       >
                                         {editingCell === cell.id ? (
@@ -1602,17 +1625,6 @@ export default function EditorSyllabusPage() {
                 </Card>
               )}
             </>
-          )}
-
-          {/* Panel de firmas digitales */}
-          {activeSyllabusId && (
-            <div className="mt-6">
-              <FirmasPanel
-                tipo="syllabus"
-                documentoId={Number(activeSyllabusId)}
-                documentoNombre={activeSyllabus?.name || 'Syllabus'}
-              />
-            </div>
           )}
         </main>
       </div>
