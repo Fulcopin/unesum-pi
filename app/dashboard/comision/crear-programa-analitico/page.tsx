@@ -3227,12 +3227,41 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                         </div>
                         <p className="text-purple-600 text-xs">
                           Haz clic en cada celda para alternar si el docente puede editarla.
-                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-green-200 border border-green-400 inline-block"></span> = Editable</span>
-                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block"></span> = Bloqueada</span>
-                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-300 inline-block"></span> = Sin configurar (todas editables)</span>
+                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-green-200 border border-green-400 inline-block"></span> = Editable por docente</span>
+                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block"></span> = Bloqueada por Comisión (clic para cambiar)</span>
+                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-400 inline-block"></span> = Bloqueada por Admin (no editable)</span>
                         </p>
                       </div>
                     )}
+
+                    {/* Panel de bloqueos (siempre visible cuando hay bloqueos activos) */}
+                    {activeProgramaAnalitico && (() => {
+                      let adminCount = 0, comisionCount = 0;
+                      activeProgramaAnalitico.tabs.forEach(tab => tab.rows.forEach(row => row.cells.forEach(cell => {
+                        if (cell.rowSpan === 0 || cell.colSpan === 0) return;
+                        if (cell.isLocked === true && cell.docenteEditable !== false) adminCount++;
+                        else if (cell.docenteEditable === false) comisionCount++;
+                      })));
+                      if (adminCount === 0 && comisionCount === 0) return null;
+                      return (
+                        <div key="lock-summary" className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg flex flex-wrap items-center gap-3 text-xs">
+                          <span className="font-semibold text-amber-800 flex items-center gap-1">
+                            <Lock className="h-3 w-3" /> Bloqueos activos:
+                          </span>
+                          {adminCount > 0 && (
+                            <span className="flex items-center gap-1 bg-yellow-100 border border-yellow-300 rounded px-2 py-0.5 text-yellow-800 font-medium">
+                              <Lock className="h-3 w-3 text-yellow-600" /> {adminCount} celda{adminCount !== 1 ? 's' : ''} bloqueada{adminCount !== 1 ? 's' : ''} por Admin
+                            </span>
+                          )}
+                          {comisionCount > 0 && (
+                            <span className="flex items-center gap-1 bg-red-50 border border-red-200 rounded px-2 py-0.5 text-red-700 font-medium">
+                              <Lock className="h-3 w-3 text-red-500" /> {comisionCount} celda{comisionCount !== 1 ? 's' : ''} bloqueada{comisionCount !== 1 ? 's' : ''} por Comisión
+                            </span>
+                          )}
+                          <span className="text-amber-600 italic ml-1">🟡 = Admin · 🔴 = Comisión</span>
+                        </div>
+                      );
+                    })()}
 
                     <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm bg-white">
                       <table className="w-full border-collapse text-sm text-left"> 
@@ -3323,7 +3352,9 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                 style={{
                   backgroundColor: configModeDocente
                     ? (adminLocked ? '#fef08a' : comisionLocked ? '#fef2f2' : '#f0fdf4')
-                    : (anyCellLocked ? '#fef08a' : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'))),
+                    : adminLocked ? '#fef08a'
+                      : comisionLocked ? '#fef2f2'
+                        : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff')),
                   color: cell.textColor,
                   width: widthStyle,
                   minWidth: minWidthStyle,
@@ -3383,7 +3414,12 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                       )}
                     </div>
                   ) : (
-                    anyCellLocked && <Lock className="h-3 w-3 text-amber-600 absolute top-1 right-1 opacity-70 pointer-events-none" />
+                    anyCellLocked && (
+                      <div className="absolute top-0 right-0 p-0.5">
+                        <Lock className={`h-3 w-3 pointer-events-none ${adminLocked ? 'text-yellow-600' : 'text-red-500'}`}
+                              title={adminLocked ? 'Bloqueado por Administrador' : 'Bloqueado por Comisión'} />
+                      </div>
+                    )
                   )}
                 </div>
               </td>

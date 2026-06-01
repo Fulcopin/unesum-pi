@@ -38,11 +38,11 @@ const applyComisionLocksToDocente = (datos, lockState) => {
           ...row,
           cells: (row.cells || []).map((cell, cellIndex) => {
             const positionKey = getCellPositionKey(tabIndex, rowIndex, cellIndex);
-            const locked = Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)
+            const templateLocked = Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)
               ? lockState.lockById[cell.id]
               : (lockState.lockByPosition[positionKey] ?? false);
-
-            return { ...cell, isLocked: locked };
+            // ADDITIVE: preserve existing locks from comision record, only add template locks
+            return { ...cell, isLocked: !!cell.isLocked || templateLocked };
           })
         }))
       }))
@@ -56,11 +56,11 @@ const applyComisionLocksToDocente = (datos, lockState) => {
         ...row,
         cells: (row.cells || []).map((cell, cellIndex) => {
           const positionKey = getCellPositionKey(0, rowIndex, cellIndex);
-          const locked = Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)
+          const templateLocked = Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)
             ? lockState.lockById[cell.id]
             : (lockState.lockByPosition[positionKey] ?? false);
-
-          return { ...cell, isLocked: locked };
+          // ADDITIVE: preserve existing locks from comision record, only add template locks
+          return { ...cell, isLocked: !!cell.isLocked || templateLocked };
         })
       }))
     };

@@ -234,6 +234,8 @@ export default function EditorSyllabusComisionPage() {
   const nuevaParam = searchParams.get("nueva")
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fileInputRefSync = useRef<HTMLInputElement>(null)
+  // Ref para rastrear en qué syllabus ya se aplicaron los bloqueos del admin (evitar bucle)
+  const adminLocksAppliedRef = useRef<Set<string | number>>(new Set())
 
   const activeSyllabus = syllabi.find((s) => s.id === activeSyllabusId);
   const activeTab = activeSyllabus?.tabs.find(t => t.id === activeTabId);
@@ -506,7 +508,18 @@ export default function EditorSyllabusComisionPage() {
     
     if (syllabiDelPeriodo.length > 0) {
       const primerSyllabus = syllabiDelPeriodo[0];
-      if (activeSyllabusId !== primerSyllabus.id) handleLoadSyllabus(String(primerSyllabus.id));
+      if (activeSyllabusId !== primerSyllabus.id) {
+        handleLoadSyllabus(String(primerSyllabus.id));
+      } else if (activeSyllabus && !adminLocksAppliedRef.current.has(activeSyllabusId)) {
+        // El mismo syllabus ya está cargado pero aún no se aplicaron los bloqueos del admin
+        const sylRecord = savedSyllabi.find((s: any) => Number(s.id) === Number(activeSyllabusId));
+        adminLocksAppliedRef.current.add(activeSyllabusId);
+        // Solo aplicar si viene del admin (no de comisión): respetar lo que la comisión guardó
+        if ((sylRecord as any)?._source !== 'comision') {
+          const updated = syncLocksFromTemplate(activeSyllabus as any, selectedPeriod);
+          updateProgramaAnalitico(activeSyllabusId, { tabs: (updated as any).tabs });
+        }
+      }
     } else if (asignaturaIdParam && selectedPeriod) {
       // No encontrado en savedSyllabi, intentar buscar directamente en el backend
       const buscarEnBackend = async () => {
@@ -569,6 +582,11 @@ export default function EditorSyllabusComisionPage() {
           }));
         } else if (editorData.rows) {
           editorData.tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: editorData.rows }];
+        }
+        // Aplicar bloqueos del admin solo si el syllabus viene de la tabla general (admin)
+        // Si viene de 'comision', la comisión ya guardó su estado de bloqueos → no sobrescribir
+        if (syllabusData.periodo && source !== 'comision') {
+          editorData = syncLocksFromTemplate(editorData, syllabusData.periodo);
         }
         setSyllabi([editorData]);
         setActiveSyllabusId(editorData.id);
@@ -669,6 +687,25 @@ export default function EditorSyllabusComisionPage() {
     const id = periodoAlIdSelect(s.periodo, periodos);
     if (periodoIdCoincideEnLista(id, periodos)) setSelectedPeriod(id);
   }, [activeSyllabusId, periodos, savedSyllabi]);
+
+  // Aplicar bloqueos del admin (plantilla general) cuando el syllabus se cargó via ?id=X
+  // Solo si viene del admin (source !== 'comision'): la comisión ya habrá guardado sus preferencias
+  useEffect(() => {
+    if (!syllabusIdParam) return;
+    if (!activeSyllabusId || !activeSyllabus) return;
+    if (!selectedPeriod || periodos.length === 0) return;
+    if (savedSyllabi.length === 0) return;
+    if (adminLocksAppliedRef.current.has(activeSyllabusId)) return;
+    // Si el syllabus ya fue guardado por la comisión, respetar sus bloqueos guardados
+    if (sourceParam === 'comision') {
+      adminLocksAppliedRef.current.add(activeSyllabusId);
+      return;
+    }
+
+    adminLocksAppliedRef.current.add(activeSyllabusId);
+    const updated = syncLocksFromTemplate(activeSyllabus as any, selectedPeriod);
+    updateProgramaAnalitico(activeSyllabusId, { tabs: (updated as any).tabs });
+  }, [syllabusIdParam, activeSyllabusId, selectedPeriod, savedSyllabi.length, periodos.length]);
 
   // 🆕 Crear syllabus vacío cuando se viene con ?nueva=true
   useEffect(() => {
@@ -1019,7 +1056,13 @@ export default function EditorSyllabusComisionPage() {
             savedUIData.tabs = savedUIData.tabs.map((t: any) => ({
                 ...t, rows: t.rows.map((r: any) => ({
                     ...r, cells: r.cells.map((c: any) => ({
-                        ...c, backgroundColor: c.styles?.backgroundColor, textOrientation: c.styles?.textOrientation, isEditable: true
+                        ...c,
+                        backgroundColor: c.styles?.backgroundColor || c.backgroundColor,
+                        textColor: c.styles?.textColor || c.textColor,
+                        textAlign: c.styles?.textAlign || c.textAlign,
+                        textOrientation: c.styles?.textOrientation || c.textOrientation,
+                        isEditable: true
+                        // isLocked y docenteEditable preservados por ...c
                     }))
                 }))
             }));
@@ -1045,7 +1088,14 @@ export default function EditorSyllabusComisionPage() {
   }
 
   const syncLocksFromTemplate = (uiData: any, periodoStr: string) => {
-    const templateAdmin = savedSyllabi.find((s: any) => !s.asignatura_id && s.periodo === periodoStr);
+    // Flexible period matching: admin saves period as NAME, comision saves as ID
+    const periodoObj = periodos.find((p: any) => p.id.toString() === periodoStr);
+    const periodoNombre = periodoObj?.nombre || '';
+    const templateAdmin = savedSyllabi.find((s: any) => {
+      if (s.asignatura_id) return false; // Solo plantillas generales (sin asignatura específica)
+      const sp = String(s.periodo || '').trim();
+      return sp === periodoStr || (periodoNombre && sp === periodoNombre);
+    });
     if (!templateAdmin) return uiData;
 
     let templateData = (templateAdmin as any).datos_syllabus || (templateAdmin as any).datos_tabla;
@@ -1060,24 +1110,28 @@ export default function EditorSyllabusComisionPage() {
       if (!tTab) return tab;
 
       const lockedTemplateCells = tTab.rows.flatMap((r: any) => r.cells).filter((c: any) => c.isLocked === true);
-      const unlockedTemplateCells = tTab.rows.flatMap((r: any) => r.cells).filter((c: any) => c.isLocked === false);
 
       const newRows = tab.rows.map((row: any, rIdx: number) => {
         const tRow = tTab.rows[rIdx];
         
         const newCells = row.cells.map((cell: any, cIdx: number) => {
+          // Empezar con el valor actual (preservar bloqueos ya establecidos por admin/comision)
           let shouldLock = cell.isLocked;
           let bgColor = cell.backgroundColor;
           let txtColor = cell.textColor;
 
           if (tRow && tRow.cells[cIdx]) {
             const tCell = tRow.cells[cIdx];
-            if (tCell.isLocked !== undefined) shouldLock = tCell.isLocked;
-            if (tCell.backgroundColor) bgColor = tCell.backgroundColor;
-            if (tCell.styles?.backgroundColor) bgColor = tCell.styles.backgroundColor;
-            if (tCell.textColor) txtColor = tCell.textColor;
+            // Solo AGREGAR bloqueos de la plantilla, nunca quitar los existentes
+            if (tCell.isLocked === true) {
+              shouldLock = true;
+              if (tCell.backgroundColor) bgColor = tCell.backgroundColor;
+              if (tCell.styles?.backgroundColor) bgColor = tCell.styles.backgroundColor;
+              if (tCell.textColor) txtColor = tCell.textColor;
+            }
           } 
           
+          // Fallback: buscar por contenido si aún no está definido
           if (shouldLock === undefined && cell.content && cell.content.trim().length > 0) {
             const cellContentNorm = cell.content.trim().toUpperCase();
             const matchedLocked = lockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
@@ -1086,9 +1140,6 @@ export default function EditorSyllabusComisionPage() {
                if (matchedLocked.backgroundColor) bgColor = matchedLocked.backgroundColor;
                if (matchedLocked.styles?.backgroundColor) bgColor = matchedLocked.styles.backgroundColor;
                if (matchedLocked.textColor) txtColor = matchedLocked.textColor;
-            } else {
-               const matchedUnlocked = unlockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
-               if (matchedUnlocked) shouldLock = false;
             }
           }
 
@@ -1168,7 +1219,9 @@ export default function EditorSyllabusComisionPage() {
       editorData.tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: editorData.rows }];
     }
     
-    if (syllabusToLoad.periodo) {
+    // Solo aplicar plantilla del admin si el syllabus no viene de la tabla de comisión
+    // (la comisión puede haber modificado los bloqueos del admin intencionalmente)
+    if (syllabusToLoad.periodo && (syllabusToLoad as any)._source !== 'comision') {
         editorData = syncLocksFromTemplate(editorData, syllabusToLoad.periodo);
     }
     
@@ -1340,7 +1393,10 @@ export default function EditorSyllabusComisionPage() {
         ...row,
         cells: row.cells.map(c => {
           if (c.id === id) {
-            if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+            if (isAdminLockedCell(c)) {
+              // Comisión puede desbloquear celdas bloqueadas por el admin
+              return { ...c, isLocked: false, docenteEditable: true };
+            }
             const isCurrentlyLocked = c.docenteEditable === false;
             return { ...c, docenteEditable: isCurrentlyLocked ? true : false, isLocked: !isCurrentlyLocked };
           }
@@ -1357,7 +1413,7 @@ export default function EditorSyllabusComisionPage() {
     const updated = tableData.map(row => ({
       ...row,
       cells: row.cells.map(c => {
-        if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+        // La comisión puede habilitar/bloquear todas las celdas, incluidas las del admin
         return { ...c, docenteEditable: enable, isLocked: !enable };
       })
     }));
@@ -2394,11 +2450,41 @@ export default function EditorSyllabusComisionPage() {
                         </div>
                         <p className="text-purple-600 text-xs">
                           Haz clic en cada celda para alternar si el docente puede editarla.
-                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-green-200 border border-green-400 inline-block"></span> = Editable</span>
-                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block"></span> = Bloqueada</span>
+                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-green-200 border border-green-400 inline-block"></span> = Editable por docente</span>
+                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block"></span> = Bloqueada por Comisión (clic para cambiar)</span>
+                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-400 inline-block"></span> = Bloqueada por Admin (clic para desbloquear)</span>
                         </p>
                       </div>
                     )}
+
+                    {/* Panel de bloqueos (siempre visible cuando hay bloqueos activos) */}
+                    {activeSyllabus && (() => {
+                      let adminCount = 0, comisionCount = 0;
+                      activeSyllabus.tabs.forEach(tab => tab.rows.forEach(row => row.cells.forEach(cell => {
+                        if (cell.rowSpan === 0 || cell.colSpan === 0) return;
+                        if (cell.isLocked === true && cell.docenteEditable !== false) adminCount++;
+                        else if (cell.docenteEditable === false) comisionCount++;
+                      })));
+                      if (adminCount === 0 && comisionCount === 0) return null;
+                      return (
+                        <div key="lock-summary" className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg flex flex-wrap items-center gap-3 text-xs">
+                          <span className="font-semibold text-amber-800 flex items-center gap-1">
+                            <Lock className="h-3 w-3" /> Bloqueos activos:
+                          </span>
+                          {adminCount > 0 && (
+                            <span className="flex items-center gap-1 bg-yellow-100 border border-yellow-300 rounded px-2 py-0.5 text-yellow-800 font-medium">
+                              <Lock className="h-3 w-3 text-yellow-600" /> {adminCount} celda{adminCount !== 1 ? 's' : ''} bloqueada{adminCount !== 1 ? 's' : ''} por Admin
+                            </span>
+                          )}
+                          {comisionCount > 0 && (
+                            <span className="flex items-center gap-1 bg-red-50 border border-red-200 rounded px-2 py-0.5 text-red-700 font-medium">
+                              <Lock className="h-3 w-3 text-red-500" /> {comisionCount} celda{comisionCount !== 1 ? 's' : ''} bloqueada{comisionCount !== 1 ? 's' : ''} por Comisión
+                            </span>
+                          )}
+                          <span className="text-amber-600 italic ml-1">🟡 = Admin · 🔴 = Comisión</span>
+                        </div>
+                      );
+                    })()}
 
                     {/* ─── Banner de validación de horas (Prominente) ─── */}
                     {horasValidation.message && (
@@ -2631,12 +2717,14 @@ export default function EditorSyllabusComisionPage() {
                                                 : isHeaderForAlign 
                                                   ? 'border-gray-300 bg-gray-100/80 font-bold text-gray-800' 
                                                   : 'border-gray-300 bg-white text-gray-700'
-                                          )} ${!configModeDocente && anyCellLocked ? 'bg-yellow-200' : ''} ${!configModeDocente && !hasError && isSelected ? 'ring-2 ring-inset ring-blue-500 z-10 bg-blue-50' : ''} ${!configModeDocente && isReadOnly ? 'bg-gray-50 cursor-not-allowed text-gray-500' : !configModeDocente && !anyCellLocked ? 'cursor-cell' : ''}`}
+                                          )} ${!configModeDocente && anyCellLocked ? 'bg-yellow-200' : ''} ${!configModeDocente && !hasError && isSelected ? 'ring-2 ring-inset ring-blue-500 z-10 bg-blue-50' : ''} ${!configModeDocente && isReadOnly ? 'bg-gray-50 cursor-not-allowed text-gray-500' : !configModeDocente ? 'cursor-cell' : ''}`}
                                           style={{ 
                                             ...commonStyle,
                                             backgroundColor: configModeDocente 
                                               ? (adminLocked ? '#fef08a' : comisionLocked ? '#fef2f2' : '#f0fdf4')
-                                              : (anyCellLocked ? '#fef08a' : (cell.backgroundColor || (isFirstSectionLabel ? undefined : isHeaderForAlign ? '#f8fafc' : undefined))), 
+                                              : adminLocked ? '#fef08a'
+                                                : comisionLocked ? '#fef2f2'
+                                                  : (cell.backgroundColor || (isFirstSectionLabel ? undefined : isHeaderForAlign ? '#f8fafc' : undefined)), 
                                             width: cellWidth,
                                             minWidth: cellMinW,
                                             maxWidth: cellMaxW,
@@ -2685,7 +2773,12 @@ export default function EditorSyllabusComisionPage() {
                                                 )}
                                               </div>
                                             ) : (
-                                              anyCellLocked && <Lock className="h-3 w-3 text-amber-600 absolute top-1 right-1 opacity-70 pointer-events-none" />
+                                              anyCellLocked && (
+                                                <div className="absolute top-0 right-0 p-0.5">
+                                                  <Lock className={`h-3 w-3 pointer-events-none ${adminLocked ? 'text-yellow-600' : 'text-red-500'}`}
+                                                        title={adminLocked ? 'Bloqueado por Administrador' : 'Bloqueado por Comisión'} />
+                                                </div>
+                                              )
                                             )}
                                           </div>
                                         </td>

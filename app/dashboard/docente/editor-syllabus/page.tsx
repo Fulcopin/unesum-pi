@@ -763,6 +763,7 @@ export default function DocenteEditorSyllabusPage() {
               let comisionDatos = comisionRes.data.datos_syllabus
               if (typeof comisionDatos === 'string') comisionDatos = JSON.parse(comisionDatos)
 
+              const lockState = buildComisionLockState(comisionDatos)
               mergedDatos = applyComisionLocks(datos, comisionDatos, lockState)
               setLockedCells(lockState.lockById)
               resolvedComisionId = resolvedComisionId || comisionRes.data.id
@@ -789,6 +790,7 @@ export default function DocenteEditorSyllabusPage() {
           let datos = comisionRes.data.datos_syllabus
           if (typeof datos === 'string') datos = JSON.parse(datos)
 
+          const lockState = buildComisionLockState(datos)
           processSyllabusData(applyComisionLocks(datos, datos, lockState))
           setLockedCells(lockState.lockById)
           setSyllabusComisionId(comisionRes.data.id)
