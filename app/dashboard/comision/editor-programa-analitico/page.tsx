@@ -150,13 +150,16 @@ export default function EditorProgramaAnaliticoComisionPage() {
         
         const newCells = row.cells.map((cell: any, cIdx: number) => {
           let shouldLock = cell.isLocked;
+          let bgColor = cell.backgroundColor;
+          let txtColor = cell.textColor;
 
           // 1. Intentar match por índice exacto (si la fila existe)
           if (tRow && tRow.cells[cIdx]) {
             const tCell = tRow.cells[cIdx];
-            if (tCell.isLocked !== undefined) {
-              shouldLock = tCell.isLocked;
-            }
+            if (tCell.isLocked !== undefined) shouldLock = tCell.isLocked;
+            if (tCell.backgroundColor) bgColor = tCell.backgroundColor;
+            if (tCell.styles?.backgroundColor) bgColor = tCell.styles.backgroundColor;
+            if (tCell.textColor) txtColor = tCell.textColor;
           } 
           
           // 2. Si no hubo match por índice, intentar match por contenido (muy útil para headers o etiquetas)
@@ -167,13 +170,16 @@ export default function EditorProgramaAnaliticoComisionPage() {
             const matchedLocked = lockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
             if (matchedLocked) {
                shouldLock = true;
+               if (matchedLocked.backgroundColor) bgColor = matchedLocked.backgroundColor;
+               if (matchedLocked.styles?.backgroundColor) bgColor = matchedLocked.styles.backgroundColor;
+               if (matchedLocked.textColor) txtColor = matchedLocked.textColor;
             } else {
                const matchedUnlocked = unlockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
                if (matchedUnlocked) shouldLock = false;
             }
           }
 
-          return { ...cell, isLocked: shouldLock };
+          return { ...cell, isLocked: shouldLock, backgroundColor: bgColor, textColor: txtColor };
         });
         return { ...row, cells: newCells };
       });
@@ -606,13 +612,19 @@ export default function EditorProgramaAnaliticoComisionPage() {
   const startEditing = (id: string, content: string) => { setEditingCell(id); setEditContent(content) }
   const saveEdit = () => { if(editingCell){ const updated=tableData.map(row=>({...row,cells:row.cells.map(c=>(c.id===editingCell?{...c,content:editContent}:c))})); handleUpdateActiveTabRows(updated); setEditingCell(null);setEditContent("")}}
   const cancelEdit = () => { setEditingCell(null); setEditContent("") }
+  // Detecta si una celda fue bloqueada por el admin (isLocked=true pero docenteEditable no es false)
+  const isAdminLockedCell = (c: TableCell) => c.isLocked === true && c.docenteEditable !== false;
+
   const handleCellClick = (id: string, e: React.MouseEvent) => {
     if (configModeDocente) {
       const updated = tableData.map(row => ({
         ...row,
         cells: row.cells.map(c => {
           if (c.id === id) {
-            return { ...c, docenteEditable: c.docenteEditable === false ? true : (c.docenteEditable === true ? false : false) };
+            if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+            // Toggle: si está bloqueada por comisión, desbloquear; si está libre, bloquear
+            const isCurrentlyLocked = c.docenteEditable === false;
+            return { ...c, docenteEditable: isCurrentlyLocked ? true : false, isLocked: !isCurrentlyLocked };
           }
           return c;
         })
@@ -626,7 +638,10 @@ export default function EditorProgramaAnaliticoComisionPage() {
   const toggleDocenteEditableAll = (enable: boolean) => {
     const updated = tableData.map(row => ({
       ...row,
-      cells: row.cells.map(c => ({ ...c, docenteEditable: enable }))
+      cells: row.cells.map(c => {
+        if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+        return { ...c, docenteEditable: enable, isLocked: !enable };
+      })
     }));
     handleUpdateActiveTabRows(updated);
   }
@@ -1308,9 +1323,9 @@ export default function EditorProgramaAnaliticoComisionPage() {
                         </div>
                         <p className="text-purple-600 text-xs">
                           Haz clic en cada celda para alternar si el docente puede editarla.
+                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-yellow-200 border border-yellow-400 inline-block"></span> = Bloqueada por Admin</span>
+                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block"></span> = Bloqueada por Comisión</span>
                           <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-green-200 border border-green-400 inline-block"></span> = Editable</span>
-                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block"></span> = Bloqueada</span>
-                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-300 inline-block"></span> = Sin configurar (todas editables)</span>
                         </p>
                       </div>
                     )}
@@ -1349,17 +1364,20 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                     }
                                   }
                                   
+                                  const adminLocked = isAdminLockedCell(cell);
+                                  const comisionLocked = cell.docenteEditable === false;
+                                  const anyCellLocked = adminLocked || comisionLocked;
+                                  
+                                  const configModeClass = configModeDocente
+                                    ? adminLocked
+                                      ? 'ring-2 ring-inset ring-yellow-400 bg-yellow-100 cursor-not-allowed'
+                                      : comisionLocked
+                                        ? 'ring-2 ring-inset ring-red-400 bg-red-50/60 cursor-pointer'
+                                        : 'ring-2 ring-inset ring-green-500 bg-green-50/60 cursor-pointer'
+                                    : '';
+                                  
                                   let justifyContent = 'justify-start'; 
                                   if (isHeader || isSeparator || isVertical) justifyContent = 'justify-center';
-                                  
-                                  const docenteFlag = cell.docenteEditable;
-                                  const configModeClass = configModeDocente
-                                    ? docenteFlag === true
-                                      ? 'ring-2 ring-inset ring-green-500 bg-green-50/60 cursor-pointer'
-                                      : docenteFlag === false
-                                        ? 'ring-2 ring-inset ring-red-400 bg-red-50/60 cursor-pointer'
-                                        : 'ring-1 ring-inset ring-gray-300 bg-gray-50/40 cursor-pointer'
-                                    : '';
                                   
                                   return (
                                     <td 
@@ -1370,13 +1388,13 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                         ${configModeDocente ? configModeClass : (
                                           isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"
                                         )}
-                                        ${!configModeDocente && cell.isLocked ? "bg-amber-50/60" : ""}
+                                        ${!configModeDocente && anyCellLocked ? "bg-yellow-200" : ""}
                                         ${!configModeDocente && isSelected ? "ring-2 ring-inset ring-blue-500 z-10" : ""}
                                       `}
                                       style={{ 
                                         backgroundColor: configModeDocente 
-                                          ? (docenteFlag === true ? '#f0fdf4' : docenteFlag === false ? '#fef2f2' : '#f9fafb')
-                                          : (cell.isLocked ? '#fffbeb' : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'))),
+                                          ? (adminLocked ? '#fef08a' : comisionLocked ? '#fef2f2' : '#f0fdf4')
+                                          : (anyCellLocked ? '#fef08a' : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'))),
                                         color: cell.textColor, 
                                         width: widthStyle,
                                         minWidth: minWidthStyle, 
@@ -1387,7 +1405,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                       rowSpan={cell.rowSpan || 1} 
                                       colSpan={cell.colSpan || 1} 
                                       onClick={(e) => handleCellClick(cell.id, e)} 
-                                      onDoubleClick={() => { if (!configModeDocente && !cell.isLocked) cell.isEditable && startEditing(cell.id, cell.content) }}
+                                      onDoubleClick={() => (!configModeDocente && cell.isEditable) && startEditing(cell.id, cell.content)}
                                     >
                                       <div 
                                         className={`w-full h-full flex items-center ${justifyContent} p-2`}
@@ -1398,36 +1416,35 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                             textAlign: isHeader ? 'center' : 'left' 
                                         }}
                                       >
-                                        {editingCell === cell.id ? (
-                                          <Textarea 
+                                        {!configModeDocente && editingCell === cell.id ? (
+                                          <textarea 
+                                            autoFocus 
                                             value={editContent} 
                                             onChange={(e) => setEditContent(e.target.value)} 
-                                            autoFocus 
-                                            onBlur={saveEdit} 
-                                            className="w-full min-h-[60px] p-1 bg-white border-blue-400 focus:ring-0 text-sm resize-none shadow-sm leading-normal"
-                                            style={{ writingMode: 'horizontal-tb', transform: 'none' }} 
-                                            onKeyDown={(e) => { 
-                                              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); saveEdit(); } 
-                                              if (e.key === "Escape") { cancelEdit(); } 
-                                            }}
+                                            onBlur={saveEdit}
+                                            className="w-full min-h-[50px] p-1 text-xs resize-y border-blue-400 focus-visible:ring-1 focus-visible:ring-blue-500" 
+                                            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); saveEdit(); } if (e.key === "Escape") cancelEdit(); }} 
                                           />
                                         ) : (
-                                          <div className="whitespace-pre-wrap leading-normal break-words">
-                                            {cell.content || <span className="opacity-0">.</span>}
+                                          <div 
+                                            className={`whitespace-pre-wrap break-words w-full ${isHeader ? 'text-center' : ''}`}
+                                            style={{ wordBreak: 'break-word', lineHeight: '1.3' }}
+                                          >
+                                            {cell.content.trim() || <span className="opacity-0">.</span>}
                                           </div>
                                         )}
                                         {configModeDocente ? (
                                           <div className="absolute top-0 right-0 p-0.5">
-                                            {docenteFlag === true ? (
-                                              <Unlock className="h-3 w-3 text-green-600" />
-                                            ) : docenteFlag === false ? (
-                                              <Lock className="h-3 w-3 text-red-500" />
+                                            {adminLocked ? (
+                                              <Lock className="h-3 w-3 text-yellow-600" title="Bloqueado por el Administrador" />
+                                            ) : comisionLocked ? (
+                                              <Lock className="h-3 w-3 text-red-500" title="Bloqueado por la Comisión" />
                                             ) : (
-                                              <span className="text-[8px] text-gray-400">?</span>
+                                              <Unlock className="h-3 w-3 text-green-600" title="Editable por el Docente" />
                                             )}
                                           </div>
                                         ) : (
-                                          cell.isLocked && <Lock className="h-3 w-3 text-amber-600 absolute top-1 right-1 opacity-70 pointer-events-none" />
+                                          anyCellLocked && <Lock className="h-3 w-3 text-amber-600 absolute top-1 right-1 opacity-70 pointer-events-none" />
                                         )}
                                       </div>
                                     </td>

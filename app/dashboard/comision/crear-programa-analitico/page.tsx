@@ -2289,6 +2289,9 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
     setModalCell(null);
     setEditContent("");
   }
+  // Detecta si una celda fue bloqueada por el admin (isLocked=true pero docenteEditable no es false)
+  const isAdminLockedCell = (c: TableCell) => c.isLocked === true && c.docenteEditable !== false;
+
   const handleCellClick = (id: string, e: React.MouseEvent) => {
     if (configModeDocente) {
       setprogramas(prev => prev.map(prog =>
@@ -2298,9 +2301,14 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
             ...tab,
             rows: tab.rows.map(row => ({
               ...row,
-              cells: row.cells.map(c => c.id === id
-                ? { ...c, docenteEditable: c.docenteEditable === false ? true : false }
-                : c)
+              cells: row.cells.map(c => {
+                if (c.id === id) {
+                  if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+                  const isCurrentlyLocked = c.docenteEditable === false;
+                  return { ...c, docenteEditable: isCurrentlyLocked ? true : false, isLocked: !isCurrentlyLocked };
+                }
+                return c;
+              })
             }))
           }))
         }
@@ -2318,7 +2326,10 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
           ...tab,
           rows: tab.rows.map(row => ({
             ...row,
-            cells: row.cells.map(c => ({ ...c, docenteEditable: enable }))
+            cells: row.cells.map(c => {
+              if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+              return { ...c, docenteEditable: enable, isLocked: !enable };
+            })
           }))
         }))
       }
@@ -3284,13 +3295,16 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
               return (isHeader || isSeparator || isVertical || isVisadoTab) ? 'justify-center' : 'justify-start';
             })();
 
-            const docenteFlag = cell.docenteEditable;
+            const adminLocked = isAdminLockedCell(cell);
+            const comisionLocked = cell.docenteEditable === false;
+            const anyCellLocked = adminLocked || comisionLocked;
+            
             const configModeClass = configModeDocente
-              ? docenteFlag === true
-                ? 'ring-2 ring-inset ring-green-500 bg-green-50/60 cursor-pointer'
-                : docenteFlag === false
+              ? adminLocked
+                ? 'ring-2 ring-inset ring-yellow-400 bg-yellow-100 cursor-not-allowed'
+                : comisionLocked
                   ? 'ring-2 ring-inset ring-red-400 bg-red-50/60 cursor-pointer'
-                  : 'ring-1 ring-inset ring-gray-300 bg-gray-50/40 cursor-pointer'
+                  : 'ring-2 ring-inset ring-green-500 bg-green-50/60 cursor-pointer'
               : '';
 
             return (
@@ -3301,15 +3315,15 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                   ${configModeDocente ? configModeClass : (
                     isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"
                   )}
-                  ${!configModeDocente && cell.isLocked ? "bg-amber-50/60" : ""}
+                  ${!configModeDocente && anyCellLocked ? "bg-yellow-200" : ""}
                   ${!configModeDocente && isSelected ? "ring-2 ring-inset ring-emerald-500 z-10" : ""}
                   ${!configModeDocente && isReadOnly ? "bg-gray-100/50 cursor-not-allowed" : ""}
-                  ${!configModeDocente && !isReadOnly && !cell.isLocked ? "cursor-pointer" : ""}
+                  ${!configModeDocente && !isReadOnly && !anyCellLocked ? "cursor-pointer" : ""}
                 `}
                 style={{
                   backgroundColor: configModeDocente
-                    ? (docenteFlag === true ? '#f0fdf4' : docenteFlag === false ? '#fef2f2' : '#f9fafb')
-                    : (cell.isLocked ? '#fffbeb' : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'))),
+                    ? (adminLocked ? '#fef08a' : comisionLocked ? '#fef2f2' : '#f0fdf4')
+                    : (anyCellLocked ? '#fef08a' : (cell.backgroundColor || (isHeader ? '#f9fafb' : '#ffffff'))),
                   color: cell.textColor,
                   width: widthStyle,
                   minWidth: minWidthStyle,
@@ -3320,7 +3334,7 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                 colSpan={cell.colSpan || 1}
                 onClick={(e) => handleCellClick(cell.id, e)}
                 onDoubleClick={() => {
-                  if (configModeDocente || cell.isLocked) return;
+                  if (configModeDocente || anyCellLocked) return;
                   // Abrir modal grande para ver/editar contenido
                   setModalCell({ id: cell.id, content: displayContent, isEditable: cell.isEditable && !isReadOnly });
                   setEditContent(displayContent);
@@ -3360,16 +3374,16 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
                   )}
                   {configModeDocente ? (
                     <div className="absolute top-0 right-0 p-0.5">
-                      {docenteFlag === true ? (
-                        <Unlock className="h-3 w-3 text-green-600" />
-                      ) : docenteFlag === false ? (
-                        <Lock className="h-3 w-3 text-red-500" />
+                      {adminLocked ? (
+                        <Lock className="h-3 w-3 text-yellow-600" title="Bloqueado por el Administrador" />
+                      ) : comisionLocked ? (
+                        <Lock className="h-3 w-3 text-red-500" title="Bloqueado por la Comisión" />
                       ) : (
-                        <span className="text-[8px] text-gray-400">?</span>
+                        <Unlock className="h-3 w-3 text-green-600" title="Editable por el Docente" />
                       )}
                     </div>
                   ) : (
-                    cell.isLocked && <Lock className="h-3 w-3 text-amber-600 absolute top-1 right-1 opacity-70 pointer-events-none" />
+                    anyCellLocked && <Lock className="h-3 w-3 text-amber-600 absolute top-1 right-1 opacity-70 pointer-events-none" />
                   )}
                 </div>
               </td>

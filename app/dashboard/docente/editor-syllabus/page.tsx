@@ -651,7 +651,8 @@ export default function DocenteEditorSyllabusPage() {
                 }
               }
 
-              return { ...cell, content, isLocked: locked }
+              const comisionCell = comisionRow?.cells?.[cellIndex] || {};
+              return { ...cell, ...comisionCell, id: cell.id, content, isLocked: locked }
             })
           };
         })

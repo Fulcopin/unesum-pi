@@ -1044,6 +1044,64 @@ export default function EditorSyllabusComisionPage() {
     setSyllabi(p => p.map(s => s.id === id ? { ...s, ...updates, metadata: { ...s.metadata, ...(updates.metadata || {}), updatedAt: new Date().toISOString() } } : s))
   }
 
+  const syncLocksFromTemplate = (uiData: any, periodoStr: string) => {
+    const templateAdmin = savedSyllabi.find((s: any) => !s.asignatura_id && s.periodo === periodoStr);
+    if (!templateAdmin) return uiData;
+
+    let templateData = (templateAdmin as any).datos_syllabus || (templateAdmin as any).datos_tabla;
+    if (typeof templateData === 'string') {
+      try { templateData = JSON.parse(templateData); } catch (e) { return uiData; }
+    }
+    
+    if (!templateData?.tabs || !uiData?.tabs) return uiData;
+
+    const newTabs = uiData.tabs.map((tab: any, tIdx: number) => {
+      const tTab = templateData.tabs.find((t: any) => t.title === tab.title) || templateData.tabs[tIdx];
+      if (!tTab) return tab;
+
+      const lockedTemplateCells = tTab.rows.flatMap((r: any) => r.cells).filter((c: any) => c.isLocked === true);
+      const unlockedTemplateCells = tTab.rows.flatMap((r: any) => r.cells).filter((c: any) => c.isLocked === false);
+
+      const newRows = tab.rows.map((row: any, rIdx: number) => {
+        const tRow = tTab.rows[rIdx];
+        
+        const newCells = row.cells.map((cell: any, cIdx: number) => {
+          let shouldLock = cell.isLocked;
+          let bgColor = cell.backgroundColor;
+          let txtColor = cell.textColor;
+
+          if (tRow && tRow.cells[cIdx]) {
+            const tCell = tRow.cells[cIdx];
+            if (tCell.isLocked !== undefined) shouldLock = tCell.isLocked;
+            if (tCell.backgroundColor) bgColor = tCell.backgroundColor;
+            if (tCell.styles?.backgroundColor) bgColor = tCell.styles.backgroundColor;
+            if (tCell.textColor) txtColor = tCell.textColor;
+          } 
+          
+          if (shouldLock === undefined && cell.content && cell.content.trim().length > 0) {
+            const cellContentNorm = cell.content.trim().toUpperCase();
+            const matchedLocked = lockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
+            if (matchedLocked) {
+               shouldLock = true;
+               if (matchedLocked.backgroundColor) bgColor = matchedLocked.backgroundColor;
+               if (matchedLocked.styles?.backgroundColor) bgColor = matchedLocked.styles.backgroundColor;
+               if (matchedLocked.textColor) txtColor = matchedLocked.textColor;
+            } else {
+               const matchedUnlocked = unlockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
+               if (matchedUnlocked) shouldLock = false;
+            }
+          }
+
+          return { ...cell, isLocked: shouldLock, backgroundColor: bgColor, textColor: txtColor };
+        });
+        return { ...row, cells: newCells };
+      });
+      return { ...tab, rows: newRows };
+    });
+
+    return { ...uiData, tabs: newTabs };
+  };
+
   const handleLoadSyllabus = async (syllabusId: string) => {
     if (!syllabusId) return;
     const id = parseInt(syllabusId, 10);
@@ -1108,6 +1166,10 @@ export default function EditorSyllabusComisionPage() {
       }));
     } else if (editorData.rows) {
       editorData.tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: editorData.rows }];
+    }
+    
+    if (syllabusToLoad.periodo) {
+        editorData = syncLocksFromTemplate(editorData, syllabusToLoad.periodo);
     }
     
     setSyllabi([editorData]);
@@ -1268,6 +1330,9 @@ export default function EditorSyllabusComisionPage() {
     setModalCell(null);
     setEditContent("");
   }
+  // Detecta si una celda fue bloqueada por el admin (isLocked=true pero docenteEditable no es false, para diferenciar de los bloqueos propios de la comisión)
+  const isAdminLockedCell = (c: TableCell) => c.isLocked === true && c.docenteEditable !== false;
+
   const handleCellClick = (id: string, e: React.MouseEvent) => {
     // Si estamos en modo configuración docente, togglear docenteEditable
     if (configModeDocente) {
@@ -1275,7 +1340,9 @@ export default function EditorSyllabusComisionPage() {
         ...row,
         cells: row.cells.map(c => {
           if (c.id === id) {
-            return { ...c, docenteEditable: c.docenteEditable === false ? true : (c.docenteEditable === true ? false : false) };
+            if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+            const isCurrentlyLocked = c.docenteEditable === false;
+            return { ...c, docenteEditable: isCurrentlyLocked ? true : false, isLocked: !isCurrentlyLocked };
           }
           return c;
         })
@@ -1289,7 +1356,10 @@ export default function EditorSyllabusComisionPage() {
   const toggleDocenteEditableAll = (enable: boolean) => {
     const updated = tableData.map(row => ({
       ...row,
-      cells: row.cells.map(c => ({ ...c, docenteEditable: enable }))
+      cells: row.cells.map(c => {
+        if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+        return { ...c, docenteEditable: enable, isLocked: !enable };
+      })
     }));
     handleUpdateActiveTabRows(updated);
   }
@@ -2326,7 +2396,6 @@ export default function EditorSyllabusComisionPage() {
                           Haz clic en cada celda para alternar si el docente puede editarla.
                           <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-green-200 border border-green-400 inline-block"></span> = Editable</span>
                           <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block"></span> = Bloqueada</span>
-                          <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-300 inline-block"></span> = Sin configurar (usa lógica automática)</span>
                         </p>
                       </div>
                     )}
@@ -2526,19 +2595,28 @@ export default function EditorSyllabusComisionPage() {
                                         return false;
                                       })();
 
-                                      const docenteFlag = cell.docenteEditable;
+                                      const adminLocked = isAdminLockedCell(cell);
+                                      const comisionLocked = cell.docenteEditable === false;
+                                      const anyCellLocked = adminLocked || comisionLocked;
+                                      
                                       const configModeClass = configModeDocente
-                                        ? docenteFlag === true
-                                          ? 'ring-2 ring-inset ring-green-500 bg-green-50/60 cursor-pointer'
-                                          : docenteFlag === false
+                                        ? adminLocked
+                                          ? 'ring-2 ring-inset ring-yellow-400 bg-yellow-100 cursor-not-allowed'
+                                          : comisionLocked
                                             ? 'ring-2 ring-inset ring-red-400 bg-red-50/60 cursor-pointer'
-                                            : 'ring-1 ring-inset ring-gray-300 bg-gray-50/40 cursor-pointer'
+                                            : 'ring-2 ring-inset ring-green-500 bg-green-50/60 cursor-pointer'
                                         : '';
+
+                                      const justifyContent = (isHeaderForAlign || isFirstSectionLabel || shouldCenterHorizontally) ? 'justify-center' : 'justify-start';
+                                      const commonStyle = {
+                                        fontFamily: "'Times New Roman', Times, serif",
+                                        fontSize: cell.fontSize || (isVertical ? '9px' : '11pt')
+                                      };
 
                                       return (
                                         <td
                                           key={cell.id}
-                                          className={`border relative ${vertAlign} ${(baseIsHeader && !isFirstSectionLabel) ? 'font-bold' : ''} ${
+                                          className={`border relative transition-all duration-75 ease-in-out p-0 ${
                                             hasError
                                               ? 'border-red-500 bg-red-100 shadow-[inset_0_0_0_2px_rgba(239,68,68,1)] text-red-900 font-bold z-10'
                                               : configModeDocente ? configModeClass : (
@@ -2553,34 +2631,30 @@ export default function EditorSyllabusComisionPage() {
                                                 : isHeaderForAlign 
                                                   ? 'border-gray-300 bg-gray-100/80 font-bold text-gray-800' 
                                                   : 'border-gray-300 bg-white text-gray-700'
-                                          )} ${cell.isLocked && !configModeDocente ? 'bg-amber-50/60' : ''} ${!configModeDocente && !hasError && isSelected ? 'ring-2 ring-inset ring-blue-500 z-10 bg-blue-50' : ''} ${!configModeDocente && isReadOnly ? 'bg-gray-50 cursor-not-allowed text-gray-500' : !configModeDocente && !cell.isLocked ? 'cursor-cell' : ''}`}
+                                          )} ${!configModeDocente && anyCellLocked ? 'bg-yellow-200' : ''} ${!configModeDocente && !hasError && isSelected ? 'ring-2 ring-inset ring-blue-500 z-10 bg-blue-50' : ''} ${!configModeDocente && isReadOnly ? 'bg-gray-50 cursor-not-allowed text-gray-500' : !configModeDocente && !anyCellLocked ? 'cursor-cell' : ''}`}
                                           style={{ 
+                                            ...commonStyle,
                                             backgroundColor: configModeDocente 
-                                              ? (docenteFlag === true ? '#f0fdf4' : docenteFlag === false ? '#fef2f2' : '#f9fafb')
-                                              : (cell.isLocked ? '#fffbeb' : (cell.backgroundColor || (isFirstSectionLabel ? undefined : isHeaderForAlign ? '#f8fafc' : undefined))), 
+                                              ? (adminLocked ? '#fef08a' : comisionLocked ? '#fef2f2' : '#f0fdf4')
+                                              : (anyCellLocked ? '#fef08a' : (cell.backgroundColor || (isFirstSectionLabel ? undefined : isHeaderForAlign ? '#f8fafc' : undefined))), 
                                             width: cellWidth,
                                             minWidth: cellMinW,
                                             maxWidth: cellMaxW,
-                                            padding: 0,
-                                            fontFamily: "'Times New Roman', Times, serif",
+                                            height: '1px',
                                             ...(isFirstSection && isSimpleRow ? { borderBottom: '1px solid #e2e8f0' } : {}),
                                           }}
-                                          rowSpan={cell.rowSpan} 
-                                          colSpan={cell.colSpan}
+                                          rowSpan={cell.rowSpan || 1} 
+                                          colSpan={cell.colSpan || 1}
                                           onClick={(e) => handleCellClick(cell.id, e)}
-                                          onDoubleClick={() => { if (!configModeDocente && !cell.isLocked) { setModalCell({ id: cell.id, content: displayContent, isEditable: cell.isEditable && !isReadOnly }); setEditContent(displayContent); } }}
+                                          onDoubleClick={() => { if (!configModeDocente && cell.isEditable) { setModalCell({ id: cell.id, content: displayContent, isEditable: cell.isEditable && !isReadOnly }); setEditContent(displayContent); } }}
                                         >
                                           <div 
-                                            className={`w-full ${isHeaderForAlign || isVisadoTab || isFirstSectionLabel ? 'text-center' : `${shouldCenterHorizontally ? 'text-center' : 'text-left'}`} ${isFirstSectionLabel ? 'px-2 py-1' : isFirstSectionValue ? 'px-2 py-1' : isVisadoTab ? 'px-3 py-3' : 'px-1 py-0.5'}`} 
+                                            className={`w-full h-full flex items-center ${justifyContent} p-2 ${isVertical ? 'min-h-[120px]' : ''}`}
                                             style={{ 
                                               writingMode: isVertical ? 'vertical-rl' : 'horizontal-tb', 
                                               transform: isVertical ? 'rotate(180deg)' : 'none',
-                                              maxHeight: isVertical ? '100px' : 'none', 
-                                              whiteSpace: isVertical ? 'nowrap' : 'pre-wrap', 
-                                              overflow: 'hidden',
-                                              lineHeight: isFirstSection ? '1.4' : '1.3',
-                                              fontFamily: "'Times New Roman', Times, serif",
-                                              fontSize: cell.fontSize || (isVertical ? '9px' : '11pt')
+                                              textAlign: (isHeaderForAlign || isFirstSectionLabel) ? 'center' : 'left',
+                                              lineHeight: '1.3'
                                             }}
                                           >
                                             {editingCell === cell.id ? (
@@ -2602,16 +2676,16 @@ export default function EditorSyllabusComisionPage() {
                                             )}
                                             {configModeDocente ? (
                                               <div className="absolute top-0 right-0 p-0.5">
-                                                {docenteFlag === true ? (
-                                                  <Unlock className="h-3 w-3 text-green-600" />
-                                                ) : docenteFlag === false ? (
-                                                  <Lock className="h-3 w-3 text-red-500" />
+                                                {adminLocked ? (
+                                                  <Lock className="h-3 w-3 text-yellow-600" title="Bloqueado por el Administrador" />
+                                                ) : comisionLocked ? (
+                                                  <Lock className="h-3 w-3 text-red-500" title="Bloqueado por la Comisión" />
                                                 ) : (
-                                                  <span className="text-[8px] text-gray-400">?</span>
+                                                  <Unlock className="h-3 w-3 text-green-600" title="Editable por el Docente" />
                                                 )}
                                               </div>
                                             ) : (
-                                              cell.isLocked && <Lock className="h-3 w-3 text-amber-600 absolute top-1 right-1 opacity-70 pointer-events-none" />
+                                              anyCellLocked && <Lock className="h-3 w-3 text-amber-600 absolute top-1 right-1 opacity-70 pointer-events-none" />
                                             )}
                                           </div>
                                         </td>

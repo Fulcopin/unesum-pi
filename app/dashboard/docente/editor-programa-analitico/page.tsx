@@ -127,6 +127,44 @@ export default function DocenteEditorProgramaAnaliticoPage() {
     loadPrograma()
   }, [selectedPeriod, profesorInfo, selectedAsignaturaId])
 
+  const applyComisionLocks = (docenteData: any, comisionTemplate: any) => {
+    if (!docenteData || !comisionTemplate) return docenteData;
+    
+    // Convert to tabs if needed (just in case they are old formats)
+    let dTabs = docenteData.tabs || (docenteData.secciones ? docenteData.secciones.map((s:any, i:number) => ({ id: s.id || `tab-${i}`, title: s.titulo || s.title, rows: (s.filas || s.rows || []).map((r:any, ri:number) => ({ id: r.id || `row-${i}-${ri}`, cells: (r.celdas || r.cells || []).map((c:any, ci:number) => ({ id: c.id || `cell-${i}-${ri}-${ci}`, ...c })) })) })) : []);
+    let cTabs = comisionTemplate.tabs || (comisionTemplate.secciones ? comisionTemplate.secciones.map((s:any, i:number) => ({ id: s.id || `tab-${i}`, title: s.titulo || s.title, rows: (s.filas || s.rows || []).map((r:any, ri:number) => ({ id: r.id || `row-${i}-${ri}`, cells: (r.celdas || r.cells || []).map((c:any, ci:number) => ({ id: c.id || `cell-${i}-${ri}-${ci}`, ...c })) })) })) : []);
+
+    const updatedTabs = dTabs.map((dTab: any) => {
+      const cTab = cTabs.find((t: any) => t.id === dTab.id) || cTabs.find((t: any) => t.title === dTab.title);
+      if (!cTab) return dTab;
+
+      const updatedRows = dTab.rows.map((dRow: any, rIndex: number) => {
+        const cRow = cTab.rows.find((r: any) => r.id === dRow.id) || cTab.rows[rIndex];
+        if (!cRow) return dRow;
+
+        const updatedCells = dRow.cells.map((dCell: any, cIndex: number) => {
+          const cCell = cRow.cells.find((c: any) => c.id === dCell.id) || cRow.cells[cIndex];
+          if (!cCell) return dCell;
+
+          return {
+            ...dCell,
+            isLocked: cCell.isLocked,
+            docenteEditable: cCell.docenteEditable,
+            backgroundColor: cCell.styles?.backgroundColor || cCell.backgroundColor,
+            textColor: cCell.styles?.textColor || cCell.textColor,
+            textOrientation: cCell.styles?.textOrientation || cCell.textOrientation || dCell.textOrientation,
+          };
+        });
+
+        return { ...dRow, cells: updatedCells };
+      });
+
+      return { ...dTab, rows: updatedRows };
+    });
+
+    return { ...docenteData, tabs: updatedTabs };
+  };
+
   const loadPrograma = async () => {
     setLoading(true)
     setError(null)
@@ -139,47 +177,67 @@ export default function DocenteEditorProgramaAnaliticoPage() {
     }
 
     try {
-      // 1. Primero buscar si el docente ya tiene una versión guardada
+      // 1. Fetch Comision's data first
+      let comisionData = null;
+      try {
+        const comisionRes = await apiRequest(`/docente-editor/programa/comision?asignatura_id=${asignaturaId}&periodo=${selectedPeriod}`)
+        if (comisionRes.success && comisionRes.data) {
+          comisionData = comisionRes.data;
+          setProgramaComisionId(comisionRes.data.id)
+          
+          const periodoCargado = comisionRes.data.periodo
+          if (periodoCargado) {
+            const matched = periodos.find((p: any) =>
+              String(p.id) === String(periodoCargado) || p.nombre === periodoCargado
+            )
+            if (matched && String(matched.id) !== selectedPeriod) {
+              isAutoSyncingPeriod.current = true
+              setSelectedPeriod(String(matched.id))
+              setPeriodoAutoSyncMsg(`Periodo ajustado a "${matched.nombre}" (periodo del programa subido para tu asignatura)`)
+              setTimeout(() => { isAutoSyncingPeriod.current = false }, 200)
+            } else {
+              setPeriodoAutoSyncMsg(null)
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Error fetching comision data:", e)
+      }
+
+      // 2. Fetch Docente's data
       try {
         const docenteRes = await apiRequest(`/docente-editor/programa/mio?asignatura_id=${asignaturaId}&periodo=${selectedPeriod}`)
         if (docenteRes.success && docenteRes.data?.datos_programa) {
           let datos = docenteRes.data.datos_programa
           if (typeof datos === 'string') datos = JSON.parse(datos)
+          
+          // Merge with Comision's template
+          if (comisionData) {
+             let cData = comisionData.datos_programa;
+             if (typeof cData === 'string') cData = JSON.parse(cData);
+             datos = applyComisionLocks(datos, cData);
+          }
+
           processProgramaData(datos)
-          setProgramaComisionId(docenteRes.data.programa_comision_id)
+          if (docenteRes.data.programa_comision_id) {
+             setProgramaComisionId(docenteRes.data.programa_comision_id)
+          }
           setHasDocenteVersion(true)
           setLoading(false)
           return
         }
-      } catch (e) { /* No tiene versión propia, buscar la de comisión */ }
+      } catch (e) { /* No tiene versión propia, fallback a comisión */ }
 
-      // 2. Buscar programa de la comisión
-      const comisionRes = await apiRequest(`/docente-editor/programa/comision?asignatura_id=${asignaturaId}&periodo=${selectedPeriod}`)
-      if (comisionRes.success && comisionRes.data) {
-        let datos = comisionRes.data.datos_programa
+      // 3. Fallback a Comision Data
+      if (comisionData) {
+        let datos = comisionData.datos_programa
         if (typeof datos === 'string') datos = JSON.parse(datos)
         processProgramaData(datos)
-        setProgramaComisionId(comisionRes.data.id)
         setHasDocenteVersion(false)
-        
-        // Auto-sincronizar el selector de periodo con el periodo real del programa cargado
-        const periodoCargado = comisionRes.data.periodo
-        if (periodoCargado) {
-          const matched = periodos.find((p: any) =>
-            String(p.id) === String(periodoCargado) || p.nombre === periodoCargado
-          )
-          if (matched && String(matched.id) !== selectedPeriod) {
-            isAutoSyncingPeriod.current = true
-            setSelectedPeriod(String(matched.id))
-            setPeriodoAutoSyncMsg(`Periodo ajustado a "${matched.nombre}" (periodo del programa subido para tu asignatura)`)
-            setTimeout(() => { isAutoSyncingPeriod.current = false }, 200)
-          } else {
-            setPeriodoAutoSyncMsg(null)
-          }
-        }
       } else {
         setError("La comisión académica aún no ha subido un programa analítico para tu asignatura. Contacta a la comisión académica.")
       }
+
     } catch (e: any) {
       setError(e.message || "Error al cargar programa analítico")
     } finally {
