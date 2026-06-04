@@ -179,6 +179,12 @@ export default function EditorProgramaAnaliticoComisionPage() {
             }
           }
 
+          // Si la comisión había habilitado explícitamente esta celda (docenteEditable = true),
+          // RESPETAMOS esa decisión y no la volvemos a bloquear, ignorando la plantilla.
+          if (cell.docenteEditable === true) {
+             shouldLock = false;
+          }
+
           return { ...cell, isLocked: shouldLock, backgroundColor: bgColor, textColor: txtColor };
         });
         return { ...row, cells: newCells };
@@ -621,7 +627,10 @@ export default function EditorProgramaAnaliticoComisionPage() {
         ...row,
         cells: row.cells.map(c => {
           if (c.id === id) {
-            if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+            if (isAdminLockedCell(c)) {
+              // Comisión puede desbloquear celdas bloqueadas por el admin
+              return { ...c, isLocked: false, docenteEditable: true };
+            }
             // Toggle: si está bloqueada por comisión, desbloquear; si está libre, bloquear
             const isCurrentlyLocked = c.docenteEditable === false;
             return { ...c, docenteEditable: isCurrentlyLocked ? true : false, isLocked: !isCurrentlyLocked };
@@ -639,7 +648,13 @@ export default function EditorProgramaAnaliticoComisionPage() {
     const updated = tableData.map(row => ({
       ...row,
       cells: row.cells.map(c => {
-        if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+        if (isAdminLockedCell(c)) {
+           if (enable) {
+             // Si habilitamos todas, desbloqueamos también las del admin
+             return { ...c, isLocked: false, docenteEditable: true };
+           }
+           return c; // Bloqueo de admin, no se puede tocar si estamos bloqueando todas
+        }
         return { ...c, docenteEditable: enable, isLocked: !enable };
       })
     }));
@@ -701,8 +716,8 @@ export default function EditorProgramaAnaliticoComisionPage() {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const marginL = 8;
-    const marginR = 8;
+    const marginL = 5;
+    const marginR = 5;
     const contentWidth = pageWidth - marginL - marginR;
 
     // --- FIRMAS del documento (para sección VISADO) ---
@@ -735,46 +750,46 @@ export default function EditorProgramaAnaliticoComisionPage() {
 
     // --- ENCABEZADO: rectángulo azul de fondo ---
     doc.setFillColor(25, 50, 95);
-    doc.rect(marginL, 2, contentWidth, 14, 'F');
-    doc.setFontSize(9);
+    doc.rect(marginL, 2, contentWidth, 10, 'F');
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(255, 255, 255);
-    doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 7, { align: 'center' });
-    doc.setFontSize(8);
-    doc.text('PROGRAMA ANALÍTICO DE ASIGNATURA', pageWidth / 2, 12, { align: 'center' });
+    doc.text('UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ', pageWidth / 2, 6, { align: 'center' });
+    doc.setFontSize(7);
+    doc.text('PROGRAMA ANALÍTICO DE ASIGNATURA', pageWidth / 2, 10, { align: 'center' });
 
     // --- NOMBRE DEL PROGRAMA Y PERIODO (banda gris claro) ---
     const programaTitle = activePrograma.name || '';
     const periodoName = periodos.find((p: any) => String(p.id) === selectedPeriod || p.nombre === (activePrograma as any).periodo)?.nombre
       || (activePrograma as any).periodo || '';
     doc.setFillColor(240, 244, 250);
-    doc.rect(marginL, 16, contentWidth, 7, 'F');
-    doc.setFontSize(7);
+    doc.rect(marginL, 12.5, contentWidth, 5, 'F');
+    doc.setFontSize(6);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(25, 50, 95);
     const headerLine = [programaTitle, periodoName ? `Periodo: ${periodoName}` : ''].filter(Boolean).join('   |   ');
-    if (headerLine) doc.text(headerLine, pageWidth / 2, 20.5, { align: 'center' });
+    if (headerLine) doc.text(headerLine, pageWidth / 2, 16, { align: 'center' });
 
-    let currentY = 25;
+    let currentY = 18.5;
 
     // --- CONTENIDO POR CADA PESTAÑA ---
     for (const tab of activePrograma.tabs) {
       if (!tab.rows || tab.rows.length === 0) continue;
 
-      if (currentY + 15 > pageHeight - 8) {
+      if (currentY + 10 > pageHeight - 5) {
         doc.addPage();
-        currentY = 8;
+        currentY = 5;
       }
 
       // Título de sección: barra coloreada
-      const tabTitleH = 5;
+      const tabTitleH = 4;
       doc.setFillColor(59, 100, 160);
       doc.rect(marginL, currentY, contentWidth, tabTitleH, 'F');
-      doc.setFontSize(6.5);
+      doc.setFontSize(6);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(255, 255, 255);
-      doc.text(tab.title.toUpperCase(), marginL + 2, currentY + 3.5);
-      currentY += tabTitleH + 0.5;
+      doc.text(tab.title.toUpperCase(), marginL + 2, currentY + 3);
+      currentY += tabTitleH + 0.2;
 
       // Calcular número máximo de columnas lógicas
       let maxCols = 0;
@@ -833,8 +848,8 @@ export default function EditorProgramaAnaliticoComisionPage() {
               styles: {
                 fillColor: [255, 255, 255],
                 textColor: [30, 30, 30],
-                fontSize: 6,
-                cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
+                fontSize: 5,
+                cellPadding: { top: 0.3, right: 0.5, bottom: 0.3, left: 0.5 },
               }
             });
             currentLogCol++;
@@ -843,7 +858,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
             if (currentLogCol + cellSpan > maxCols) cellSpan = Math.max(1, maxCols - currentLogCol);
 
             const isHeader = cell.isHeader;
-            const content = (cell.content || '').replace(/\r\n/g, '\n');
+            const content = (cell.content || '').replace(/\s*(B\.B\.\d+\.|B\.C\.\d+\.)/g, '\n$1').trim().replace(/\r\n/g, '\n');
             const isPeriodoCell = periodoColStart >= 0 && currentLogCol >= periodoColStart && currentLogCol < periodoColStart + periodoColSpan;
 
             pdfRow.push({
@@ -854,8 +869,8 @@ export default function EditorProgramaAnaliticoComisionPage() {
                 fontStyle: isHeader ? 'bold' as const : 'normal' as const,
                 fillColor: isHeader ? [220, 229, 242] : (cell.backgroundColor || [255, 255, 255]),
                 textColor: isHeader ? [25, 50, 95] : [30, 30, 30],
-                fontSize: isHeader ? 6.5 : 6,
-                cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
+                fontSize: isHeader ? 5.5 : 5,
+                cellPadding: { top: 0.3, right: 0.5, bottom: 0.3, left: 0.5 },
                 halign: (isHeader || isPeriodoCell) ? 'center' as const : 'left' as const,
                 valign: 'top' as const,
                 overflow: 'linebreak' as const,
@@ -874,21 +889,21 @@ export default function EditorProgramaAnaliticoComisionPage() {
           startY: currentY,
           theme: 'grid',
           styles: {
-            fontSize: 6,
-            cellPadding: { top: 0.6, right: 1, bottom: 0.6, left: 1 },
+            fontSize: 3.8,
+            cellPadding: { top: 0.1, right: 0.2, bottom: 0.1, left: 0.2 },
             lineColor: [180, 190, 210],
             lineWidth: 0.12,
             overflow: 'linebreak',
             halign: 'left',
             valign: 'top',
             textColor: [30, 30, 30],
-            minCellHeight: 3,
+            minCellHeight: 1,
           },
-          margin: { left: marginL, right: marginR, top: 8 },
+          margin: { left: marginL, right: marginR, top: 5 },
         });
 
-        const finalY = (doc as any).lastAutoTable?.finalY ?? (doc as any).previousAutoTable?.finalY ?? currentY + 8;
-        currentY = finalY + 2;
+        const finalY = (doc as any).lastAutoTable?.finalY ?? (doc as any).previousAutoTable?.finalY ?? currentY + 2;
+        currentY = finalY + 0.5;
       }
 
       // Ceder el hilo al navegador entre pestañas para no congelar la UI
@@ -902,15 +917,15 @@ export default function EditorProgramaAnaliticoComisionPage() {
       { etapa: 'coordinador',        label: 'COORDINADOR/A DE CARRERA' },
       { etapa: 'docente',            label: 'DOCENTE' },
     ];
-    const VTITLE_H = 5, VHEADER_H = 7, VSIGN_H = 36;
-    const VTOTAL = VTITLE_H + VHEADER_H + VSIGN_H + 3;
-    if (currentY + VTOTAL > pageHeight - 5) { doc.addPage(); currentY = 8; }
-    currentY += 3;
+    const VTITLE_H = 3.5, VHEADER_H = 4.5, VSIGN_H = 18;
+    const VTOTAL = VTITLE_H + VHEADER_H + VSIGN_H + 2;
+    if (currentY + VTOTAL > pageHeight - 4) { doc.addPage(); currentY = 5; }
+    currentY += 1;
 
     doc.setFillColor(25, 50, 95);
     doc.rect(marginL, currentY, contentWidth, VTITLE_H, 'F');
-    doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
-    doc.text('VISADO', marginL + 4, currentY + 3.5);
+    doc.setFontSize(5); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
+    doc.text('VISADO', marginL + 4, currentY + 2.5);
     currentY += VTITLE_H;
 
     const colW = contentWidth / 4;
@@ -921,8 +936,8 @@ export default function EditorProgramaAnaliticoComisionPage() {
     VISADO_ETAPAS.forEach((cfg, i) => {
       const x = marginL + i * colW;
       if (i > 0) doc.line(x, currentY, x, currentY + VHEADER_H);
-      doc.setFontSize(5.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(25, 50, 95);
-      doc.text(doc.splitTextToSize(cfg.label, colW - 3), x + colW / 2, currentY + 4, { align: 'center' });
+      doc.setFontSize(4.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(25, 50, 95);
+      doc.text(doc.splitTextToSize(cfg.label, colW - 2), x + colW / 2, currentY + 3, { align: 'center' });
     });
     currentY += VHEADER_H;
     doc.setDrawColor(180, 190, 210); doc.setLineWidth(0.12);
@@ -932,14 +947,14 @@ export default function EditorProgramaAnaliticoComisionPage() {
       if (i > 0) doc.line(x, currentY, x, currentY + VSIGN_H);
       const eInfo = firmasData?.etapas?.find((e: any) => e.etapa === cfg.etapa);
       if (eInfo?.firmado && eInfo.firma) {
-        doc.setFontSize(6); doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 30);
-        doc.text(doc.splitTextToSize(eInfo.firma.usuario_nombre || '', colW - 4), x + colW / 2, currentY + 6, { align: 'center' });
-        if (eInfo.firma.qr_data_url) { try { doc.addImage(eInfo.firma.qr_data_url, 'PNG', x + (colW - 16) / 2, currentY + 10, 16, 16); } catch {} }
-        doc.setFontSize(5.5); doc.setTextColor(80, 80, 80);
-        doc.text(`Fecha: ${new Date(eInfo.firma.firmado_at).toLocaleDateString('es-EC')}`, x + colW / 2, currentY + VSIGN_H - 3, { align: 'center' });
+        doc.setFontSize(4.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 30);
+        doc.text(doc.splitTextToSize(eInfo.firma.usuario_nombre || '', colW - 2), x + colW / 2, currentY + 3, { align: 'center' });
+        if (eInfo.firma.qr_data_url) { try { doc.addImage(eInfo.firma.qr_data_url, 'PNG', x + (colW - 10) / 2, currentY + 4, 10, 10); } catch {} }
+        doc.setFontSize(4); doc.setTextColor(80, 80, 80);
+        doc.text(`Fecha: ${new Date(eInfo.firma.firmado_at).toLocaleDateString('es-EC')}`, x + colW / 2, currentY + VSIGN_H - 1, { align: 'center' });
       } else {
-        doc.setFontSize(6); doc.setFont('helvetica', 'italic'); doc.setTextColor(150, 150, 150);
-        doc.text('Pendiente de firma', x + colW / 2, currentY + VSIGN_H / 2 + 3, { align: 'center' });
+        doc.setFontSize(4.5); doc.setFont('helvetica', 'italic'); doc.setTextColor(150, 150, 150);
+        doc.text('Pendiente de firma', x + colW / 2, currentY + VSIGN_H / 2 + 1, { align: 'center' });
       }
     });
 
@@ -1370,7 +1385,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                   
                                   const configModeClass = configModeDocente
                                     ? adminLocked
-                                      ? 'ring-2 ring-inset ring-yellow-400 bg-yellow-100 cursor-not-allowed'
+                                      ? 'ring-2 ring-inset ring-yellow-400 bg-yellow-100 cursor-pointer'
                                       : comisionLocked
                                         ? 'ring-2 ring-inset ring-red-400 bg-red-50/60 cursor-pointer'
                                         : 'ring-2 ring-inset ring-green-500 bg-green-50/60 cursor-pointer'
@@ -1430,7 +1445,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
                                             className={`whitespace-pre-wrap break-words w-full ${isHeader ? 'text-center' : ''}`}
                                             style={{ wordBreak: 'break-word', lineHeight: '1.3' }}
                                           >
-                                            {cell.content.trim() || <span className="opacity-0">.</span>}
+                                            {(cell.content || '').replace(/\s*(B\.B\.\d+\.|B\.C\.\d+\.)/g, '\n$1').trim() || <span className="opacity-0">.</span>}
                                           </div>
                                         )}
                                         {configModeDocente ? (

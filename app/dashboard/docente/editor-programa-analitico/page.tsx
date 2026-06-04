@@ -379,6 +379,11 @@ export default function DocenteEditorProgramaAnaliticoPage() {
     return originalVal;
   };
 
+  const formatCellContent = (text: string): string => {
+    if (!text) return '';
+    return text.replace(/\s*(B\.B\.\d+\.|B\.C\.\d+\.)/g, '\n$1').trim();
+  };
+
   const getDisplayContent = (cells: TableCell[], idx: number): string => {
     const cell = cells[idx]
     if (idx > 0) {
@@ -388,11 +393,11 @@ export default function DocenteEditorProgramaAnaliticoPage() {
         return formatearNivelOrdinal(val)
       }
     }
-    if (cell.content?.trim()) return cell.content
+    if (cell.content?.trim()) return formatCellContent(cell.content)
     if (idx === 0) return ''
     const prevLabel = (cells[idx - 1].content || '').toUpperCase().trim()
-    if (prevLabel.includes('ASIGNATURA') && asignaturaNombreActual) return asignaturaNombreActual
-    if ((prevLabel.includes('PERIODO') || prevLabel.includes('PAO')) && periodoNombreActual) return periodoNombreActual
+    if (prevLabel.includes('ASIGNATURA') && asignaturaNombreActual) return formatCellContent(asignaturaNombreActual)
+    if ((prevLabel.includes('PERIODO') || prevLabel.includes('PAO')) && periodoNombreActual) return formatCellContent(periodoNombreActual)
     if (prevLabel === 'NIVEL' && nivelNombreActual) return formatearNivelOrdinal(nivelNombreActual)
     if (prevLabel === 'DOCENTE' && docenteNombreActual) return docenteNombreActual
     return ''
@@ -726,7 +731,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
                                             transform: isVertical ? 'rotate(180deg)' : undefined,
                                             minHeight: isVertical ? '120px' : 'auto',
                                             textAlign: (isFormRow && index === 2 && (row.cells[0].content || '').toUpperCase().trim() === 'NIVEL') ? 'center' : (isHeader ? 'center' : (cell.textAlign as any) || 'left'),
-                                            fontSize: cell.fontSize || (isVertical ? '9px' : '11px'),
+                                            fontSize: cell.fontSize || (isVertical ? '14px' : '16px'),
                                             fontWeight: cell.fontWeight || undefined,
                                           }}
                                         >

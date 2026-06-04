@@ -2691,7 +2691,7 @@ export default function EditorSyllabusComisionPage() {
                                       
                                       const configModeClass = configModeDocente
                                         ? adminLocked
-                                          ? 'ring-2 ring-inset ring-yellow-400 bg-yellow-100 cursor-not-allowed'
+                                          ? 'ring-2 ring-inset ring-yellow-400 bg-yellow-100 cursor-pointer'
                                           : comisionLocked
                                             ? 'ring-2 ring-inset ring-red-400 bg-red-50/60 cursor-pointer'
                                             : 'ring-2 ring-inset ring-green-500 bg-green-50/60 cursor-pointer'

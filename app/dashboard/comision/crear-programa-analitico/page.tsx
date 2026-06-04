@@ -2303,7 +2303,10 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
               ...row,
               cells: row.cells.map(c => {
                 if (c.id === id) {
-                  if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+                  if (isAdminLockedCell(c)) {
+                    // Comisión puede desbloquear celdas bloqueadas por el admin
+                    return { ...c, isLocked: false, docenteEditable: true };
+                  }
                   const isCurrentlyLocked = c.docenteEditable === false;
                   return { ...c, docenteEditable: isCurrentlyLocked ? true : false, isLocked: !isCurrentlyLocked };
                 }
@@ -2327,7 +2330,12 @@ function buscarEnWordData(wordData: Record<string, any>, etiqueta: string): any 
           rows: tab.rows.map(row => ({
             ...row,
             cells: row.cells.map(c => {
-              if (isAdminLockedCell(c)) return c; // Bloqueo de admin, no se puede tocar
+              if (isAdminLockedCell(c)) {
+                 if (enable) {
+                   return { ...c, isLocked: false, docenteEditable: true };
+                 }
+                 return c;
+              }
               return { ...c, docenteEditable: enable, isLocked: !enable };
             })
           }))
