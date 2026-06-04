@@ -1072,8 +1072,11 @@ export default function EditorSyllabusComisionPage() {
         setActiveSyllabusId(savedUIData.id)
       }
       
-      if (isUpdate) setSavedSyllabi(prev => prev.map(s => s.id === savedRecord.id ? savedRecord : s));
-      else setSavedSyllabi(prev => [savedRecord, ...prev]);
+      if (isUpdate) {
+        setSavedSyllabi(prev => prev.map(s => s.id === savedRecord.id ? { ...savedRecord, _source: 'comision' } : s));
+      } else {
+        setSavedSyllabi(prev => [{ ...savedRecord, _source: 'comision' }, ...prev]);
+      }
       
       alert("Syllabus guardado exitosamente!")
     } catch (error: any) {
@@ -1221,7 +1224,8 @@ export default function EditorSyllabusComisionPage() {
     
     // Solo aplicar plantilla del admin si el syllabus no viene de la tabla de comisión
     // (la comisión puede haber modificado los bloqueos del admin intencionalmente)
-    if (syllabusToLoad.periodo && (syllabusToLoad as any)._source !== 'comision') {
+    const currentSource = (syllabusToLoad as any)._source || 'comision';
+    if (syllabusToLoad.periodo && currentSource !== 'comision') {
         editorData = syncLocksFromTemplate(editorData, syllabusToLoad.periodo);
     }
     

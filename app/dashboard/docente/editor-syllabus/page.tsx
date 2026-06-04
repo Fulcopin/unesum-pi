@@ -314,13 +314,15 @@ export default function DocenteEditorSyllabusPage() {
               return {
                 ...row,
                 cells: (row.cells || []).map((cell: any, cellIndex: number) => {
+                  const comisionCell = comisionRow?.cells?.[cellIndex] || {};
                   const positionKey = getCellPositionKey(tabIndex, rowIndex, cellIndex)
                   const locked = cell.id in lockState.lockById
                     ? lockState.lockById[cell.id]
                     : (lockState.lockByPosition[positionKey] ?? false)
 
-                  // Check if this cell is editable by teacher
-                  const editable = isDocenteEditable(cell, rowIndex, cellIndex, tab.rows, lockState.lockById) && !locked;
+                  // Check if this cell is editable by teacher using comisionCell to respect explicit comision overrides
+                  const mergedCellForPerms = { ...cell, ...comisionCell, id: cell.id };
+                  const editable = isDocenteEditable(mergedCellForPerms, rowIndex, cellIndex, tab.rows, lockState.lockById) && !locked;
                   
                   let content = cell.content;
                   if (!editable) {
@@ -506,12 +508,14 @@ export default function DocenteEditorSyllabusPage() {
           return {
             ...row,
             cells: (row.cells || []).map((cell: any, cellIndex: number) => {
+              const comisionCell = comisionRow?.cells?.[cellIndex] || {};
               const positionKey = getCellPositionKey(0, rowIndex, cellIndex)
               const locked = cell.id in lockState.lockById
                 ? lockState.lockById[cell.id]
                 : (lockState.lockByPosition[positionKey] ?? false)
 
-              const editable = isDocenteEditable(cell, rowIndex, cellIndex, datos.rows, lockState.lockById) && !locked;
+              const mergedCellForPerms = { ...cell, ...comisionCell, id: cell.id };
+              const editable = isDocenteEditable(mergedCellForPerms, rowIndex, cellIndex, datos.rows, lockState.lockById) && !locked;
 
               let content = cell.content;
               if (!editable) {
@@ -651,7 +655,6 @@ export default function DocenteEditorSyllabusPage() {
                 }
               }
 
-              const comisionCell = comisionRow?.cells?.[cellIndex] || {};
               return { ...cell, ...comisionCell, id: cell.id, content, isLocked: locked }
             })
           };
@@ -1026,11 +1029,12 @@ export default function DocenteEditorSyllabusPage() {
   const isDocenteEditable = (cell: TableCell, rowIndex: number, cellIndex: number, allRows: TableRow[], currentLocks?: Record<string, boolean>): boolean => {
     if (!allRows || allRows.length === 0) return false
     const locks = currentLocks || lockedCells
-    // Si el admin bloqueó la celda (en la versión propia o en el mapa de bloqueos de comisión), no puede editar
-    if (cell.isLocked || locks[cell.id]) return false
     // Si la comisión configuró explícitamente el permiso, respetar esa configuración
     if ((cell as any).docenteEditable === true) return true
     if ((cell as any).docenteEditable === false) return false
+
+    // Si el admin bloqueó la celda (en la versión propia o en el mapa de bloqueos de comisión), no puede editar
+    if (cell.isLocked || locks[cell.id]) return false
     
     // Fallback: lógica automática por detección de etiquetas
     const currentRow = allRows[rowIndex]

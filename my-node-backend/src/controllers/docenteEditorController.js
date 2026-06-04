@@ -29,6 +29,11 @@ const buildComisionLockState = (datos) => {
 };
 
 const applyComisionLocksToDocente = (datos, lockState) => {
+  // Helper: checks if comision explicitly unlocked this cell.
+  // When comision sets isLocked=false AND docenteEditable=true, it means they
+  // intentionally overrode the admin template lock — we must respect that.
+  const comisionExplicitlyUnlocked = (cell) => cell.isLocked === false && cell.docenteEditable === true;
+
   if (Array.isArray(datos?.tabs)) {
     return {
       ...datos,
@@ -41,7 +46,11 @@ const applyComisionLocksToDocente = (datos, lockState) => {
             const templateLocked = Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)
               ? lockState.lockById[cell.id]
               : (lockState.lockByPosition[positionKey] ?? false);
-            // ADDITIVE: preserve existing locks from comision record, only add template locks
+            // If comision explicitly unlocked this cell, respect it over the admin template
+            if (comisionExplicitlyUnlocked(cell)) {
+              return { ...cell, isLocked: false };
+            }
+            // Otherwise: preserve existing locks OR add template lock (additive)
             return { ...cell, isLocked: !!cell.isLocked || templateLocked };
           })
         }))
@@ -59,7 +68,11 @@ const applyComisionLocksToDocente = (datos, lockState) => {
           const templateLocked = Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)
             ? lockState.lockById[cell.id]
             : (lockState.lockByPosition[positionKey] ?? false);
-          // ADDITIVE: preserve existing locks from comision record, only add template locks
+          // If comision explicitly unlocked this cell, respect it over the admin template
+          if (comisionExplicitlyUnlocked(cell)) {
+            return { ...cell, isLocked: false };
+          }
+          // Otherwise: preserve existing locks OR add template lock (additive)
           return { ...cell, isLocked: !!cell.isLocked || templateLocked };
         })
       }))
