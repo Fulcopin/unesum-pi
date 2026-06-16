@@ -153,6 +153,7 @@ exports.getAllAsignaturas = async (req, res) => {
 exports.getAsignaturaById = async (req, res) => {
     try {
         const { id } = req.params;
+        const Facultad = db.Facultad;
         
         const asignatura = await Asignatura.findByPk(id, {
             attributes: ['id', 'codigo', 'nombre'],
@@ -165,7 +166,36 @@ exports.getAsignaturaById = async (req, res) => {
                 {
                     model: Carrera,
                     as: 'carrera',
-                    attributes: ['id', 'nombre']
+                    attributes: ['id', 'nombre'],
+                    include: [
+                        {
+                            model: Facultad,
+                            as: 'facultad',
+                            attributes: ['id', 'nombre']
+                        }
+                    ]
+                },
+                {
+                    model: AsignaturaRequisito,
+                    as: 'asignatura_requisitos',
+                    include: [
+                        {
+                            model: Asignatura,
+                            as: 'requisito',
+                            attributes: ['id', 'codigo', 'nombre']
+                        }
+                    ]
+                },
+                {
+                    model: db.DistribucionHoras,
+                    as: 'horas',
+                    attributes: [
+                        ['horas_docencia', 'horasDocencia'],
+                        ['horas_practica', 'horasPractica'],
+                        ['horas_autonoma', 'horasAutonoma'],
+                        ['horas_vinculacion', 'horasVinculacion'],
+                        ['horas_practica_preprofesional', 'horasPracticaPreprofesional']
+                    ]
                 }
             ]
         });
@@ -177,8 +207,19 @@ exports.getAsignaturaById = async (req, res) => {
             });
         }
 
-        // Devolver datos simples
         const plainAsig = asignatura.get({ plain: true });
+
+        // Procesar prerrequisitos y correquisitos
+        const prereqs = [], correqs = [];
+        if (plainAsig.asignatura_requisitos) {
+            plainAsig.asignatura_requisitos.forEach(req => {
+                if (req.tipo === 'PRERREQUISITO' && req.requisito) prereqs.push(req.requisito.codigo);
+                if (req.tipo === 'CORREQUISITO' && req.requisito) correqs.push(req.requisito.codigo);
+            });
+        }
+        plainAsig.prerrequisito = prereqs.join(', ') || null;
+        plainAsig.correquisito = correqs.join(', ') || null;
+        delete plainAsig.asignatura_requisitos;
 
         return res.status(200).json({ 
             success: true,
@@ -193,6 +234,8 @@ exports.getAsignaturaById = async (req, res) => {
         });
     }
 };
+
+
 
 
 // controllers/asignaturaController.js

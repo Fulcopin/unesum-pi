@@ -42,7 +42,7 @@ interface ProgramaAnaliticoData { id: string | number; name: string; description
 interface SavedProgramaAnaliticoRecord { id: number; nombre: string; periodo: string; materias: string; datos_tabla: ProgramaAnaliticoData; created_at: string; updated_at: string; }
 
 /** Comisión: estructura de tabla definida por administración; solo edición de contenido. */
-const HERRAMIENTAS_TABLA_BLOQUEADAS = false
+const HERRAMIENTAS_TABLA_BLOQUEADAS = true
 
 export default function EditorProgramaAnaliticoComisionPage() {
   const { token, getToken } = useAuth()
@@ -126,8 +126,23 @@ export default function EditorProgramaAnaliticoComisionPage() {
   // HELPER: Sincronizar bloqueos desde la plantilla del admin
   const syncLocksFromTemplate = (uiData: any, periodoStr: string) => {
     // Buscar la plantilla del administrador para este periodo
-    const templateAdmin = savedProgramas.find(s => !s.asignatura_id && s.periodo === periodoStr);
-    if (!templateAdmin) return uiData;
+    // Primero: sin asignatura_id (plantilla maestra global)
+    const periodoObj = periodos.find((p: any) => p.id.toString() === periodoStr);
+    const periodoNombre = periodoObj?.nombre || '';
+    const templateAdmin = savedProgramas.find((s: any) => {
+      if (s._source === 'comision') return false;
+      const sp = String(s.periodo || '').trim();
+      const matchesPeriod = sp === periodoStr || (periodoNombre && sp === periodoNombre);
+      return matchesPeriod && !s.asignatura_id;
+    }) || savedProgramas.find((s: any) => {
+      if (s._source === 'comision') return false;
+      const sp = String(s.periodo || '').trim();
+      return sp === periodoStr || (periodoNombre && sp === periodoNombre);
+    });
+    if (!templateAdmin) {
+      console.warn('[PA syncLocks] No se encontró plantilla admin para periodo:', periodoStr, '| savedProgramas:', savedProgramas.map((s:any)=>({id:s.id,periodo:s.periodo,src:s._source,asig:s.asignatura_id})));
+      return uiData;
+    }
 
     let templateData = (templateAdmin as any).datos_tabla || (templateAdmin as any).datos_programa;
     if (typeof templateData === 'string') {
@@ -160,10 +175,12 @@ export default function EditorProgramaAnaliticoComisionPage() {
             if (tCell.backgroundColor) bgColor = tCell.backgroundColor;
             if (tCell.styles?.backgroundColor) bgColor = tCell.styles.backgroundColor;
             if (tCell.textColor) txtColor = tCell.textColor;
-          } 
+            // REPARACIÓN CRÍTICA: Forzar el contenido de la plantilla si está bloqueado por el admin
+            if (tCell.isLocked === true && tCell.content) cell.content = tCell.content;
+          }
           
           // 2. Si no hubo match por índice, intentar match por contenido (muy útil para headers o etiquetas)
-          if (shouldLock === undefined && cell.content && cell.content.trim().length > 0) {
+          if (shouldLock !== true && cell.content && cell.content.trim().length > 0) {
             const cellContentNorm = cell.content.trim().toUpperCase();
             
             // Buscar si esta celda exacta fue bloqueada en la plantilla
@@ -177,12 +194,6 @@ export default function EditorProgramaAnaliticoComisionPage() {
                const matchedUnlocked = unlockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
                if (matchedUnlocked) shouldLock = false;
             }
-          }
-
-          // Si la comisión había habilitado explícitamente esta celda (docenteEditable = true),
-          // RESPETAMOS esa decisión y no la volvemos a bloquear, ignorando la plantilla.
-          if (cell.docenteEditable === true) {
-             shouldLock = false;
           }
 
           return { ...cell, isLocked: shouldLock, backgroundColor: bgColor, textColor: txtColor };
@@ -1290,7 +1301,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
               {activeTab && (
                 <Card className="border-blue-100 shadow-md">
                   <CardContent className="p-4">
-                    <div className={`flex flex-wrap gap-2 mb-2 p-2 border rounded-md bg-blue-50/50 ${HERRAMIENTAS_TABLA_BLOQUEADAS ? "opacity-60 pointer-events-none" : ""}`}>
+                    <div className="flex flex-wrap gap-2 mb-2 p-2 border rounded-md bg-blue-50/50">
                        <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertRow('above')} disabled={isToolsDisabled}><Plus className="h-3 w-3 mr-1"/>Fila ↑</Button>
                        <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertRow('below')} disabled={isToolsDisabled}><Plus className="h-3 w-3 mr-1"/>Fila ↓</Button>
                        <Button size="sm" className="bg-white text-blue-700 border-blue-200" onClick={() => handleInsertColumn('left')} disabled={isToolsDisabled}><Plus className="h-3 w-3 mr-1"/>Col ←</Button>
@@ -1308,7 +1319,6 @@ export default function EditorProgramaAnaliticoComisionPage() {
                          onClick={() => setConfigModeDocente(!configModeDocente)} 
                          className={configModeDocente ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}
                          variant={configModeDocente ? "default" : "outline"}
-                         disabled={HERRAMIENTAS_TABLA_BLOQUEADAS}
                        >
                          <Settings className="h-4 w-4 mr-1" />
                          {configModeDocente ? 'Salir Config. Docente' : 'Config. Celdas Docente'}
@@ -1317,11 +1327,11 @@ export default function EditorProgramaAnaliticoComisionPage() {
                     {HERRAMIENTAS_TABLA_BLOQUEADAS && (
                       <p className="text-xs text-slate-600 mb-4 flex items-center gap-2">
                         <Lock className="h-3.5 w-3.5 shrink-0" />
-                        Caja de herramientas bloqueada: la estructura la define el administrador. Solo puede editar el contenido de las celdas permitidas.
+                        Caja de herramientas bloqueada: la estructura la define el administrador. Solo puede editar el contenido y la configuración de celdas.
                       </p>
                     )}
 
-                    {configModeDocente && !HERRAMIENTAS_TABLA_BLOQUEADAS && (
+                    {configModeDocente && (
                       <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="text-purple-800 font-bold text-sm flex items-center gap-2">

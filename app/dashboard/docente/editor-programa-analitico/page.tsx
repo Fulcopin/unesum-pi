@@ -546,9 +546,16 @@ export default function DocenteEditorProgramaAnaliticoPage() {
           )}
 
           {/* Información del editor */}
-          <div className="mb-6 p-3.5 bg-blue-50/40 border border-blue-100 rounded-xl text-sm text-blue-800 flex items-center gap-2.5 shadow-sm">
-            <Unlock className="h-4 w-4 text-blue-600 shrink-0" />
-            <span>Haz doble clic en las celdas habilitadas para editarlas. Las celdas bloqueadas por la comisión aparecen con un candado gris.</span>
+          <div className="mb-6 p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm shadow-sm">
+            <div className="flex items-center gap-4 flex-wrap font-medium">
+              <span className="flex items-center gap-1"><Unlock className="h-4 w-4 text-green-600" /> <span className="text-green-700">Editable (verde)</span></span>
+              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-gray-400" /> <span className="text-gray-600">Solo lectura</span></span>
+              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-amber-500" /> <span className="text-amber-700">Bloqueado por Admin</span></span>
+              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-red-500" /> <span className="text-red-700">Bloqueado por Comisión</span></span>
+            </div>
+            <p className="mt-2 text-slate-600 text-xs">
+              El Administrador y la Comisión Académica han definido la estructura y restricciones de este documento. Solo puedes editar el contenido de las celdas en color verde.
+            </p>
           </div>
 
           {/* Selector de Asignatura y Periodo */}
@@ -696,6 +703,8 @@ export default function DocenteEditorProgramaAnaliticoPage() {
                                     }
 
                                     const editable = isCellEditable(cell);
+                                    const isAdminLocked = cell.isLocked === true;
+                                    const isComisionLocked = cell.docenteEditable === false;
 
                                     return (
                                       <td
@@ -703,11 +712,14 @@ export default function DocenteEditorProgramaAnaliticoPage() {
                                         className={`
                                           border border-gray-200 
                                           relative transition-all duration-75 ease-in-out
-                                          ${isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"}
-                                          ${editable ? "hover:bg-blue-50/40 cursor-cell" : "bg-slate-50/60 cursor-not-allowed opacity-80"}
+                                          ${isAdminLocked ? 'border-yellow-400 bg-yellow-100/70 text-yellow-900' :
+                                            isComisionLocked ? 'border-red-300 bg-red-50/70 text-red-900' :
+                                            editable ? "hover:bg-green-50/40 border-green-300 bg-green-50/50 cursor-cell" :
+                                            isHeader ? "bg-gray-50 font-semibold text-gray-900" : "bg-white text-gray-700"
+                                          }
                                         `}
                                         style={{
-                                          backgroundColor: cell.backgroundColor || (isHeader ? '#f9fafb' : editable ? '#ffffff' : '#f8fafc'),
+                                          backgroundColor: isAdminLocked ? '#fef08a' : isComisionLocked ? '#fef2f2' : cell.backgroundColor || (isHeader ? '#f9fafb' : editable ? '#ffffff' : '#f8fafc'),
                                           color: cell.textColor,
                                           width: widthStyle,
                                           minWidth: minWidthStyle,
@@ -744,7 +756,7 @@ export default function DocenteEditorProgramaAnaliticoPage() {
                                             {editable ? (
                                               <Unlock className="h-3 w-3 text-green-500" />
                                             ) : (
-                                              <Lock className="h-3 w-3 text-slate-400" />
+                                              <Lock className={`h-3 w-3 ${isAdminLocked ? 'text-amber-500' : isComisionLocked ? 'text-red-400' : 'text-slate-400'}`} />
                                             )}
                                           </div>
                                         </div>

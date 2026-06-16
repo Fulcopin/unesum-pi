@@ -1572,17 +1572,58 @@ export default function DocenteEditorSyllabusPage() {
     const activeTab = syllabusData?.tabs.find(t => t.id === activeTabId)
     const isFirstSection = activeTab && (activeTab.title.toUpperCase().includes('GENERAL') || activeTab.title.toUpperCase().includes('INFORMACIÓN') || activeTab.title.toUpperCase().includes('DATOS'))
 
-    if (isFirstSection && rowIndex <= 5 && cellIndex > 0 && profesorInfo) {
+    // NUNCA auto-rellenar celdas separadoras
+    const rawContent = cell.content.trim()
+    if (rawContent === ':' || rawContent === '::') return cell.content
+
+    if (isFirstSection) {
+      const currentRow = tableData[rowIndex]
+      if (currentRow) {
+        const rowVisibleCols = currentRow.cells.filter(c => c.rowSpan > 0 && c.colSpan > 0).length;
+        // Forzar separador si es una fila de formulario (<= 4 columnas visibles) y es la celda índice 1
+        if (rowVisibleCols <= 4 && cellIndex === 1) return ':'
+      }
+    }
+
+    if (isFirstSection && cellIndex > 0 && profesorInfo) {
       const currentRow = tableData[rowIndex]
       if (!currentRow) return cell.content || ""
-      const prevCell = currentRow.cells[cellIndex - 1]
-      const etiqueta = prevCell?.content?.toUpperCase().trim() || ""
+      // Buscar la etiqueta real: saltando celdas separadoras (:)
+      let labelCell: TableCell | undefined
+      for (let i = cellIndex - 1; i >= 0; i--) {
+        const c = currentRow.cells[i]
+        const t = (c?.content || '').trim()
+        if (t !== ':' && t !== '::' && t.length > 0) { labelCell = c; break; }
+      }
+      const etiqueta = labelCell?.content?.toUpperCase().replace(/:/g, '').trim() || ""
       
       if (etiqueta.includes("PARALELO") && profesorInfo.paralelo?.nombre) {
         return profesorInfo.paralelo.nombre
       }
       if ((etiqueta.includes("PROFESOR") || etiqueta.includes("DOCENTE")) && !etiqueta.includes("PERFIL")) {
         return `${profesorInfo.nombres || ''} ${profesorInfo.apellidos || ''}`.trim()
+      }
+      // Auto-relleno de Carrera y Facultad (solo celdas vacías, nunca separadores)
+      const asigP = profesorInfo.asignatura || (profesorInfo.asignaturas?.[0])
+      if (asigP?.carrera) {
+        if (etiqueta.includes("FACULTAD") && asigP.carrera.facultad?.nombre) {
+          if (!cell.content?.trim()) return asigP.carrera.facultad.nombre
+        }
+        if (etiqueta.includes("CARRERA") && !etiqueta.includes("FACULTAD") && asigP.carrera.nombre) {
+          if (!cell.content?.trim()) return asigP.carrera.nombre
+        }
+      }
+      // Auto-relleno de Prerrequisito, Correquisito y Código (solo celdas vacías)
+      if (!cell.content?.trim()) {
+        if ((etiqueta.includes("PRERREQUISITO") || etiqueta.includes("PRE-REQUISITO") || etiqueta.includes("PRE REQUISITO")) && asigP?.prerrequisito) {
+          return asigP.prerrequisito
+        }
+        if ((etiqueta.includes("CORREQUISITO") || etiqueta.includes("CO-REQUISITO") || etiqueta.includes("CO REQUISITO")) && asigP?.correquisito) {
+          return asigP.correquisito
+        }
+        if (etiqueta.includes("CÓDIGO") && !etiqueta.includes("ASIGNATURA") && asigP?.codigo) {
+          return asigP.codigo
+        }
       }
     }
 
@@ -1824,14 +1865,15 @@ export default function DocenteEditorSyllabusPage() {
           )}
 
           {/* Legend */}
-          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
-            <div className="flex items-center gap-4 flex-wrap">
-              <span className="flex items-center gap-1"><Unlock className="h-4 w-4 text-green-600" /> Campos editables (verde)</span>
-              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-gray-400" /> Campos de solo lectura</span>
-              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-amber-400" /> Bloqueado por comisión académica</span>
+          <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+            <div className="flex items-center gap-4 flex-wrap font-medium">
+              <span className="flex items-center gap-1"><Unlock className="h-4 w-4 text-green-600" /> <span className="text-green-700">Editable (verde)</span></span>
+              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-gray-400" /> <span className="text-gray-600">Solo lectura</span></span>
+              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-amber-500" /> <span className="text-amber-700">Bloqueado por Admin</span></span>
+              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-red-500" /> <span className="text-red-700">Bloqueado por Comisión</span></span>
             </div>
-            <p className="mt-1 text-amber-700 text-xs">
-              Puedes editar: Paralelo, Horario, Perfil del profesor, Contenidos (HD, PFAE, TA), Metodologías, Recursos, Escenario, Bibliografía, Fecha, Criterios e Instrumentos de evaluación.
+            <p className="mt-1.5 text-slate-600 text-xs">
+              El Administrador y la Comisión Académica han definido la estructura y restricciones de este documento. Solo puedes editar el contenido de las celdas en color verde.
             </p>
           </div>
 
@@ -1940,6 +1982,7 @@ export default function DocenteEditorSyllabusPage() {
 
                                   const editable = isDocenteEditable(cell, rowIndex, cellIndex, tableData)
                                   const isAdminLocked = cell.isLocked || !!lockedCells[cell.id]
+                                  const isComisionLocked = (cell as any).docenteEditable === false
                                   let displayContent = getAutoFilledContent(cell, rowIndex, cellIndex)
                                   if (displayContent.trim() === 'CONTENIDOS') {
                                     displayContent = 'Contenidos';
@@ -2089,7 +2132,9 @@ export default function DocenteEditorSyllabusPage() {
                                         hasError
                                           ? 'border-red-500 bg-red-100 shadow-[inset_0_0_0_2px_rgba(239,68,68,1)] text-red-900 font-bold z-10'
                                           : isAdminLocked
-                                          ? 'border-amber-300 bg-amber-50/70 text-amber-900'
+                                          ? 'border-yellow-400 bg-yellow-100/70 text-yellow-900'
+                                          : isComisionLocked
+                                          ? 'border-red-300 bg-red-50/70 text-red-900'
                                           : editable
                                           ? 'border-green-300 bg-green-50/50 cursor-cell hover:bg-green-100/50'
                                           : isVisadoTab && cell.isHeader
@@ -2106,7 +2151,9 @@ export default function DocenteEditorSyllabusPage() {
                                       }`}
                                       style={{
                                         backgroundColor: isAdminLocked
-                                           ? '#fffbeb'
+                                           ? '#fef08a'
+                                           : isComisionLocked
+                                           ? '#fef2f2'
                                            : cell.backgroundColor || (isFirstSectionLabel ? undefined : isHeaderForAlign ? '#f8fafc' : undefined), fontFamily: "'Times New Roman', Times, serif",
                                         width: cellWidth,
                                         minWidth: cellMinW,
@@ -2130,7 +2177,7 @@ export default function DocenteEditorSyllabusPage() {
                                           transform: isVertical ? 'rotate(180deg)' : 'none',
                                           maxHeight: isVertical ? '100px' : 'none',
                                           whiteSpace: isVertical ? 'nowrap' : 'pre-wrap',
-                                          overflow: 'hidden',
+                                          overflow: isVertical ? 'hidden' : 'visible',
                                           lineHeight: isFirstSection ? '1.4' : '1.3',
                                           fontFamily: "'Times New Roman', Times, serif",
                                           fontSize: cell.fontSize || (isVertical ? '9px' : '11pt'),

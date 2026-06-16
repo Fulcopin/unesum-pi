@@ -162,6 +162,51 @@ exports.getById = async (req, res) => {
   }
 };
 
+// --- OBTENER PLANTILLA DE BLOQUEOS DEL ADMIN PARA UN PERIODO ---
+// GET /api/syllabi/admin-locks/:periodo
+// Devuelve los datos completos (con isLocked) del primer syllabus admin para ese periodo
+exports.getAdminLocks = async (req, res) => {
+  try {
+    const { periodo } = req.params;
+    const { Op } = require('sequelize');
+
+    // Intentar buscar por valor exacto O como nombre O como ID
+    const syllabi = await Syllabus.findAll({
+      where: {
+        [Op.or]: [
+          { periodo: periodo },
+          { periodo: periodo.toString() }
+        ]
+      },
+      order: [
+        // Preferir plantillas sin asignatura_id (generales del admin)
+        ['asignatura_id', 'ASC NULLS FIRST'],
+        ['updatedAt', 'DESC']
+      ],
+      attributes: ['id', 'nombre', 'periodo', 'asignatura_id', 'datos_syllabus', 'usuario_id']
+    });
+
+    if (!syllabi || syllabi.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No se encontró plantilla admin para periodo: ${periodo}`,
+        data: null
+      });
+    }
+
+    // Preferir la que no tiene asignatura_id (plantilla maestra general)
+    const template = syllabi.find(s => !s.asignatura_id) || syllabi[0];
+
+    return res.status(200).json({
+      success: true,
+      data: template
+    });
+  } catch (error) {
+    console.error('Error en getAdminLocks:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // --- ¡NUEVA FUNCIÓN AÑADIDA! ---
 // --- OBTENER LOS SYLLABI DEL USUARIO AUTENTICADO PARA EL ÚLTIMO PERIODO ---
 exports.getMine = async (req, res) => {

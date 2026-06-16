@@ -614,12 +614,112 @@ exports.obtenerSyllabusComision = async (req, res) => {
     }
     const result = syllabus.toJSON();
     try { result.datos_syllabus = JSON.parse(result.datos_syllabus); } catch(e) {}
+    // Aplicar bloqueos del admin SIEMPRE antes de devolver
+    result.datos_syllabus = await applyAdminLocksToData(result.datos_syllabus, result.periodo);
     return res.status(200).json({ success: true, data: result });
   } catch (error) {
     console.error('❌ Error al obtener syllabus comisión:', error);
     return res.status(500).json({ success: false, message: 'Error al obtener syllabus', error: error.message });
   }
 };
+
+// ============================================================
+// HELPER: Aplica los bloqueos del admin (tabla syllabi) sobre
+// los datos_syllabus de la comisión. Matching por posición.
+// ============================================================
+async function applyAdminLocksToData(datosSyllabus, periodoStr) {
+  if (!datosSyllabus || !datosSyllabus.tabs) return datosSyllabus;
+  try {
+    // Obtener todos los periodos para resolver ID ↔ nombre
+    let periodoValues = [periodoStr];
+    try {
+      const periodoRecord = await db.Periodo.findByPk(parseInt(periodoStr));
+      if (periodoRecord && periodoRecord.nombre) periodoValues.push(periodoRecord.nombre);
+      // También buscar si el periodoStr ya es el nombre
+      const byNombre = await db.Periodo.findOne({ where: { nombre: periodoStr } });
+      if (byNombre) periodoValues.push(byNombre.id.toString());
+    } catch(e) {}
+
+    // Buscar plantilla admin para este periodo (preferir sin asignatura_id = plantilla general)
+    const Syllabus = db.Syllabus;
+    const adminTemplate = await Syllabus.findOne({
+      where: { periodo: { [Op.in]: periodoValues }, asignatura_id: null },
+      order: [['updatedAt', 'DESC']],
+      attributes: ['id', 'periodo', 'datos_syllabus']
+    }) || await Syllabus.findOne({
+      where: { periodo: { [Op.in]: periodoValues } },
+      order: [['asignatura_id', 'ASC NULLS FIRST'], ['updatedAt', 'DESC']],
+      attributes: ['id', 'periodo', 'datos_syllabus']
+    });
+
+    if (!adminTemplate) {
+      console.log('[applyAdminLocksToData] No hay plantilla admin para periodo:', periodoStr, '| buscado en:', periodoValues);
+      return datosSyllabus;
+    }
+
+    let templateData = adminTemplate.datos_syllabus;
+    if (typeof templateData === 'string') templateData = JSON.parse(templateData);
+    if (!templateData || !templateData.tabs) return datosSyllabus;
+
+    console.log('[applyAdminLocksToData] ✅ Aplicando locks del admin ID:', adminTemplate.id);
+
+    const newTabs = datosSyllabus.tabs.map((tab, tIdx) => {
+      const tTab = templateData.tabs.find(t => t.title === tab.title) || templateData.tabs[tIdx];
+      if (!tTab || !tTab.rows) return tab;
+
+      const lockedCells = tTab.rows.flatMap(r => r.cells || []).filter(c => c.isLocked === true);
+
+      const newRows = (tab.rows || []).map((row, rIdx) => {
+        const tRow = tTab.rows[rIdx];
+        const newCells = (row.cells || []).map((cell, cIdx) => {
+          let isLocked = cell.isLocked;
+          let backgroundColor = cell.backgroundColor;
+          let textColor = cell.textColor;
+
+          // 1. Match por posición exacta (más confiable)
+          if (tRow && tRow.cells && tRow.cells[cIdx]) {
+            const tCell = tRow.cells[cIdx];
+            if (tCell.isLocked === true) {
+              isLocked = true;
+              if (tCell.backgroundColor) backgroundColor = tCell.backgroundColor;
+              if (tCell.styles && tCell.styles.backgroundColor) backgroundColor = tCell.styles.backgroundColor;
+              if (tCell.textColor) textColor = tCell.textColor;
+              // REPARACIÓN CRÍTICA: Forzar el contenido de la plantilla si está bloqueado por el admin
+              if (tCell.content === ':' || tCell.content === '::') {
+                cell.content = tCell.content;
+              } else if (cell.docenteEditable !== true && tCell.content !== undefined && tCell.content !== null) {
+                cell.content = tCell.content;
+              }
+            }
+          }
+
+          // 2. Fallback: match por contenido del label
+          if (isLocked !== true && cell.content && cell.content.trim().length > 0) {
+            const norm = cell.content.trim().toUpperCase();
+            const matched = lockedCells.find(tc => tc.content && tc.content.trim().toUpperCase() === norm);
+            if (matched) {
+              isLocked = true;
+              if (matched.backgroundColor) backgroundColor = matched.backgroundColor;
+              // NOTA: No forzamos contenido en fallback para evitar sobrescribir campos que casualmente coinciden
+            }
+          }
+
+          // Respetar docenteEditable explícito de la comisión
+          if (cell.docenteEditable === true) isLocked = false;
+
+          return { ...cell, isLocked, backgroundColor, textColor };
+        });
+        return { ...row, cells: newCells };
+      });
+      return { ...tab, rows: newRows };
+    });
+
+    return { ...datosSyllabus, tabs: newTabs };
+  } catch(e) {
+    console.error('[applyAdminLocksToData] Error:', e.message);
+    return datosSyllabus;
+  }
+}
 
 // 📖 OBTENER SYLLABUS COMISIÓN POR ASIGNATURA + PERIODO
 exports.obtenerSyllabusPorAsignaturaPeriodo = async (req, res) => {
@@ -629,7 +729,6 @@ exports.obtenerSyllabusPorAsignaturaPeriodo = async (req, res) => {
       return res.status(400).json({ success: false, message: 'asignatura_id y periodo son obligatorios' });
     }
     
-    // Buscar por periodo ID o nombre (registros viejos guardaron nombre, nuevos guardan ID)
     const periodoStr = periodo.toString();
     let periodoValues = [periodoStr];
     try {
@@ -645,6 +744,8 @@ exports.obtenerSyllabusPorAsignaturaPeriodo = async (req, res) => {
     }
     const result = syllabus.toJSON();
     try { result.datos_syllabus = JSON.parse(result.datos_syllabus); } catch(e) {}
+    // Aplicar bloqueos del admin SIEMPRE antes de devolver
+    result.datos_syllabus = await applyAdminLocksToData(result.datos_syllabus, periodoStr);
     return res.status(200).json({ success: true, data: result });
   } catch (error) {
     console.error('❌ Error al buscar syllabus comisión:', error);

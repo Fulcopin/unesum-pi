@@ -79,6 +79,10 @@ router.post('/plantilla/upload', authorize(['administrador']), upload.single('fi
 // PERMITIDO PARA: Solo 'administrador'
 router.post('/:id/marcar-plantilla', authorize(['administrador']), syllabusController.marcarComoPlantilla);
 
+// GET /api/syllabi/admin-locks/:periodo → Obtener plantilla de bloqueos del admin para un periodo
+// PERMITIDO PARA: comision_academica, comision, administrador, docente
+router.get('/admin-locks/:periodo', syllabusController.getAdminLocks);
+
 // GET /api/syllabi/plantilla/:periodo -> Obtener plantilla de referencia de un periodo
 // PERMITIDO PARA: Todos los roles autenticados
 router.get('/plantilla/:periodo', syllabusController.obtenerPlantillaPeriodo);

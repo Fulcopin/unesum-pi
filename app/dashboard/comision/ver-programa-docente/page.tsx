@@ -26,6 +26,8 @@ interface TabCell {
   textOrientation?: string;
   fontWeight?: string;
   fontSize?: string;
+  isLocked?: boolean;
+  docenteEditable?: boolean;
   styles?: {
     backgroundColor?: string;
     textColor?: string;
@@ -275,7 +277,10 @@ function ReadOnlyTable({
                 {row.cells.map((cell, cellIndex) => {
                   if ((cell.rowSpan ?? 1) === 0 || (cell.colSpan ?? 1) === 0) return null;
 
-                  const bg = cell.styles?.backgroundColor || cell.backgroundColor;
+                  const adminLocked = cell.isLocked === true && cell.docenteEditable !== false;
+                  const comisionLocked = cell.docenteEditable === false;
+
+                  const bg = adminLocked ? '#fef08a' : comisionLocked ? '#fef2f2' : (cell.styles?.backgroundColor || cell.backgroundColor);
                   const color = cell.styles?.textColor || cell.textColor;
                   const orientation = cell.styles?.textOrientation || cell.textOrientation;
                   const trimmed = (cell.content || '').trim();
@@ -318,6 +323,8 @@ function ReadOnlyTable({
                       } ${
                         cell.isHeader
                           ? 'bg-gray-100/80 font-bold text-gray-800'
+                          : adminLocked || comisionLocked
+                          ? 'text-gray-800'
                           : isFirstSection && isSimpleRow && cellIndex === 0
                           ? 'bg-gradient-to-r from-slate-50 to-gray-50 font-semibold text-gray-700'
                           : 'bg-white text-gray-700'
@@ -578,6 +585,10 @@ function VisorContent() {
               </button>
             ))}
             <div className="ml-auto flex-shrink-0 px-2 flex items-center gap-1">
+              <div className="hidden sm:flex items-center gap-3 text-[10px] text-gray-500 mr-2">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#fef08a] border border-yellow-300"></span>Bloq. Admin</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#fef2f2] border border-red-200"></span>Bloq. Comisión</span>
+              </div>
               {hasTabs && (
                 <button
                   onClick={handlePrintToPdf}

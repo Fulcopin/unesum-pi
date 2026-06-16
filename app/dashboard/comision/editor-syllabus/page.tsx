@@ -186,7 +186,7 @@ const extraerTablasNativasWord = async (file: File): Promise<ExtractedCell[][][]
 };
 
 /** Comisión: estructura de tabla definida por administración; solo edición de contenido. */
-const HERRAMIENTAS_TABLA_BLOQUEADAS = false
+const HERRAMIENTAS_TABLA_BLOQUEADAS = true
 
 export default function EditorSyllabusComisionPage() {
   const { token, getToken, user } = useAuth()
@@ -512,13 +512,10 @@ export default function EditorSyllabusComisionPage() {
         handleLoadSyllabus(String(primerSyllabus.id));
       } else if (activeSyllabus && !adminLocksAppliedRef.current.has(activeSyllabusId)) {
         // El mismo syllabus ya está cargado pero aún no se aplicaron los bloqueos del admin
-        const sylRecord = savedSyllabi.find((s: any) => Number(s.id) === Number(activeSyllabusId));
         adminLocksAppliedRef.current.add(activeSyllabusId);
-        // Solo aplicar si viene del admin (no de comisión): respetar lo que la comisión guardó
-        if ((sylRecord as any)?._source !== 'comision') {
-          const updated = syncLocksFromTemplate(activeSyllabus as any, selectedPeriod);
-          updateProgramaAnalitico(activeSyllabusId, { tabs: (updated as any).tabs });
-        }
+        // Siempre aplicar bloqueos del admin, incluso si el documento fue guardado por comisión
+        const updated = syncLocksFromTemplate(activeSyllabus as any, selectedPeriod);
+        updateProgramaAnalitico(activeSyllabusId, { tabs: (updated as any).tabs });
       }
     } else if (asignaturaIdParam && selectedPeriod) {
       // No encontrado en savedSyllabi, intentar buscar directamente en el backend
@@ -583,11 +580,8 @@ export default function EditorSyllabusComisionPage() {
         } else if (editorData.rows) {
           editorData.tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: editorData.rows }];
         }
-        // Aplicar bloqueos del admin solo si el syllabus viene de la tabla general (admin)
-        // Si viene de 'comision', la comisión ya guardó su estado de bloqueos → no sobrescribir
-        if (syllabusData.periodo && source !== 'comision') {
-          editorData = syncLocksFromTemplate(editorData, syllabusData.periodo);
-        }
+        // Aplicar bloqueos del admin SIEMPRE — llamada directa a la API para evitar problemas de timing
+        editorData = await applyAdminLocksFromAPI(editorData, syllabusData.periodo || selectedPeriod || periodoParam || '');
         setSyllabi([editorData]);
         setActiveSyllabusId(editorData.id);
         setActiveTabId(editorData.tabs?.[0]?.id || null);
@@ -667,6 +661,12 @@ export default function EditorSyllabusComisionPage() {
         setActiveSyllabusId(editorData.id);
         setActiveTabId(editorData.tabs?.[0]?.id || null);
         
+        // Aplicar bloqueos del admin directamente desde la API
+        const periodo = syllabusData.periodo || selectedPeriod || '';
+        applyAdminLocksFromAPI(editorData, periodo).then(lockedData => {
+          setSyllabi([lockedData]);
+        });
+        
         // También agregar a savedSyllabi para que el guardar pueda detectarlo
         setSavedSyllabi(prev => {
           const exists = prev.find(s => s.id === syllabusData.id);
@@ -678,6 +678,93 @@ export default function EditorSyllabusComisionPage() {
     };
     cargarSyllabusDirecto();
   }, [syllabusIdParam]);
+
+  // Funcion helper para obtener y aplicar bloqueos del admin directamente desde la API
+  const applyAdminLocksFromAPI = async (editorData: any, periodoStr: string): Promise<any> => {
+    if (!periodoStr) return editorData;
+    try {
+      const periodoObj = periodos.find((p: any) => p.id.toString() === periodoStr)
+        || periodos.find((p: any) => p.nombre === periodoStr);
+      const periodoNombre = periodoObj?.nombre || periodoStr;
+      const periodoId = periodoObj?.id?.toString() || periodoStr;
+
+      let templateData: any = null;
+      for (const pVal of Array.from(new Set([periodoStr, periodoNombre, periodoId]))) {
+        try {
+          const res = await apiRequest(`/api/syllabi/admin-locks/${encodeURIComponent(pVal)}`);
+          if (res?.success && res?.data) {
+            let tData = res.data.datos_syllabus;
+            if (typeof tData === 'string') tData = JSON.parse(tData);
+            if (tData?.tabs) { templateData = tData; break; }
+          }
+        } catch(e) { /* try next */ }
+      }
+
+      if (!templateData) {
+        console.warn('[applyAdminLocksFromAPI] No se encontro plantilla para periodo:', periodoStr);
+        return editorData;
+      }
+
+      console.log('[applyAdminLocksFromAPI] Plantilla encontrada, aplicando bloqueos...');
+
+
+      const newTabs = editorData.tabs.map((tab: any, tIdx: number) => {
+        const tTab = templateData.tabs.find((t: any) => t.title === tab.title) || templateData.tabs[tIdx];
+        if (!tTab) return tab;
+
+        const lockedTemplateCells = tTab.rows.flatMap((r: any) => r.cells).filter((c: any) => c.isLocked === true);
+
+        const newRows = tab.rows.map((row: any, rIdx: number) => {
+          const tRow = tTab.rows[rIdx];
+          const newCells = row.cells.map((cell: any, cIdx: number) => {
+            let shouldLock = cell.isLocked;
+            let bgColor = cell.backgroundColor;
+            let txtColor = cell.textColor;
+
+            if (tRow && tRow.cells[cIdx]) {
+              const tCell = tRow.cells[cIdx];
+              if (tCell.isLocked === true) {
+                shouldLock = true;
+                if (tCell.backgroundColor) bgColor = tCell.backgroundColor;
+                if (tCell.styles?.backgroundColor) bgColor = tCell.styles.backgroundColor;
+                if (tCell.textColor) txtColor = tCell.textColor;
+                // REPARACIÓN CRÍTICA: Forzar el contenido de la plantilla si está bloqueado por el admin
+                // Siempre reparar separadores, o reparar contenido normal SOLO si la comisión no lo ha desbloqueado
+                if (tCell.content === ':' || tCell.content === '::') {
+                  cell.content = tCell.content;
+                } else if (cell.docenteEditable !== true && tCell.content !== undefined && tCell.content !== null) {
+                  cell.content = tCell.content;
+                }
+              }
+            }
+
+            // Fallback: match por contenido
+            if (shouldLock !== true && cell.content && cell.content.trim().length > 0) {
+              const norm = cell.content.trim().toUpperCase();
+              const matched = lockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === norm);
+              if (matched) {
+                shouldLock = true;
+                if (matched.backgroundColor) bgColor = matched.backgroundColor;
+                if (matched.styles?.backgroundColor) bgColor = matched.styles.backgroundColor;
+              }
+            }
+
+            // Respetar docenteEditable explícito de la comisión
+            if (cell.docenteEditable === true) shouldLock = false;
+
+            return { ...cell, isLocked: shouldLock, backgroundColor: bgColor, textColor: txtColor };
+          });
+          return { ...row, cells: newCells };
+        });
+        return { ...tab, rows: newRows };
+      });
+
+      return { ...editorData, tabs: newTabs };
+    } catch(e) {
+      console.error('[applyAdminLocksFromAPI] Error:', e);
+      return editorData;
+    }
+  };
 
   // El período guardado puede ser nombre; el Select usa id — cubre URL ?id= y carga desde la lista
   useEffect(() => {
@@ -695,14 +782,8 @@ export default function EditorSyllabusComisionPage() {
     if (!activeSyllabusId || !activeSyllabus) return;
     if (!selectedPeriod || periodos.length === 0) return;
     if (savedSyllabi.length === 0) return;
-    if (adminLocksAppliedRef.current.has(activeSyllabusId)) return;
-    // Si el syllabus ya fue guardado por la comisión, respetar sus bloqueos guardados
-    if (sourceParam === 'comision') {
-      adminLocksAppliedRef.current.add(activeSyllabusId);
-      return;
-    }
-
     adminLocksAppliedRef.current.add(activeSyllabusId);
+    // Siempre aplicar bloqueos del admin incluso si el syllabus es de la comisión
     const updated = syncLocksFromTemplate(activeSyllabus as any, selectedPeriod);
     updateProgramaAnalitico(activeSyllabusId, { tabs: (updated as any).tabs });
   }, [syllabusIdParam, activeSyllabusId, selectedPeriod, savedSyllabi.length, periodos.length]);
@@ -1094,12 +1175,25 @@ export default function EditorSyllabusComisionPage() {
     // Flexible period matching: admin saves period as NAME, comision saves as ID
     const periodoObj = periodos.find((p: any) => p.id.toString() === periodoStr);
     const periodoNombre = periodoObj?.nombre || '';
+    // Buscar plantilla admin: primero sin asignatura_id (plantilla maestra global),
+    // luego con _source 'general' que tiene celdas bloqueadas.
     const templateAdmin = savedSyllabi.find((s: any) => {
-      if (s.asignatura_id) return false; // Solo plantillas generales (sin asignatura específica)
+      if (s._source === 'comision') return false; // Nunca usar syllabus de comisión como plantilla de bloqueo
+      const sp = String(s.periodo || '').trim();
+      const matchesPeriod = sp === periodoStr || (periodoNombre && sp === periodoNombre);
+      if (!matchesPeriod) return false;
+      // Preferir plantilla general (sin asignatura_id)
+      return !s.asignatura_id;
+    }) || savedSyllabi.find((s: any) => {
+      // Fallback: cualquier plantilla de fuente 'general' con celdas bloqueadas en el mismo periodo
+      if (s._source === 'comision') return false;
       const sp = String(s.periodo || '').trim();
       return sp === periodoStr || (periodoNombre && sp === periodoNombre);
     });
-    if (!templateAdmin) return uiData;
+    if (!templateAdmin) {
+      console.warn('[syncLocks] No se encontró plantilla admin para periodo:', periodoStr, '| savedSyllabi:', savedSyllabi.map((s:any)=>({id:s.id,periodo:s.periodo,src:s._source,asig:s.asignatura_id})));
+      return uiData;
+    }
 
     let templateData = (templateAdmin as any).datos_syllabus || (templateAdmin as any).datos_tabla;
     if (typeof templateData === 'string') {
@@ -1134,8 +1228,8 @@ export default function EditorSyllabusComisionPage() {
             }
           } 
           
-          // Fallback: buscar por contenido si aún no está definido
-          if (shouldLock === undefined && cell.content && cell.content.trim().length > 0) {
+          // Fallback: buscar por contenido si aún no está definido o es falso
+          if (shouldLock !== true && cell.content && cell.content.trim().length > 0) {
             const cellContentNorm = cell.content.trim().toUpperCase();
             const matchedLocked = lockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
             if (matchedLocked) {
@@ -1144,6 +1238,11 @@ export default function EditorSyllabusComisionPage() {
                if (matchedLocked.styles?.backgroundColor) bgColor = matchedLocked.styles.backgroundColor;
                if (matchedLocked.textColor) txtColor = matchedLocked.textColor;
             }
+          }
+
+          // Respetar explícitamente si la comisión habilitó esta celda
+          if (cell.docenteEditable === true) {
+             shouldLock = false;
           }
 
           return { ...cell, isLocked: shouldLock, backgroundColor: bgColor, textColor: txtColor };
@@ -1222,12 +1321,9 @@ export default function EditorSyllabusComisionPage() {
       editorData.tabs = [{ id: `tab-${Date.now()}`, title: 'General', rows: editorData.rows }];
     }
     
-    // Solo aplicar plantilla del admin si el syllabus no viene de la tabla de comisión
-    // (la comisión puede haber modificado los bloqueos del admin intencionalmente)
-    const currentSource = (syllabusToLoad as any)._source || 'comision';
-    if (syllabusToLoad.periodo && currentSource !== 'comision') {
-        editorData = syncLocksFromTemplate(editorData, syllabusToLoad.periodo);
-    }
+    // Aplicar SIEMPRE los bloqueos del admin directamente desde la API
+    const periodoParaLock = syllabusToLoad.periodo || selectedPeriod || '';
+    editorData = await applyAdminLocksFromAPI(editorData, periodoParaLock);
     
     setSyllabi([editorData]);
     setActiveSyllabusId(editorData.id);
@@ -2005,6 +2101,13 @@ export default function EditorSyllabusComisionPage() {
     if (raw === ':' || raw === '::') return cell.content;
     
     const currentRow = tableData[rowIndex];
+
+    const isFirstSectionRow = activeTab && (activeTab.title.toUpperCase().includes('GENERAL') || activeTab.title.toUpperCase().includes('INFORMACIÓN') || activeTab.title.toUpperCase().includes('DATOS'));
+    if (isFirstSectionRow && currentRow) {
+      const rowVisibleCols = currentRow.cells.filter(c => c.rowSpan > 0 && c.colSpan > 0).length;
+      if (rowVisibleCols <= 4 && cellIndex === 1) return ':';
+    }
+
     if (cellIndex > 0 && currentRow) {
       // Find the real label: look backwards past any separator cells
       let labelCell: TableCell | undefined;
@@ -2027,6 +2130,25 @@ export default function EditorSyllabusComisionPage() {
       if (ASIGNATURA_LABELS.includes(etiqueta)) return asignaturaInfo.nombre || "";
       if (PAO_LABELS.includes(etiqueta)) return formatPeriodoSimple(selectedPeriod) || cell.content || "";
       if (NIVEL_LABELS.includes(etiqueta)) return asignaturaInfo.nivel?.nombre || "";
+
+      // Auto-relleno de Carrera y Facultad (solo si la celda está vacía)
+      if (!cell.content?.trim()) {
+        if (etiqueta.includes("FACULTAD") && asignaturaInfo.carrera?.facultad?.nombre) {
+          return asignaturaInfo.carrera.facultad.nombre;
+        }
+        if (etiqueta.includes("CARRERA") && !etiqueta.includes("FACULTAD") && asignaturaInfo.carrera?.nombre) {
+          return asignaturaInfo.carrera.nombre;
+        }
+        if ((etiqueta.includes("PRERREQUISITO") || etiqueta.includes("PRE-REQUISITO") || etiqueta.includes("PRE REQUISITO")) && asignaturaInfo.prerrequisito) {
+          return asignaturaInfo.prerrequisito;
+        }
+        if ((etiqueta.includes("CORREQUISITO") || etiqueta.includes("CO-REQUISITO") || etiqueta.includes("CO REQUISITO")) && asignaturaInfo.correquisito) {
+          return asignaturaInfo.correquisito;
+        }
+        if (etiqueta.includes("CÓDIGO") && asignaturaInfo.codigo) {
+          return asignaturaInfo.codigo;
+        }
+      }
 
       // ─── Auto-sumatoria en tiempo real para filas de totales en la pestaña Estructura ───
       const isEstructuraTab = activeTab && (activeTab.title.toUpperCase().includes('ESTRUCTURA') || (['ASIGNATURA', 'CONTENIDO', 'UNIDAD'].some(k => activeTab.title.toUpperCase().includes(k)) && !activeTab.title.toUpperCase().includes('DATOS') && !activeTab.title.toUpperCase().includes('GENERAL')));
@@ -2155,8 +2277,8 @@ export default function EditorSyllabusComisionPage() {
 
       if (asignaturaInfo.horas) {
         if (etiqueta.includes("HORAS DOCENCIA") || etiqueta === "DOCENCIA") return (asignaturaInfo.horas.horasDocencia > 0 ? asignaturaInfo.horas.horasDocencia.toString() : cell.content) || "";
-        if (etiqueta.includes("PRÁCTICAS") || etiqueta.includes("PRACTICAS")) return (asignaturaInfo.horas.horasPractica > 0 ? asignaturaInfo.horas.horasPractica.toString() : cell.content) || "";
-        if (etiqueta.includes("AUTÓNOMAS") || etiqueta.includes("AUTONOMAS")) return (asignaturaInfo.horas.horasAutonoma > 0 ? asignaturaInfo.horas.horasAutonoma.toString() : cell.content) || "";
+        if (etiqueta.includes("PRÁCTICAS") || etiqueta.includes("PRACTICAS") || etiqueta.includes("PRÁCTICA") || etiqueta.includes("PRACTICA")) return (asignaturaInfo.horas.horasPractica > 0 ? asignaturaInfo.horas.horasPractica.toString() : cell.content) || "";
+        if (etiqueta.includes("AUTÓNOMAS") || etiqueta.includes("AUTONOMAS") || etiqueta.includes("AUTÓNOMO") || etiqueta.includes("AUTONOMO")) return (asignaturaInfo.horas.horasAutonoma > 0 ? asignaturaInfo.horas.horasAutonoma.toString() : cell.content) || "";
         if (etiqueta.includes("VINCULACIÓN") || etiqueta.includes("VINCULACION")) return (asignaturaInfo.horas.horasVinculacion > 0 ? asignaturaInfo.horas.horasVinculacion.toString() : cell.content) || "";
       }
     }
@@ -2406,7 +2528,7 @@ export default function EditorSyllabusComisionPage() {
               {activeTab && (
                 <Card className="border-emerald-100 shadow-md">
                   <CardContent className="p-4">
-                    <div className={`flex flex-wrap gap-2 mb-2 p-2 border rounded-md bg-emerald-50/50 ${HERRAMIENTAS_TABLA_BLOQUEADAS ? "opacity-60 pointer-events-none" : ""}`}>
+                    <div className="flex flex-wrap gap-2 mb-2 p-2 border rounded-md bg-emerald-50/50">
                        <Button size="sm" onClick={() => handleInsertRow('above')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Fila ↑</Button>
                        <Button size="sm" onClick={() => handleInsertRow('below')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Fila ↓</Button>
                        <Button size="sm" onClick={() => handleInsertColumn('left')} disabled={!selectedCells.length || configModeDocente || HERRAMIENTAS_TABLA_BLOQUEADAS}><Plus className="h-3 w-3 mr-1"/>Col ←</Button>
@@ -2424,7 +2546,6 @@ export default function EditorSyllabusComisionPage() {
                          onClick={() => setConfigModeDocente(!configModeDocente)} 
                          className={configModeDocente ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}
                          variant={configModeDocente ? "default" : "outline"}
-                         disabled={HERRAMIENTAS_TABLA_BLOQUEADAS}
                        >
                          <Settings className="h-4 w-4 mr-1" />
                          {configModeDocente ? 'Salir Config. Docente' : 'Config. Celdas Docente'}
@@ -2433,11 +2554,11 @@ export default function EditorSyllabusComisionPage() {
                     {HERRAMIENTAS_TABLA_BLOQUEADAS && (
                       <p className="text-xs text-slate-600 mb-4 flex items-center gap-2">
                         <Lock className="h-3.5 w-3.5 shrink-0" />
-                        Caja de herramientas bloqueada: la estructura la define el administrador. Solo puede editar el contenido de las celdas permitidas.
+                        Caja de herramientas bloqueada: la estructura la define el administrador. Solo puede editar el contenido y la configuración de celdas.
                       </p>
                     )}
 
-                    {configModeDocente && !HERRAMIENTAS_TABLA_BLOQUEADAS && (
+                    {configModeDocente && (
                       <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="text-purple-800 font-bold text-sm flex items-center gap-2">
@@ -2637,7 +2758,7 @@ export default function EditorSyllabusComisionPage() {
                                       const dims = (() => {
                                         if (isFirstSection && isSimpleRow) {
                                           if (isSeparator) return { w: '18px', min: '18px', max: '18px' };
-                                          if (cellIndex === 0) return { w: '250px', min: '200px', max: '300px' };
+                                          if (cellIndex === 0) return { w: '320px', min: '260px', max: '380px' };
                                           return { w: 'auto', min: '60px', max: 'none' };
                                         }
                                         if (isVisadoTab) return { w: 'auto', min: '150px', max: 'none' };
@@ -2732,7 +2853,7 @@ export default function EditorSyllabusComisionPage() {
                                             width: cellWidth,
                                             minWidth: cellMinW,
                                             maxWidth: cellMaxW,
-                                            height: '1px',
+                                            padding: 0,
                                             ...(isFirstSection && isSimpleRow ? { borderBottom: '1px solid #e2e8f0' } : {}),
                                           }}
                                           rowSpan={cell.rowSpan || 1} 
@@ -2741,12 +2862,20 @@ export default function EditorSyllabusComisionPage() {
                                           onDoubleClick={() => { if (!configModeDocente && cell.isEditable) { setModalCell({ id: cell.id, content: displayContent, isEditable: cell.isEditable && !isReadOnly }); setEditContent(displayContent); } }}
                                         >
                                           <div 
-                                            className={`w-full h-full flex items-center ${justifyContent} p-2 ${isVertical ? 'min-h-[120px]' : ''}`}
+                                            className={`w-full flex ${
+                                              isVertical ? 'min-h-[120px] items-center' :
+                                              (isFirstSection && isSimpleRow) ? 'items-start' :
+                                              (isHeaderForAlign || shouldCenterVertically) ? 'items-center' : 'items-start'
+                                            } ${justifyContent} ${
+                                              isFirstSectionLabel ? 'px-2 py-1' :
+                                              isFirstSectionValue ? 'px-2 py-1' :
+                                              isVisadoTab ? 'px-3 py-3' : 'px-1 py-0.5'
+                                            }`}
                                             style={{ 
                                               writingMode: isVertical ? 'vertical-rl' : 'horizontal-tb', 
                                               transform: isVertical ? 'rotate(180deg)' : 'none',
                                               textAlign: (isHeaderForAlign || isFirstSectionLabel) ? 'center' : 'left',
-                                              lineHeight: '1.3'
+                                              lineHeight: isFirstSection ? '1.4' : '1.3'
                                             }}
                                           >
                                             {editingCell === cell.id ? (
