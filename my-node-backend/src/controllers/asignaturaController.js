@@ -253,11 +253,11 @@ exports.createAsignaturaBase = async (req, res) => {
     // Verificar si el código ya existe
     const asignaturaExistente = await Asignatura.findOne({ where: { codigo } });
     if (asignaturaExistente) {
+      // Si la asignatura ya existe, se considera una operación de actualización (Upsert automático)
+      // Especialmente útil para cargas masivas donde el frontend no la detectó previamente.
       await transaction.rollback();
-      return res.status(400).json({ 
-        success: false, 
-        message: `El código '${codigo}' ya está siendo usado por otra asignatura: ${asignaturaExistente.nombre}. Por favor, use un código diferente.` 
-      });
+      req.params = { id: asignaturaExistente.id };
+      return exports.updateAsignaturaBase(req, res);
     }
     
     const nuevaAsignatura = await Asignatura.create({

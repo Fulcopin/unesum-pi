@@ -621,6 +621,12 @@ export default function RegistroAsignaturaPage() {
     return tieneUnidad && tieneResultados;
   };
 
+  const getNombreAsignaturaPorCodigo = (codigo: string) => {
+    const allAsignaturas = [...asignaturasNivelAnterior, ...asignaturasNivelActual];
+    const asignatura = allAsignaturas.find((a) => a.codigo === codigo);
+    return asignatura ? asignatura.nombre : codigo;
+  };
+
   // Asignaturas incompletas → se muestran en el combo (aún necesitan ser completadas)
   const asignaturasIncompletas = useMemo(
     () => asignaturasDelNivel.filter((a) => !esCompleta(a)),
@@ -726,8 +732,7 @@ export default function RegistroAsignaturaPage() {
       "Correquisito",
     ];
 
-    for (let i = 1; i <= 40; i++) {
-      headers.push(`Unidad_${i}_Nombre`);
+    for (let i = 1; i <= 10; i++) {
       headers.push(`Unidad_${i}_Temas`);
       headers.push(`Unidad_${i}_Resultados`);
     }
@@ -742,21 +747,8 @@ export default function RegistroAsignaturaPage() {
       fuente = asignaturasDelNivel;
     }
 
-    // Ordenar fuente por nivel numérico para que el Excel quede en orden
-    const getValorNivel = (a: any) => {
-      const val = a.nivel?.codigo || a.nivel?.nombre || a.nivel?.ordinal || a.nivelNombre || "0";
-      const match = val.toString().match(/\d+/);
-      if (match) return parseInt(match[0], 10);
-      const ordinalMap: Record<string, number> = {
-        "primero": 1, "segundo": 2, "tercero": 3, "cuarto": 4, "quinto": 5,
-        "sexto": 6, "septimo": 7, "séptimo": 7, "octavo": 8, "noveno": 9, "decimo": 10, "décimo": 10
-      };
-      return ordinalMap[val.toString().toLowerCase().trim()] || 99;
-    };
+    // Ordenar fuente por código alfanumérico (TI01, TI02...) para que aparezcan en secuencia ascendente
     const fuenteOrdenada = [...fuente].sort((a, b) => {
-      const nivelDiff = getValorNivel(a) - getValorNivel(b);
-      if (nivelDiff !== 0) return nivelDiff;
-      // Ordenar por código alfanumérico (TI01, TI02...) para que aparezcan en secuencia
       return (a.codigo || "").localeCompare(b.codigo || "", undefined, { numeric: true, sensitivity: 'base' });
     });
 
@@ -765,8 +757,17 @@ export default function RegistroAsignaturaPage() {
       "6": "Sexto", "7": "Séptimo", "8": "Octavo", "9": "Noveno", "10": "Décimo",
     };
 
+    const getNombresFromCodigos = (codigos: string[] | undefined) => {
+      if (!codigos || codigos.length === 0) return "No aplica";
+      return codigos.map((codigo) => {
+        const asig = fuente.find((as) => as.codigo === codigo);
+        return asig ? asig.nombre : codigo;
+      }).join(", ");
+    };
+
     const rows = fuenteOrdenada.map((a) => {
-      let nivelRaw = (a as any).nivelNombre || (a as any).nivel?.ordinal || (a as any).nivel?.nombre || (a as any).nivel?.codigo || "";
+      const nivelEnEstado = niveles.find(n => n.id === a.nivel_id);
+      let nivelRaw = nivelEnEstado?.ordinal || nivelEnEstado?.nombre || (a as any).nivelNombre || (a as any).nivel?.ordinal || (a as any).nivel?.nombre || (a as any).nivel?.codigo || "";
       let nivelFormateado = NUMERO_A_ORDINAL[nivelRaw.toString().trim()] || nivelRaw;
       
       if (typeof nivelFormateado === 'string' && nivelFormateado.length > 0 && !NUMERO_A_ORDINAL[nivelRaw.toString().trim()]) {
@@ -777,12 +778,11 @@ export default function RegistroAsignaturaPage() {
         Codigo: a.codigo,
         Asignatura: a.nombre,
         Nivel: nivelFormateado,
-        Prerequisito: a.prerrequisitos_codigos?.join(", ") || "No aplica",
-        Correquisito: a.correquisitos_codigos?.join(", ") || "No aplica",
+        Prerequisito: getNombresFromCodigos(a.prerrequisitos_codigos),
+        Correquisito: getNombresFromCodigos(a.correquisitos_codigos),
       };
 
-      for (let i = 1; i <= 40; i++) {
-        baseRow[`Unidad_${i}_Nombre`] = a.unidades?.[i - 1]?.unidad || "";
+      for (let i = 1; i <= 10; i++) {
         baseRow[`Unidad_${i}_Temas`] = a.unidades?.[i - 1]?.descripcion || "";
         baseRow[`Unidad_${i}_Resultados`] = a.unidades?.[i - 1]?.resultados || "";
       }
@@ -799,8 +799,7 @@ export default function RegistroAsignaturaPage() {
         Prerequisito: "No aplica",
         Correquisito: "No aplica",
       };
-      for (let i = 1; i <= 40; i++) {
-        demoRow[`Unidad_${i}_Nombre`] = i === 1 ? "Unidad 1" : "";
+      for (let i = 1; i <= 10; i++) {
         demoRow[`Unidad_${i}_Temas`] = i === 1 ? "Temas de la unidad 1" : "";
         demoRow[`Unidad_${i}_Resultados`] = i === 1 ? "El estudiante puede..." : "";
       }
@@ -860,22 +859,24 @@ export default function RegistroAsignaturaPage() {
           continue; 
         }
 
-        // Construir unidades desde las columnas (hasta 40)
+        // Construir unidades desde las columnas (hasta 10)
         const unidades: UnidadData[] = [];
-        for (let i = 1; i <= 40; i++) {
-          const nombre = row[`Unidad_${i}_Nombre`]?.toString().trim() || "";
-          if (nombre) {
+        for (let i = 1; i <= 10; i++) {
+          const descripcion = row[`Unidad_${i}_Temas`]?.toString().trim() || "";
+          const resultados = row[`Unidad_${i}_Resultados`]?.toString().trim() || "";
+          if (descripcion || resultados) {
             unidades.push({
-              unidad: nombre,
-              descripcion: row[`Unidad_${i}_Temas`]?.toString().trim() || "",
-              resultados: row[`Unidad_${i}_Resultados`]?.toString().trim() || "",
+              unidad: row[`Unidad_${i}_Nombre`]?.toString().trim() || `Unidad ${i}`,
+              descripcion: descripcion,
+              resultados: resultados,
             });
           }
         }
 
         // Función para resolver prerrequisitos/correquisitos (convirtiendo nombres a códigos si el usuario escribió el nombre)
-        const resolverCodigos = (inputVal: string | undefined) => {
-          if (!inputVal || inputVal.trim().toLowerCase() === "no aplica") return [];
+        // Si el valor es "No aplica" o está vacío, retorna null para indicar "sin cambio"
+        const resolverCodigos = (inputVal: string | undefined): string[] | null => {
+          if (!inputVal || inputVal.trim().toLowerCase() === "no aplica") return null; // null = no cambiar
           const items = inputVal.split(",").map(s => s.trim()).filter(Boolean);
           const codigosFinales: string[] = [];
           for (const item of items) {
@@ -891,34 +892,55 @@ export default function RegistroAsignaturaPage() {
           return codigosFinales;
         };
 
-        const prereqCodigos = resolverCodigos(row["Prerequisito"]?.toString());
-        const correqCodigos = resolverCodigos(row["Correquisito"]?.toString());
+        // Si el Excel dice "No aplica", preservar los valores existentes en la BD (no borrarlos)
+        const prereqDelExcel = resolverCodigos(row["Prerequisito"]?.toString());
+        const correqDelExcel = resolverCodigos(row["Correquisito"]?.toString());
+        const prereqCodigos = prereqDelExcel !== null ? prereqDelExcel : (Array.isArray(asig.prerrequisitos_codigos) ? asig.prerrequisitos_codigos : []);
+        const correqCodigos = correqDelExcel !== null ? correqDelExcel : (Array.isArray(asig.correquisitos_codigos) ? asig.correquisitos_codigos : []);
 
-        // Guardar asignatura (PUT)
-        await apiRequest(`/asignaturas/${asig.id}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            nombre: asig.nombre,
-            codigo: asig.codigo,
-            carrera_id: asig.carrera_id,
-            nivel_id: asig.nivel_id,
-            organizacion_id: asig.organizacion_id,
-            prerrequisitos_codigos: prereqCodigos,
-            correquisitos_codigos: correqCodigos,
-          }),
-        });
+        // Guardar asignatura (PUT) SOLO si el Excel especificó nuevos prereqs/correqs
+        // Si ambos son null (== "No aplica"), no hay nada que actualizar → saltar el PUT
+        // para evitar cualquier riesgo de borrar accidentalmente los requisitos existentes
+        const requisitosCambiaron = prereqDelExcel !== null || correqDelExcel !== null;
+        if (requisitosCambiaron) {
+          await apiRequest(`/asignaturas/${asig.id}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              nombre: asig.nombre,
+              codigo: asig.codigo,
+              carrera_id: asig.carrera_id,
+              nivel_id: asig.nivel_id,
+              organizacion_id: asig.organizacion_id,
+              prerrequisitos_codigos: prereqCodigos,
+              correquisitos_codigos: correqCodigos,
+            }),
+          });
+        }
 
-        // Guardar horas (PUT)
-        await apiRequest(`/asignaturas/${asig.id}/horas`, {
-          method: "PUT",
-          body: JSON.stringify({
-            horasDocencia: parseInt(row["Docencia"]?.toString() || "0"),
-            horasPractica: parseInt(row["Practica"]?.toString() || "0"),
-            horasAutonoma: parseInt(row["Autonoma"]?.toString() || "0"),
-            horasVinculacion: parseInt(row["Vinculacion"]?.toString() || "0"),
-            horasPracticaPreprofesional: parseInt(row["Preprofesionales"]?.toString() || "0"),
-          }),
-        });
+
+        // Guardar horas (POST) SOLO si el Excel tiene columnas de horas definidas
+        // La plantilla de "Unidades y Resultados" NO tiene estas columnas, por lo que
+        // si están ausentes, se saltan para no sobreescribir los valores existentes con 0
+        const tieneColumnasHoras = (
+          row["Docencia"] !== undefined ||
+          row["Practica"] !== undefined ||
+          row["Autonoma"] !== undefined ||
+          row["Vinculacion"] !== undefined ||
+          row["Preprofesionales"] !== undefined
+        );
+        if (tieneColumnasHoras) {
+          await apiRequest(`/asignaturas/${asig.id}/horas`, {
+            method: "POST",
+            body: JSON.stringify({
+              horasDocencia: parseInt(row["Docencia"]?.toString() || "0"),
+              horasPractica: parseInt(row["Practica"]?.toString() || "0"),
+              horasAutonoma: parseInt(row["Autonoma"]?.toString() || "0"),
+              horasVinculacion: parseInt(row["Vinculacion"]?.toString() || "0"),
+              horasPracticaPreprofesional: parseInt(row["Preprofesionales"]?.toString() || "0"),
+            }),
+          });
+        }
+
 
         // Guardar unidades (POST) solo si se definieron en el Excel
         if (unidades.length > 0) {
@@ -1588,9 +1610,9 @@ export default function RegistroAsignaturaPage() {
       </div>
 
       <div id="tabla-asignaturas" className="mt-12">
-        <h2 className="text-2xl font-bold text-[#00563F]">Asignaturas con información completa</h2>
+        <h2 className="text-2xl font-bold text-[#00563F]">Asignaturas Registradas</h2>
         <p className="text-muted-foreground mb-4">
-            Asignaturas que ya tienen prerrequisito/correquisito, unidades temáticas y resultados de aprendizaje registrados.
+            Lista de asignaturas registradas en el nivel seleccionado.
         </p>
 
         {!nivel || !carrera ? (
@@ -1602,13 +1624,11 @@ export default function RegistroAsignaturaPage() {
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                 <p className="text-muted-foreground">Cargando asignaturas...</p>
             </Card>
-        ) : asignaturasCompletas.length === 0 ? (
+        ) : asignaturasDelNivel.length === 0 ? (
             <Card className="flex items-center justify-center p-8">
                 <AlertTriangle className="mr-2 h-5 w-5 text-yellow-500" />
                 <p className="text-muted-foreground">
-                  {asignaturasDelNivel.length === 0
-                    ? "No hay asignaturas registradas para este nivel."
-                    : "Ninguna asignatura tiene aún todos los datos completos (prerrequisito/correquisito, unidades y resultados)."}
+                  No hay asignaturas registradas para este nivel.
                 </p>
             </Card>
         ) : (
@@ -1624,12 +1644,13 @@ export default function RegistroAsignaturaPage() {
                                     <TableHead className="text-center">Correquisitos</TableHead>
                                     <TableHead>Unidades Temáticas</TableHead>
                                     <TableHead>Resultados de Aprendizaje</TableHead>
+                                    <TableHead className="text-center">Estado</TableHead>
                                     <TableHead>Opciones</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {asignaturasCompletas.map((asig) => {
-                                    const unidadesFiltradas = asig.unidades.filter(u => u.unidad);
+                                {asignaturasDelNivel.map((asig) => {
+                                    const unidadesFiltradas = asig.unidades && asig.unidades.length > 0 ? asig.unidades.filter(u => u.unidad) : [];
                                     return (
                                         <TableRow key={asig.id}>
                                             <TableCell className="font-semibold text-[#00563F] align-middle">{asig.codigo}</TableCell>
@@ -1639,7 +1660,7 @@ export default function RegistroAsignaturaPage() {
                                             <TableCell className="text-sm align-middle text-center">
                                               {asig.prerrequisitos_codigos && asig.prerrequisitos_codigos.length > 0
                                                 ? asig.prerrequisitos_codigos.map((cod, i) => (
-                                                    <div key={i}>{cod}</div>
+                                                    <div key={i}>{getNombreAsignaturaPorCodigo(cod)}</div>
                                                   ))
                                                 : <span className="text-gray-400 italic">No aplica</span>}
                                             </TableCell>
@@ -1648,7 +1669,7 @@ export default function RegistroAsignaturaPage() {
                                             <TableCell className="text-sm align-middle text-center">
                                               {asig.correquisitos_codigos && asig.correquisitos_codigos.length > 0
                                                 ? asig.correquisitos_codigos.map((cod, i) => (
-                                                    <div key={i}>{cod}</div>
+                                                    <div key={i}>{getNombreAsignaturaPorCodigo(cod)}</div>
                                                   ))
                                                 : <span className="text-gray-400 italic">No aplica</span>}
                                             </TableCell>
@@ -1656,7 +1677,7 @@ export default function RegistroAsignaturaPage() {
                                             {/* Unidades: nombre + temas (descripción) */}
                                             <TableCell className="align-top w-64 min-w-[16rem] pr-6">
                                               <div className="space-y-3">
-                                                {unidadesFiltradas.map((u, i) => (
+                                                {unidadesFiltradas.length > 0 ? unidadesFiltradas.map((u, i) => (
                                                   <div key={i}>
                                                     <div className="text-sm font-semibold text-[#00563F]">
                                                       {i + 1}. {u.unidad}
@@ -1667,20 +1688,29 @@ export default function RegistroAsignaturaPage() {
                                                       </div>
                                                     )}
                                                   </div>
-                                                ))}
+                                                )) : <span className="italic text-gray-400">Sin unidades</span>}
                                               </div>
                                             </TableCell>
 
                                             {/* Resultados: uno por unidad */}
                                             <TableCell className="align-top w-64 min-w-[16rem] pr-6">
                                               <div className="space-y-3">
-                                                {unidadesFiltradas.map((u, i) => (
+                                                {unidadesFiltradas.length > 0 ? unidadesFiltradas.map((u, i) => (
                                                   <div key={i} className="text-sm text-gray-700">
                                                     <span className="font-semibold text-[#00563F]">{i + 1}.</span>{" "}
                                                     {u.resultados || <span className="italic text-gray-400">—</span>}
                                                   </div>
-                                                ))}
+                                                )) : <span className="italic text-gray-400">Sin resultados</span>}
                                               </div>
+                                            </TableCell>
+
+                                            {/* Estado */}
+                                            <TableCell className="align-middle text-center">
+                                              {esCompleta(asig) ? (
+                                                <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full whitespace-nowrap">Completa</span>
+                                              ) : (
+                                                <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full whitespace-nowrap">Incompleta</span>
+                                              )}
                                             </TableCell>
 
                                             {/* Columna Opciones: centrada horizontal y verticalmente */}
