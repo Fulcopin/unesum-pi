@@ -56,6 +56,10 @@ router.get('/plantilla', programaAnaliticoController.descargarPlantilla);
 // Obtener estructura del formulario desde BD
 router.get('/estructura-formulario', authenticate, programaAnaliticoController.getEstructuraFormulario);
 
+// Obtener y actualizar plantilla de campos de unidades temáticas (admin)
+router.get('/plantilla-unidades', authenticate, programaAnaliticoController.getPlantillaUnidades);
+router.put('/plantilla-unidades', authenticate, authorize(['administrador']), programaAnaliticoController.updatePlantillaUnidades);
+
 // Subir programa analítico desde Excel (con autenticación)
 router.post('/upload', authenticate, programaAnaliticoController.uploadExcel);
 

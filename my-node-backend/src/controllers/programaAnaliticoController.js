@@ -1796,16 +1796,97 @@ exports.getById = async (req, res) => {
   }
 };
 
-// Obtener estructura del formulario desde el primer programa analÃ­tico guardado o uno especÃ­fico
+// Nombre especial para el registro de configuración de plantilla de unidades
+const PLANTILLA_UNIDADES_NOMBRE = '__PLANTILLA_UNIDADES__';
+
+// Obtener configuración de campos de unidades temáticas (para el admin)
+exports.getPlantillaUnidades = async (req, res) => {
+  try {
+    const config = await ProgramaAnalitico.findOne({
+      where: { nombre: PLANTILLA_UNIDADES_NOMBRE },
+      order: [['createdAt', 'DESC']]
+    });
+
+    const camposDefault = [
+      'unidad_tematica', 'contenidos', 'resultados_aprendizaje',
+      'criterios_evaluacion', 'instrumentos_evaluacion'
+    ];
+
+    if (!config || !config.datos_tabla || !config.datos_tabla.campos_unidades) {
+      return res.status(200).json({
+        success: true,
+        data: { campos_unidades: camposDefault },
+        esDefault: true
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { campos_unidades: config.datos_tabla.campos_unidades },
+      esDefault: false
+    });
+  } catch (error) {
+    console.error('Error al obtener plantilla unidades:', error);
+    return res.status(500).json({ success: false, message: 'Error al obtener plantilla de unidades', error: error.message });
+  }
+};
+
+// Actualizar configuración de campos de unidades temáticas (solo admin)
+exports.updatePlantillaUnidades = async (req, res) => {
+  try {
+    const { campos_unidades } = req.body;
+    if (!Array.isArray(campos_unidades) || campos_unidades.length === 0) {
+      return res.status(400).json({ success: false, message: 'campos_unidades debe ser un array no vacío' });
+    }
+
+    // Sanitizar: solo strings no vacíos, máximo 50 chars cada uno
+    const camposSanitizados = campos_unidades
+      .map(c => String(c).trim().substring(0, 50))
+      .filter(c => c.length > 0);
+
+    const [config, created] = await ProgramaAnalitico.findOrCreate({
+      where: { nombre: PLANTILLA_UNIDADES_NOMBRE },
+      defaults: {
+        nombre: PLANTILLA_UNIDADES_NOMBRE,
+        datos_tabla: { campos_unidades: camposSanitizados }
+      }
+    });
+
+    if (!created) {
+      await config.update({ datos_tabla: { campos_unidades: camposSanitizados } });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Configuración de unidades temáticas actualizada',
+      data: { campos_unidades: camposSanitizados }
+    });
+  } catch (error) {
+    console.error('Error al actualizar plantilla unidades:', error);
+    return res.status(500).json({ success: false, message: 'Error al actualizar plantilla de unidades', error: error.message });
+  }
+};
+
+// Obtener estructura del formulario desde el primer programa analítico guardado o uno específico
 exports.getEstructuraFormulario = async (req, res) => {
   try {
-    const { id } = req.query; // Opcional: ID de programa especÃ­fico
+    const { id } = req.query; // Opcional: ID de programa específico
+
+    // Primero: buscar la configuración de plantilla de unidades del admin
+    let camposUnidadesConfig = null;
+    const plantillaConfig = await ProgramaAnalitico.findOne({
+      where: { nombre: PLANTILLA_UNIDADES_NOMBRE },
+      order: [['createdAt', 'DESC']]
+    });
+    if (plantillaConfig && plantillaConfig.datos_tabla && plantillaConfig.datos_tabla.campos_unidades) {
+      camposUnidadesConfig = plantillaConfig.datos_tabla.campos_unidades;
+    }
     
-    // Buscar el programa analÃ­tico especÃ­fico o el mÃ¡s reciente
+    // Buscar el programa analítico específico o el más reciente (que NO sea la plantilla config)
     const programa = id 
       ? await ProgramaAnalitico.findByPk(id)
       : await ProgramaAnalitico.findOne({
-          where: {},
+          where: { nombre: { [Op.ne]: PLANTILLA_UNIDADES_NOMBRE } },
           order: [['createdAt', 'DESC']]
         });
 
@@ -1817,13 +1898,12 @@ exports.getEstructuraFormulario = async (req, res) => {
             'carrera', 'nivel', 'paralelo', 'asignatura', 'codigo', 
             'creditos', 'horas_semanales', 'periodo_academico', 'docente'
           ],
-          campos_unidades: [
-            'unidad_tematica', 'contenidos', 'horas_clase', 'horas_practicas',
-            'horas_autonomas', 'estrategias_metodologicas', 'recursos_didacticos',
-            'evaluacion', 'bibliografia'
+          campos_unidades: camposUnidadesConfig || [
+            'unidad_tematica', 'contenidos', 'resultados_aprendizaje',
+            'criterios_evaluacion', 'instrumentos_evaluacion'
           ],
           secciones_completas: [],
-          mensaje: 'Usando estructura por defecto'
+          mensaje: camposUnidadesConfig ? 'Usando configuración del administrador' : 'Usando estructura por defecto'
         }
       });
     }
@@ -1875,11 +1955,10 @@ exports.getEstructuraFormulario = async (req, res) => {
           'carrera', 'nivel', 'paralelo', 'asignatura', 'codigo', 
           'creditos', 'horas_semanales', 'periodo_academico', 'docente'
         ],
-        campos_unidades: camposUnidades.length > 0 ? camposUnidades : [
-          'unidad_tematica', 'contenidos', 'horas_clase', 'horas_practicas',
-          'horas_autonomas', 'estrategias_metodologicas', 'recursos_didacticos',
-          'evaluacion', 'bibliografia'
-        ],
+        campos_unidades: camposUnidadesConfig || (camposUnidades.length > 0 ? camposUnidades : [
+          'unidad_tematica', 'contenidos', 'resultados_aprendizaje',
+          'criterios_evaluacion', 'instrumentos_evaluacion'
+        ]),
         secciones_tablas: seccionesTablas,
         secciones_formulario: seccionesFormulario,
         secciones_completas: seccionesCompletas,

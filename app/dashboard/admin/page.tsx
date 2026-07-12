@@ -76,6 +76,13 @@ export default function AdminDashboard() {
       color: "bg-cyan-500",
     },
     {
+      title: "Metodologías",
+      description: "Crear el catálogo de metodologías de enseñanza-aprendizaje para el syllabus",
+      icon: ClipboardList,
+      href: "/dashboard/admin/metodologia",
+      color: "bg-emerald-500",
+    },
+    {
       title: "Campo de Formación",
       description: "Crear los campos de formación de carrera ",
       icon: LucideAirplay,

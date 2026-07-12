@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Minus, Download, Upload, Save, Edit3, Merge, Trash2 } from "lucide-react"
+import { Plus, Minus, Download, Upload, Save, Edit3, Merge, Trash2, Settings } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import * as mammoth from "mammoth"
 import * as XLSX from "xlsx"
@@ -69,6 +69,15 @@ export default function EditorTablasPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const excelInputRef = useRef<HTMLInputElement>(null)
 
+  // --- CONFIGURACIÓN DE PLANTILLA DE UNIDADES TEMÁTICAS ---
+  const [camposUnidades, setCamposUnidades] = useState<string[]>([
+    'unidad_tematica', 'contenidos', 'resultados_aprendizaje',
+    'criterios_evaluacion', 'instrumentos_evaluacion'
+  ])
+  const [nuevoCampo, setNuevoCampo] = useState("")
+  const [guardandoCampos, setGuardandoCampos] = useState(false)
+  const [mensajeCampos, setMensajeCampos] = useState<string | null>(null)
+
   // --- DATOS DERIVADOS Y ESTILOS ---
   const activeTable = tables.find((t) => t.id === activeTableId)
   const tableData = activeTable ? activeTable.rows : []
@@ -125,6 +134,70 @@ export default function EditorTablasPage() {
   useEffect(() => {
     if (token) fetchTables()
   }, [token])
+
+  // Cargar configuración de campos de unidades desde el backend
+  useEffect(() => {
+    const cargarCamposUnidades = async () => {
+      try {
+        const currentToken = token || getToken()
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'}/programa-analitico/plantilla-unidades`, {
+          headers: { Authorization: `Bearer ${currentToken}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.success && data.data?.campos_unidades?.length > 0) {
+            setCamposUnidades(data.data.campos_unidades)
+          }
+        }
+      } catch (e) {
+        console.error('Error al cargar plantilla de unidades:', e)
+      }
+    }
+    if (token) cargarCamposUnidades()
+  }, [token])
+
+  const handleGuardarCamposUnidades = async () => {
+    setGuardandoCampos(true)
+    setMensajeCampos(null)
+    try {
+      const currentToken = token || getToken()
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'}/programa-analitico/plantilla-unidades`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` },
+        body: JSON.stringify({ campos_unidades: camposUnidades })
+      })
+      const data = await res.json()
+      if (res.ok && data.success) {
+        setMensajeCampos('✅ Campos de unidades actualizados correctamente')
+      } else {
+        setMensajeCampos('❌ Error: ' + (data.message || 'No se pudo guardar'))
+      }
+    } catch (e) {
+      setMensajeCampos('❌ Error de conexión al servidor')
+    } finally {
+      setGuardandoCampos(false)
+      setTimeout(() => setMensajeCampos(null), 4000)
+    }
+  }
+
+  const agregarCampo = () => {
+    const campo = nuevoCampo.trim().toLowerCase().replace(/\s+/g, '_')
+    if (!campo || camposUnidades.includes(campo)) return
+    setCamposUnidades(prev => [...prev, campo])
+    setNuevoCampo("")
+  }
+
+  const eliminarCampo = (campo: string) => {
+    setCamposUnidades(prev => prev.filter(c => c !== campo))
+  }
+
+  const moverCampo = (index: number, direccion: 'arriba' | 'abajo') => {
+    const newCampos = [...camposUnidades]
+    const newIndex = direccion === 'arriba' ? index - 1 : index + 1
+    if (newIndex < 0 || newIndex >= newCampos.length) return
+    ;[newCampos[index], newCampos[newIndex]] = [newCampos[newIndex], newCampos[index]]
+    setCamposUnidades(newCampos)
+  }
   
   const handleSaveToDB = async () => {
     if (!activeTable) return alert("No hay tabla activa para guardar.")
@@ -498,6 +571,72 @@ export default function EditorTablasPage() {
             <h2 className="text-xl font-bold">UNIVERSIDAD ESTATAL DEL SUR DE MANABÍ</h2>
             <p className="text-emerald-100 mt-1">Sistema de Gestión Académica - Editor de Tablas</p>
           </div>
+
+          <Card className="mb-6 border-2 border-emerald-200">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-emerald-700">
+                <Settings className="h-5 w-5" />
+                Configurar Campos de Unidades Temáticas
+              </CardTitle>
+              <p className="text-sm text-gray-500">
+                Define los campos/columnas que los docentes deberán completar en las Unidades Temáticas del Programa Analítico.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {camposUnidades.map((campo, idx) => (
+                  <div key={campo} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2">
+                    <span className="flex-1 font-mono text-sm text-gray-700">{campo}</span>
+                    <button
+                      onClick={() => moverCampo(idx, 'arriba')}
+                      disabled={idx === 0}
+                      className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700 disabled:opacity-30"
+                      title="Mover arriba"
+                    >▲</button>
+                    <button
+                      onClick={() => moverCampo(idx, 'abajo')}
+                      disabled={idx === camposUnidades.length - 1}
+                      className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700 disabled:opacity-30"
+                      title="Mover abajo"
+                    >▼</button>
+                    <button
+                      onClick={() => eliminarCampo(campo)}
+                      className="px-2 py-1 text-xs text-red-500 hover:text-red-700"
+                      title="Eliminar campo"
+                    >✕</button>
+                  </div>
+                ))}
+
+                <div className="flex gap-2 mt-4">
+                  <input
+                    type="text"
+                    value={nuevoCampo}
+                    onChange={e => setNuevoCampo(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') agregarCampo() }}
+                    placeholder="nuevo_campo (ej: horas_clase)"
+                    className="flex-1 border rounded-md px-3 py-2 text-sm font-mono"
+                  />
+                  <Button onClick={agregarCampo} variant="outline" className="text-emerald-700 border-emerald-300">
+                    <Plus className="h-4 w-4 mr-1" /> Agregar
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-4 mt-4 pt-4 border-t">
+                  <Button
+                    onClick={handleGuardarCamposUnidades}
+                    disabled={guardandoCampos || camposUnidades.length === 0}
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    {guardandoCampos ? 'Guardando...' : 'Guardar Configuración de Unidades'}
+                  </Button>
+                  {mensajeCampos && (
+                    <span className="text-sm font-medium">{mensajeCampos}</span>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           <Card className="mb-6">
             <CardHeader>

@@ -13,6 +13,8 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Minus, Upload, Save, Merge, Trash2, Printer, X, Pencil, Check, ArrowUpFromLine, Copy, FileText, Home, Lock } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
+import { syncContenidosEstructuraAResultados } from "@/lib/syllabus-contenidos-sync"
+import { mergeLocksByPosition, contarBloqueos } from "@/lib/syllabus-locks"
 import * as mammoth from "mammoth"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -134,6 +136,15 @@ export default function EditorSyllabusPage() {
       setActiveTabId(null);
     }
   }, [activeSyllabus, activeTabId]);
+
+  // Sincronización automática: los contenidos de la pestaña ESTRUCTURA se reflejan
+  // en la columna "Contenidos" de la pestaña RESULTADOS ante cualquier cambio.
+  // (syncContenidosEstructuraAResultados es idempotente: changed=false evita bucles)
+  useEffect(() => {
+    if (!activeSyllabus) return;
+    const res = syncContenidosEstructuraAResultados(activeSyllabus.tabs);
+    if (res.changed) updateSyllabus(activeSyllabus.id, { tabs: res.tabs });
+  }, [activeSyllabus]);
 
   const handlePeriodChange = (periodNombre: string) => {
     setSelectedPeriod(periodNombre);
@@ -779,19 +790,29 @@ export default function EditorSyllabusPage() {
         return alert("No se encontraron datos válidos.");
       }
 
+      // Conservar los bloqueos de la versión previa (si estaba cargada) sobre las
+      // celdas recién importadas. El match es por posición/contenido porque los ids
+      // de celda se regeneran en cada subida.
+      const tabsConLocks = mergeLocksByPosition(newTabs, activeSyllabus?.tabs);
+      const bloqueosPreservados = contarBloqueos(tabsConLocks);
+
       const newData: SyllabusData = {
         id: `syllabus-${Date.now()}`,
         name: meta.subject || file.name.replace(/\.docx?$/i, ''),
         description: "Importado",
         metadata: { ...meta, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-        tabs: newTabs,
+        tabs: tabsConLocks,
       };
-      
+
       setSyllabi([newData]);
       setActiveSyllabusId(newData.id);
-      setActiveTabId(newTabs[0]?.id || null);
-      setCellLockState(buildCellLockState(newTabs));
+      setActiveTabId(tabsConLocks[0]?.id || null);
+      setCellLockState(buildCellLockState(tabsConLocks));
       setEditingComisionId(null);
+
+      if (bloqueosPreservados > 0) {
+        console.log(`[subir-word] Se conservaron ${bloqueosPreservados} celda(s) bloqueada(s) de la versión anterior.`);
+      }
 
     } catch (e) { console.error(e); alert("Error crítico."); } 
     finally { setIsLoading(false); }

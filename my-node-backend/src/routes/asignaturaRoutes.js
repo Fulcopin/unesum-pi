@@ -37,5 +37,9 @@ router.post('/:asignaturaId/horas', authenticate, authorize(['administrador', 'c
 // Añadir/Actualizar las unidades temáticas (Sección 4)
 router.post('/:asignaturaId/unidades', authenticate, authorize(['administrador', 'comision_academica']), asignaturaController.addUnidades);
 
+// Obtener las unidades temáticas (con resultados de aprendizaje) de una asignatura
+// La usa el editor de syllabus para rellenar la columna "Resultados de aprendizaje".
+router.get('/:asignaturaId/unidades', authenticate, authorize(['administrador', 'comision_academica', 'comision', 'profesor', 'docente']), asignaturaController.getUnidadesTematicas);
+
 
 module.exports = router;

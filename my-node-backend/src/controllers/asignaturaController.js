@@ -467,6 +467,30 @@ exports.addUnidades = async (req, res) => {
     }
 };
 
+// --- OBTENER LAS UNIDADES TEMÁTICAS DE UNA ASIGNATURA ---
+// Devuelve las unidades (con sus resultados de aprendizaje) filtradas por asignatura_id.
+// La usa el editor de syllabus para rellenar la columna "Resultados de aprendizaje".
+// GET /api/asignaturas/:asignaturaId/unidades
+exports.getUnidadesTematicas = async (req, res) => {
+    try {
+        const { asignaturaId } = req.params;
+        if (!asignaturaId) {
+            return res.status(400).json({ success: false, message: 'El asignaturaId es requerido' });
+        }
+
+        const unidades = await UnidadTematica.findAll({
+            where: { asignatura_id: asignaturaId },
+            attributes: ['id', 'asignatura_id', 'nombre_unidad', 'numero_unidad', 'descripcion', 'resultados_aprendizaje'],
+            order: [['numero_unidad', 'ASC']]
+        });
+
+        return res.status(200).json({ success: true, data: unidades });
+    } catch (error) {
+        console.error('Error al obtener las unidades temáticas:', error);
+        return res.status(500).json({ success: false, message: 'Error al obtener las unidades temáticas', error: error.message });
+    }
+};
+
 // --- ELIMINAR UNA ASIGNATURA ---
 // El frontend necesita esta función para el botón de eliminar.
 exports.deleteAsignatura = async (req, res) => {

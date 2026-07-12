@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,8 @@ import { Save, ArrowLeft, Loader2, Lock, Unlock, FileDown, CheckCircle2, AlertCi
 import { useAuth } from "@/contexts/auth-context"
 import { FirmasPanel } from "@/components/firmas/firmas-panel"
 import Link from "next/link"
+import { esTabEstructura, syncContenidosEstructuraAResultados, syncResultadosAprendizajeDesdeBD } from "@/lib/syllabus-contenidos-sync"
+import { buildFechasPorParalelo, extraerHorarioClases, parseFechasCell, formatFechasCell, nombreDia } from "@/lib/syllabus-fechas"
 
 
 // --- INTERFACES ---
@@ -70,7 +72,7 @@ export default function DocenteEditorSyllabusPage() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [editingCell, setEditingCell] = useState<string | null>(null)
   const [editContent, setEditContent] = useState("")
-  const [modalCell, setModalCell] = useState<{id: string, content: string, isEditable: boolean} | null>(null)
+  const [modalCell, setModalCell] = useState<{id: string, content: string, isEditable: boolean, colType?: string} | null>(null)
   const [periodos, setPeriodos] = useState<any[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState<string>("")
   const [profesorInfo, setProfesorInfo] = useState<any>(null)
@@ -80,6 +82,12 @@ export default function DocenteEditorSyllabusPage() {
   const [asignaturasDisponibles, setAsignaturasDisponibles] = useState<any[]>([])
   const [selectedAsignaturaId, setSelectedAsignaturaId] = useState<string>('')
   const [periodoAutoSyncMsg, setPeriodoAutoSyncMsg] = useState<string | null>(null)
+  // Unidades temáticas (con resultados de aprendizaje) traídas de la BD para la asignatura activa
+  const [unidadesResultados, setUnidadesResultados] = useState<any[]>([])
+  // Catálogo de metodologías (para el combo de la columna Metodologías)
+  const [metodologias, setMetodologias] = useState<any[]>([])
+  // Catálogo de organización curricular (para el combo de la columna Escenario de aprendizaje)
+  const [organizaciones, setOrganizaciones] = useState<any[]>([])
   const isAutoSyncingPeriod = useRef(false)
   // Mapa de celdas bloqueadas por la comisión (cellId → true)
   const [lockedCells, setLockedCells] = useState<Record<string, boolean>>({})
@@ -259,6 +267,17 @@ export default function DocenteEditorSyllabusPage() {
     });
   }, [syllabusData]);
 
+  // Sincronización automática: los contenidos de la pestaña ESTRUCTURA se reflejan
+  // en la columna "Contenidos" de la pestaña RESULTADOS ante cualquier cambio.
+  // (syncContenidosEstructuraAResultados es idempotente: changed=false evita bucles)
+  useEffect(() => {
+    if (!syllabusData) return;
+    const res = syncContenidosEstructuraAResultados(syllabusData.tabs);
+    if (res.changed) {
+      setSyllabusData(prev => (prev ? { ...prev, tabs: syncContenidosEstructuraAResultados(prev.tabs).tabs } : prev));
+    }
+  }, [syllabusData]);
+
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'
 
   const apiRequest = async (url: string, options: RequestInit = {}) => {
@@ -271,6 +290,86 @@ export default function DocenteEditorSyllabusPage() {
     if (!res.ok) throw new Error(data.message || `Error ${res.status}`)
     return data
   }
+
+  // Cargar las unidades temáticas (con resultados de aprendizaje) de la asignatura activa.
+  // Se usan para autocompletar la columna "Resultados de aprendizaje" de la pestaña RESULTADOS.
+  useEffect(() => {
+    const asignaturaId = selectedAsignaturaId || profesorInfo?.asignatura_id || profesorInfo?.asignatura?.id
+    if (!asignaturaId) { setUnidadesResultados([]); return }
+    let cancelado = false
+    ;(async () => {
+      try {
+        const res = await apiRequest(`/asignaturas/${asignaturaId}/unidades`)
+        if (!cancelado) setUnidadesResultados(Array.isArray(res?.data) ? res.data : [])
+      } catch (e) {
+        if (!cancelado) setUnidadesResultados([])
+      }
+    })()
+    return () => { cancelado = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAsignaturaId, profesorInfo])
+
+  // Cargar el catálogo de metodologías (para el combo de la columna Metodologías)
+  useEffect(() => {
+    let cancelado = false
+    ;(async () => {
+      try {
+        const res = await apiRequest(`/metodologias?estado=activo`)
+        if (!cancelado) setMetodologias(Array.isArray(res?.data) ? res.data : [])
+      } catch (e) {
+        if (!cancelado) setMetodologias([])
+      }
+    })()
+    return () => { cancelado = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Cargar la organización curricular (para el combo de la columna Escenario de aprendizaje)
+  useEffect(() => {
+    let cancelado = false
+    ;(async () => {
+      try {
+        const res = await apiRequest(`/organizacion`)
+        if (!cancelado) setOrganizaciones(Array.isArray(res?.data) ? res.data : [])
+      } catch (e) {
+        if (!cancelado) setOrganizaciones([])
+      }
+    })()
+    return () => { cancelado = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Fechas de clase por paralelo (rango del periodo × días del "Horario de clases").
+  // Alimenta el selector de fechas de la columna "Fecha/paralelo".
+  const fechasPorParalelo = useMemo(() => {
+    const p = periodos.find((x: any) => String(x.id) === String(selectedPeriod))
+    const inicio = p?.fecha_inicio
+    const fin = p?.fecha_fin
+    const horario = extraerHorarioClases(syllabusData?.tabs)
+    if (!inicio || !fin || !horario) return []
+    return buildFechasPorParalelo(horario, inicio, fin)
+  }, [periodos, selectedPeriod, syllabusData])
+
+  // Escribe la fecha elegida para un paralelo dentro de la celda "Fecha/paralelo"
+  const setFechaDeParalelo = (paralelo: string, fecha: string) => {
+    const actual = parseFechasCell(editContent)
+    actual[paralelo] = fecha
+    const orden = fechasPorParalelo.map((fp) => fp.paralelo)
+    // Incluir también paralelos escritos a mano que no estén en el horario
+    Object.keys(actual).forEach((k) => { if (!orden.includes(k)) orden.push(k) })
+    setEditContent(formatFechasCell(actual, orden))
+  }
+
+  // Sincronización automática: los resultados de aprendizaje guardados en la BD para
+  // la asignatura se reflejan en la columna "Resultados de aprendizaje" de la pestaña
+  // RESULTADOS, emparejando por número de unidad. (Idempotente: changed=false evita bucles).
+  useEffect(() => {
+    if (!syllabusData || unidadesResultados.length === 0) return
+    const res = syncResultadosAprendizajeDesdeBD(syllabusData.tabs, unidadesResultados)
+    if (res.changed) {
+      setSyllabusData(prev => (prev ? { ...prev, tabs: syncResultadosAprendizajeDesdeBD(prev.tabs, unidadesResultados).tabs } : prev))
+    }
+  }, [syllabusData, unidadesResultados])
 
   const getCellPositionKey = (tabIndex: number, rowIndex: number, cellIndex: number) =>
     `${tabIndex}:${rowIndex}:${cellIndex}`
@@ -1109,18 +1208,21 @@ export default function DocenteEditorSyllabusPage() {
     if (!editingCell || !syllabusData) return
     setSyllabusData(prev => {
       if (!prev) return prev
-      return {
-        ...prev,
-        tabs: prev.tabs.map(tab => ({
-          ...tab,
-          rows: tab.rows.map(row => ({
-            ...row,
-            cells: row.cells.map(cell =>
-              cell.id === editingCell ? { ...cell, content: editContent } : cell
-            )
-          }))
+      let tabs = prev.tabs.map(tab => ({
+        ...tab,
+        rows: tab.rows.map(row => ({
+          ...row,
+          cells: row.cells.map(cell =>
+            cell.id === editingCell ? { ...cell, content: editContent } : cell
+          )
         }))
+      }))
+      // Si se editó la pestaña ESTRUCTURA, reflejar los contenidos por unidad en la pestaña RESULTADOS
+      const edited = tabs.find(t => t.id === activeTabId)
+      if (edited && esTabEstructura(edited.title)) {
+        tabs = syncContenidosEstructuraAResultados(tabs).tabs
       }
+      return { ...prev, tabs }
     })
     setEditingCell(null)
     setEditContent("")
@@ -1135,18 +1237,21 @@ export default function DocenteEditorSyllabusPage() {
     if (!modalCell || !syllabusData) return
     setSyllabusData(prev => {
       if (!prev) return prev
-      return {
-        ...prev,
-        tabs: prev.tabs.map(tab => ({
-          ...tab,
-          rows: tab.rows.map(row => ({
-            ...row,
-            cells: row.cells.map(cell =>
-              cell.id === modalCell.id ? { ...cell, content: editContent } : cell
-            )
-          }))
+      let tabs = prev.tabs.map(tab => ({
+        ...tab,
+        rows: tab.rows.map(row => ({
+          ...row,
+          cells: row.cells.map(cell =>
+            cell.id === modalCell.id ? { ...cell, content: editContent } : cell
+          )
         }))
+      }))
+      // Si se editó la pestaña ESTRUCTURA, reflejar los contenidos por unidad en la pestaña RESULTADOS
+      const edited = tabs.find(t => t.id === activeTabId)
+      if (edited && esTabEstructura(edited.title)) {
+        tabs = syncContenidosEstructuraAResultados(tabs).tabs
       }
+      return { ...prev, tabs }
     })
     setModalCell(null)
     setEditContent("")
@@ -1167,10 +1272,12 @@ export default function DocenteEditorSyllabusPage() {
     const asignaturaId = selectedAsignaturaId || profesorInfo?.asignatura_id || profesorInfo?.asignatura?.id
     setIsSaving(true)
     try {
+      // Antes de guardar, asegurar que los contenidos de ESTRUCTURA estén reflejados en RESULTADOS
+      const tabsSincronizados = syncContenidosEstructuraAResultados(syllabusData.tabs).tabs
       const datosParaGuardar = {
         version: "2.0-docente",
         metadata: syllabusData.metadata,
-        tabs: syllabusData.tabs.map(tab => ({
+        tabs: tabsSincronizados.map(tab => ({
           id: tab.id, title: tab.title,
           rows: tab.rows.map(row => ({
             id: row.id, cells: row.cells.map(cell => ({
@@ -1572,58 +1679,17 @@ export default function DocenteEditorSyllabusPage() {
     const activeTab = syllabusData?.tabs.find(t => t.id === activeTabId)
     const isFirstSection = activeTab && (activeTab.title.toUpperCase().includes('GENERAL') || activeTab.title.toUpperCase().includes('INFORMACIÓN') || activeTab.title.toUpperCase().includes('DATOS'))
 
-    // NUNCA auto-rellenar celdas separadoras
-    const rawContent = cell.content.trim()
-    if (rawContent === ':' || rawContent === '::') return cell.content
-
-    if (isFirstSection) {
-      const currentRow = tableData[rowIndex]
-      if (currentRow) {
-        const rowVisibleCols = currentRow.cells.filter(c => c.rowSpan > 0 && c.colSpan > 0).length;
-        // Forzar separador si es una fila de formulario (<= 4 columnas visibles) y es la celda índice 1
-        if (rowVisibleCols <= 4 && cellIndex === 1) return ':'
-      }
-    }
-
-    if (isFirstSection && cellIndex > 0 && profesorInfo) {
+    if (isFirstSection && rowIndex <= 5 && cellIndex > 0 && profesorInfo) {
       const currentRow = tableData[rowIndex]
       if (!currentRow) return cell.content || ""
-      // Buscar la etiqueta real: saltando celdas separadoras (:)
-      let labelCell: TableCell | undefined
-      for (let i = cellIndex - 1; i >= 0; i--) {
-        const c = currentRow.cells[i]
-        const t = (c?.content || '').trim()
-        if (t !== ':' && t !== '::' && t.length > 0) { labelCell = c; break; }
-      }
-      const etiqueta = labelCell?.content?.toUpperCase().replace(/:/g, '').trim() || ""
+      const prevCell = currentRow.cells[cellIndex - 1]
+      const etiqueta = prevCell?.content?.toUpperCase().trim() || ""
       
       if (etiqueta.includes("PARALELO") && profesorInfo.paralelo?.nombre) {
         return profesorInfo.paralelo.nombre
       }
       if ((etiqueta.includes("PROFESOR") || etiqueta.includes("DOCENTE")) && !etiqueta.includes("PERFIL")) {
         return `${profesorInfo.nombres || ''} ${profesorInfo.apellidos || ''}`.trim()
-      }
-      // Auto-relleno de Carrera y Facultad (solo celdas vacías, nunca separadores)
-      const asigP = profesorInfo.asignatura || (profesorInfo.asignaturas?.[0])
-      if (asigP?.carrera) {
-        if (etiqueta.includes("FACULTAD") && asigP.carrera.facultad?.nombre) {
-          if (!cell.content?.trim()) return asigP.carrera.facultad.nombre
-        }
-        if (etiqueta.includes("CARRERA") && !etiqueta.includes("FACULTAD") && asigP.carrera.nombre) {
-          if (!cell.content?.trim()) return asigP.carrera.nombre
-        }
-      }
-      // Auto-relleno de Prerrequisito, Correquisito y Código (solo celdas vacías)
-      if (!cell.content?.trim()) {
-        if ((etiqueta.includes("PRERREQUISITO") || etiqueta.includes("PRE-REQUISITO") || etiqueta.includes("PRE REQUISITO")) && asigP?.prerrequisito) {
-          return asigP.prerrequisito
-        }
-        if ((etiqueta.includes("CORREQUISITO") || etiqueta.includes("CO-REQUISITO") || etiqueta.includes("CO REQUISITO")) && asigP?.correquisito) {
-          return asigP.correquisito
-        }
-        if (etiqueta.includes("CÓDIGO") && !etiqueta.includes("ASIGNATURA") && asigP?.codigo) {
-          return asigP.codigo
-        }
       }
     }
 
@@ -1865,15 +1931,14 @@ export default function DocenteEditorSyllabusPage() {
           )}
 
           {/* Legend */}
-          <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
-            <div className="flex items-center gap-4 flex-wrap font-medium">
-              <span className="flex items-center gap-1"><Unlock className="h-4 w-4 text-green-600" /> <span className="text-green-700">Editable (verde)</span></span>
-              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-gray-400" /> <span className="text-gray-600">Solo lectura</span></span>
-              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-amber-500" /> <span className="text-amber-700">Bloqueado por Admin</span></span>
-              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-red-500" /> <span className="text-red-700">Bloqueado por Comisión</span></span>
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+            <div className="flex items-center gap-4 flex-wrap">
+              <span className="flex items-center gap-1"><Unlock className="h-4 w-4 text-green-600" /> Campos editables (verde)</span>
+              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-gray-400" /> Campos de solo lectura</span>
+              <span className="flex items-center gap-1"><Lock className="h-4 w-4 text-amber-400" /> Bloqueado por comisión académica</span>
             </div>
-            <p className="mt-1.5 text-slate-600 text-xs">
-              El Administrador y la Comisión Académica han definido la estructura y restricciones de este documento. Solo puedes editar el contenido de las celdas en color verde.
+            <p className="mt-1 text-amber-700 text-xs">
+              Puedes editar: Paralelo, Horario, Perfil del profesor, Contenidos (HD, PFAE, TA), Metodologías, Recursos, Escenario, Bibliografía, Fecha, Criterios e Instrumentos de evaluación.
             </p>
           </div>
 
@@ -1982,7 +2047,6 @@ export default function DocenteEditorSyllabusPage() {
 
                                   const editable = isDocenteEditable(cell, rowIndex, cellIndex, tableData)
                                   const isAdminLocked = cell.isLocked || !!lockedCells[cell.id]
-                                  const isComisionLocked = (cell as any).docenteEditable === false
                                   let displayContent = getAutoFilledContent(cell, rowIndex, cellIndex)
                                   if (displayContent.trim() === 'CONTENIDOS') {
                                     displayContent = 'Contenidos';
@@ -2132,9 +2196,7 @@ export default function DocenteEditorSyllabusPage() {
                                         hasError
                                           ? 'border-red-500 bg-red-100 shadow-[inset_0_0_0_2px_rgba(239,68,68,1)] text-red-900 font-bold z-10'
                                           : isAdminLocked
-                                          ? 'border-yellow-400 bg-yellow-100/70 text-yellow-900'
-                                          : isComisionLocked
-                                          ? 'border-red-300 bg-red-50/70 text-red-900'
+                                          ? 'border-amber-300 bg-amber-50/70 text-amber-900'
                                           : editable
                                           ? 'border-green-300 bg-green-50/50 cursor-cell hover:bg-green-100/50'
                                           : isVisadoTab && cell.isHeader
@@ -2151,9 +2213,7 @@ export default function DocenteEditorSyllabusPage() {
                                       }`}
                                       style={{
                                         backgroundColor: isAdminLocked
-                                           ? '#fef08a'
-                                           : isComisionLocked
-                                           ? '#fef2f2'
+                                           ? '#fffbeb'
                                            : cell.backgroundColor || (isFirstSectionLabel ? undefined : isHeaderForAlign ? '#f8fafc' : undefined), fontFamily: "'Times New Roman', Times, serif",
                                         width: cellWidth,
                                         minWidth: cellMinW,
@@ -2165,7 +2225,7 @@ export default function DocenteEditorSyllabusPage() {
                                       colSpan={cell.colSpan}
                                       onDoubleClick={() => {
                                         if (editable) {
-                                          setModalCell({ id: cell.id, content: displayContent, isEditable: true })
+                                          setModalCell({ id: cell.id, content: displayContent, isEditable: true, colType })
                                           setEditContent(displayContent)
                                         }
                                       }}
@@ -2177,7 +2237,7 @@ export default function DocenteEditorSyllabusPage() {
                                           transform: isVertical ? 'rotate(180deg)' : 'none',
                                           maxHeight: isVertical ? '100px' : 'none',
                                           whiteSpace: isVertical ? 'nowrap' : 'pre-wrap',
-                                          overflow: isVertical ? 'hidden' : 'visible',
+                                          overflow: 'hidden',
                                           lineHeight: isFirstSection ? '1.4' : '1.3',
                                           fontFamily: "'Times New Roman', Times, serif",
                                           fontSize: cell.fontSize || (isVertical ? '9px' : '11pt'),
@@ -2267,12 +2327,181 @@ export default function DocenteEditorSyllabusPage() {
               </div>
               <div className="p-4">
                 {modalCell.isEditable ? (
-                  <Textarea
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    className="w-full min-h-[300px] p-3 text-sm border-gray-300 rounded-lg"
-                    autoFocus
-                  />
+                  <>
+                    {/* Combo con los resultados de aprendizaje de las unidades de esta asignatura
+                        (solo para la columna "Resultados de aprendizaje") */}
+                    {modalCell.colType === 'resultado' && unidadesResultados.some((u: any) => (u.resultados_aprendizaje || '').trim()) && (
+                      <div className="mb-3">
+                        <label className="block text-xs font-semibold text-emerald-700 mb-1">
+                          Resultados de aprendizaje de esta asignatura
+                        </label>
+                        <Select
+                          value={
+                            unidadesResultados.find((u: any) => (u.resultados_aprendizaje || '').trim() === editContent.trim())
+                              ? editContent.trim()
+                              : undefined
+                          }
+                          onValueChange={(val) => setEditContent(val)}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Selecciona un resultado de aprendizaje..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {unidadesResultados
+                              .filter((u: any) => (u.resultados_aprendizaje || '').trim())
+                              .map((u: any) => (
+                                <SelectItem key={u.id ?? u.numero_unidad} value={(u.resultados_aprendizaje || '').trim()}>
+                                  {u.numero_unidad != null ? `Unidad ${u.numero_unidad}: ` : ''}
+                                  {(u.resultados_aprendizaje || '').trim().slice(0, 90)}
+                                  {(u.resultados_aprendizaje || '').trim().length > 90 ? '…' : ''}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[11px] text-gray-500 mt-1">
+                          Elige un resultado de la lista o edita el texto libremente abajo.
+                        </p>
+                      </div>
+                    )}
+                    {/* Combo con el catálogo de metodologías (solo para la columna "Metodologías") */}
+                    {modalCell.colType === 'metodologia' && (
+                      <div className="mb-3">
+                        <label className="block text-xs font-semibold text-emerald-700 mb-1">
+                          Metodologías del catálogo
+                        </label>
+                        {metodologias.length > 0 ? (
+                          <>
+                            <Select
+                              value={
+                                metodologias.find((m: any) => (m.descripcion || '').trim() === editContent.trim())
+                                  ? editContent.trim()
+                                  : undefined
+                              }
+                              onValueChange={(val) => setEditContent(val)}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Selecciona una metodología..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {metodologias.map((m: any) => (
+                                  <SelectItem key={m.id} value={(m.descripcion || '').trim()}>
+                                    {`${m.id}. `}{(m.descripcion || '').trim().slice(0, 90)}
+                                    {(m.descripcion || '').trim().length > 90 ? '…' : ''}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Elige una metodología del catálogo o edita el texto libremente abajo.
+                            </p>
+                          </>
+                        ) : (
+                          <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                            Aún no hay metodologías en el catálogo. Un administrador debe crearlas en{" "}
+                            <span className="font-semibold">Admin → Metodologías</span>; luego aparecerán aquí para seleccionarlas.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Combo con la organización curricular (solo para la columna "Escenario de aprendizaje") */}
+                    {modalCell.colType === 'escenario' && (
+                      <div className="mb-3">
+                        <label className="block text-xs font-semibold text-emerald-700 mb-1">
+                          Escenario / Organización curricular
+                        </label>
+                        {organizaciones.length > 0 ? (
+                          <>
+                            <Select
+                              value={
+                                organizaciones.find((o: any) => (o.nombre || '').trim() === editContent.trim())
+                                  ? editContent.trim()
+                                  : undefined
+                              }
+                              onValueChange={(val) => setEditContent(val)}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Selecciona un escenario..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {organizaciones.map((o: any) => (
+                                  <SelectItem key={o.id} value={(o.nombre || '').trim()}>
+                                    {o.codigo ? `${o.codigo} — ` : ''}{o.nombre}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Elige un escenario de la lista o edita el texto libremente abajo.
+                            </p>
+                          </>
+                        ) : (
+                          <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                            Aún no hay organización curricular registrada. Un administrador debe crearla en{" "}
+                            <span className="font-semibold">Admin → Organización</span>; luego aparecerá aquí para seleccionarla.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Selector de fechas por paralelo (solo para la columna "Fecha/paralelo").
+                        Las fechas salen del rango del periodo y los días del Horario de clases. */}
+                    {modalCell.colType === 'fecha' && (
+                      <div className="mb-3">
+                        <label className="block text-xs font-semibold text-emerald-700 mb-1">
+                          Fechas por paralelo (según periodo y horario de clases)
+                        </label>
+                        {fechasPorParalelo.length > 0 ? (
+                          <>
+                            <div className="space-y-2">
+                              {fechasPorParalelo.map((fp) => {
+                                const seleccionada = parseFechasCell(editContent)[fp.paralelo]
+                                return (
+                                  <div key={fp.paralelo} className="flex items-center gap-2">
+                                    <span className="w-24 shrink-0 text-xs font-semibold text-gray-700">
+                                      Paralelo {fp.paralelo}
+                                    </span>
+                                    <Select
+                                      value={fp.fechas.includes(seleccionada) ? seleccionada : undefined}
+                                      onValueChange={(v) => setFechaDeParalelo(fp.paralelo, v)}
+                                    >
+                                      <SelectTrigger className="flex-1">
+                                        <SelectValue
+                                          placeholder={
+                                            fp.fechas.length
+                                              ? `Selecciona fecha (${fp.dias.join(', ')})...`
+                                              : 'Sin fechas para este paralelo'
+                                          }
+                                        />
+                                      </SelectTrigger>
+                                      <SelectContent className="max-h-72">
+                                        {fp.fechas.map((f) => (
+                                          <SelectItem key={f} value={f}>
+                                            {f} — {nombreDia(f)}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Elige una fecha para cada paralelo; se escriben abajo (una por línea). Puedes ajustar el texto a mano.
+                            </p>
+                          </>
+                        ) : (
+                          <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                            No se pudieron generar fechas. Verifica que el periodo tenga <span className="font-semibold">fecha de inicio y fin</span> y que el campo <span className="font-semibold">"Horario de clases"</span> indique los días de cada paralelo (ej. "Paralelo A: jueves; viernes").
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <Textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      className="w-full min-h-[300px] p-3 text-sm border-gray-300 rounded-lg"
+                      autoFocus
+                    />
+                  </>
                 ) : (
                   <div className="whitespace-pre-wrap text-sm text-gray-700 p-3 bg-gray-50 rounded-lg min-h-[200px]">
                     {modalCell.content}
