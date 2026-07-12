@@ -34,6 +34,9 @@ export interface AsignaturaImportada {
   "Horas Autónoma": string
   "Horas Vinculación": string
   "Horas Práctica Preprofesional": string
+  // Columnas opcionales para prerrequisitos y correquisitos
+  Prerrequisito?: string
+  Correquisito?: string
   prerrequisitos?: string[]
   correquisitos?: string[]
   unidades?: UnidadImportada[]
@@ -67,6 +70,9 @@ const REQUIRED_COLUMNS = [
   "Horas Práctica Preprofesional",
 ] as const
 
+// Columnas opcionales que se aceptan sin error de validación
+const OPTIONAL_COLUMNS = ["Prerrequisito", "Correquisito"] as const
+
 function pickFirstValue(record: Record<string, any>, aliases: string[]): string {
   for (const alias of aliases) {
     const value = record[alias]
@@ -89,6 +95,12 @@ function normalizeRow(record: Record<string, any>): AsignaturaImportada {
   const horasVinculacion = pickFirstValue(record, ["Horas Vinculación"])
   const horasPreprofesional = pickFirstValue(record, ["Horas Práctica Preprofesional"])
 
+  // Columnas opcionales: verificar si existen en el record usando acceso directo
+  // NO usar pickFirstValue porque siempre retorna string (nunca undefined)
+  // En su lugar, buscar si alguna variante del nombre de la columna existe en el record
+  const prereqKey = ["Prerrequisito", "Prerrequisitos", "prerrequisito"].find((k) => k in record)
+  const correqKey = ["Correquisito", "Correquisitos", "correquisito"].find((k) => k in record)
+
   return {
     Código: codigo,
     Asignatura: asignatura,
@@ -99,6 +111,9 @@ function normalizeRow(record: Record<string, any>): AsignaturaImportada {
     "Horas Autónoma": horasAutonoma,
     "Horas Vinculación": horasVinculacion,
     "Horas Práctica Preprofesional": horasPreprofesional,
+    // Solo incluir si la columna realmente existe en el Excel (clave presente en el record)
+    ...(prereqKey !== undefined ? { Prerrequisito: String(record[prereqKey] ?? "").trim() } : {}),
+    ...(correqKey !== undefined ? { Correquisito: String(record[correqKey] ?? "").trim() } : {}),
   }
 }
 
@@ -181,10 +196,16 @@ export default function ExcelAsignaturasImport({
   const validateHeaders = (headers: string[]) => {
     const normalized = headers.map(normalizeHeader).filter(Boolean)
     const missing = REQUIRED_COLUMNS.filter((col) => !normalized.includes(col))
-    const extras = normalized.filter((col) => !REQUIRED_COLUMNS.includes(col as (typeof REQUIRED_COLUMNS)[number]))
+    // Ignorar columnas opcionales (Prerrequisito, Correquisito) al detectar extras
+    const allAllowed = [...REQUIRED_COLUMNS, ...OPTIONAL_COLUMNS] as string[]
+    const extras = normalized.filter((col) => !allAllowed.includes(col))
+    // Para el orden, solo verificamos las columnas requeridas al inicio
+    const requiredInOrder = normalized.filter((col) =>
+      REQUIRED_COLUMNS.includes(col as (typeof REQUIRED_COLUMNS)[number])
+    )
     const hasExactOrder =
-      normalized.length === REQUIRED_COLUMNS.length &&
-      REQUIRED_COLUMNS.every((col, index) => normalized[index] === col)
+      requiredInOrder.length === REQUIRED_COLUMNS.length &&
+      REQUIRED_COLUMNS.every((col, index) => requiredInOrder[index] === col)
     return { missing, extras, hasExactOrder }
   }
 
@@ -195,6 +216,12 @@ export default function ExcelAsignaturasImport({
       const row: Record<string, any> = {}
       REQUIRED_COLUMNS.forEach((column) => {
         row[column] = raw?.[column] ?? ""
+      })
+      // Incluir columnas opcionales si existen en los datos
+      OPTIONAL_COLUMNS.forEach((column) => {
+        if (raw?.[column] !== undefined) {
+          row[column] = raw[column] ?? ""
+        }
       })
       return row
     })
@@ -207,10 +234,16 @@ export default function ExcelAsignaturasImport({
       const dynamicRows = onRequestTemplateRows ? await onRequestTemplateRows() : []
       const templateRows = sanitizeTemplateRows(dynamicRows)
 
-      const headerRow = [...REQUIRED_COLUMNS]
-      const dataRows = templateRows.map((row) => REQUIRED_COLUMNS.map((column) => row[column] ?? ""))
+      // Determinar qué columnas opcionales están presentes en los datos
+      const optionalPresent = OPTIONAL_COLUMNS.filter((col) =>
+        templateRows.some((row) => row[col] !== undefined && row[col] !== "")
+      )
+      const allColumns = [...REQUIRED_COLUMNS, ...optionalPresent]
+
+      const headerRow = allColumns
+      const dataRows = templateRows.map((row) => allColumns.map((column) => row[column] ?? ""))
       const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows])
-      worksheet["!cols"] = REQUIRED_COLUMNS.map((col) => ({ wch: Math.max(16, col.length + 2) }))
+      worksheet["!cols"] = allColumns.map((col) => ({ wch: Math.max(16, col.length + 2) }))
 
       const workbook = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(workbook, worksheet, "Plantilla")

@@ -686,20 +686,47 @@ export default function RegistroAsignaturaPage() {
             return []
           }
 
-          return data.map((asig) => {
+          // Ordenar por código alfanumérico ascendente (ej. TI01, TI02, TI03...)
+          const dataOrdenada = [...data].sort((a, b) => {
+            return (a.codigo || "").localeCompare(b.codigo || "", undefined, { numeric: true, sensitivity: 'base' });
+          });
+
+          return dataOrdenada.map((asig) => {
             const nivelObj = niveles.find((n) => n.id === asig.nivel_id)
             const organizacionObj = organizaciones.find((o) => o.id === asig.organizacion_id)
+
+            const NUMERO_A_ORDINAL: Record<string, string> = {
+              "1": "Primero", "2": "Segundo", "3": "Tercero", "4": "Cuarto", "5": "Quinto",
+              "6": "Sexto", "7": "Séptimo", "8": "Octavo", "9": "Noveno", "10": "Décimo",
+            };
+            let nivelRaw = nivelObj?.ordinal || nivelObj?.nombre || asig.nivel?.ordinal || asig.nivel?.nombre || asig.nivel?.codigo || "";
+            let nivelFormateado = NUMERO_A_ORDINAL[nivelRaw.toString().trim()] || nivelRaw;
+            
+            if (typeof nivelFormateado === 'string' && nivelFormateado.length > 0 && !NUMERO_A_ORDINAL[nivelRaw.toString().trim()]) {
+               nivelFormateado = nivelFormateado.charAt(0).toUpperCase() + nivelFormateado.slice(1).toLowerCase();
+            }
+
+            // Formatear prerrequisitos y correquisitos para mostrar NOMBRES en lugar de códigos
+            const getNamesFromCodes = (codigos: string[]) => {
+              if (!codigos || codigos.length === 0) return "";
+              return codigos.map(c => {
+                const found = data.find(a => a.codigo === c);
+                return found ? found.nombre : c;
+              }).join(", ");
+            }
 
             return {
               Código: asig.codigo || "",
               Asignatura: asig.nombre || "",
-              Nivel: nivelObj?.codigo || nivelToOrdinalShort(nivelObj) || "",
+              Nivel: nivelFormateado,
               "Unidad de Organización": organizacionObj?.nombre || "",
               "Horas Docencia": asig.horas?.horasDocencia ?? 0,
               "Horas Práctica": asig.horas?.horasPractica ?? 0,
               "Horas Autónoma": asig.horas?.horasAutonoma ?? 0,
               "Horas Vinculación": asig.horas?.horasVinculacion ?? 0,
               "Horas Práctica Preprofesional": asig.horas?.horasPracticaPreprofesional ?? 0,
+              Prerrequisito: getNamesFromCodes(asig.prerrequisitos_codigos || []),
+              Correquisito: getNamesFromCodes(asig.correquisitos_codigos || []),
             }
           })
         }}
@@ -721,25 +748,24 @@ export default function RegistroAsignaturaPage() {
               return Number.isFinite(number) ? number : 0
             }
 
-            // Cache de asignaturas existentes por nivel usando el endpoint que ya funciona
+            // Cache de TODAS las asignaturas disponibles para este usuario, 
+            // no solo las de la carrera seleccionada. Así, si la asignatura "TI01"
+            // existía en otra carrera/nivel, la detectamos para actualizarla y evitar 
+            // el error de "código duplicado" al intentar crearla de nuevo.
             const existentesPorCodigo = new Map<string, AsignaturaCompleta>()
-            const nivelesCargados = new Set<number>()
-
-            const ensureExistentesNivel = async (nivelId: number) => {
-              if (nivelesCargados.has(nivelId)) return
-
-              const response = await apiRequest(`/asignaturas?nivel_id=${nivelId}&carrera_id=${carreraId}`)
-              const list = Array.isArray(response?.data) ? (response.data as any[]) : []
-
+            try {
+              // Obtenemos todas las asignaturas de la carrera actual (evitando caché)
+              const response = await apiRequest(`/asignaturas?carrera_id=${carreraId}&_t=${Date.now()}`)
+              const list = Array.isArray(response?.data) ? response.data : (Array.isArray(response) ? response : [])
               for (const item of list) {
                 if (!item || typeof item !== "object") continue
-                const codigoItem = String((item as any).codigo ?? "").trim()
+                const codigoItem = String((item as any).codigo ?? "").trim().toLowerCase()
                 const idItem = (item as any).id
                 if (!codigoItem || typeof idItem !== "number") continue
                 existentesPorCodigo.set(codigoItem, item as AsignaturaCompleta)
               }
-
-              nivelesCargados.add(nivelId)
+            } catch (err) {
+              console.warn("No se pudieron cargar asignaturas previas", err)
             }
 
             let creadas = 0
@@ -778,26 +804,68 @@ export default function RegistroAsignaturaPage() {
                 continue
               }
 
+              // Convertir Nombres (o códigos) a códigos para prerrequisitos
+              const parseRequisitos = (rawStr: string) => {
+                if (!rawStr) return [];
+                return rawStr.split(",").map(s => s.trim()).filter(s => s).map(s => {
+                  const sLower = s.toLowerCase();
+                  // Si es código exacto
+                  if (existentesPorCodigo.has(sLower)) return existentesPorCodigo.get(sLower)!.codigo;
+                  // Si es el nombre de la materia
+                  for (const [, asig] of existentesPorCodigo.entries()) {
+                    if (asig.nombre.toLowerCase() === sLower) return asig.codigo;
+                  }
+                  // Asumir que es el código si no se encuentra
+                  return s;
+                });
+              }
+
+              const prereqStr = String(row["Prerrequisito"] ?? row["Prerrequisitos"] ?? row["prerrequisito"] ?? "").trim();
+              const correqStr = String(row["Correquisito"] ?? row["Correquisitos"] ?? row["correquisito"] ?? "").trim();
+
+              // Determinar si las columnas existen en el Excel y tienen contenido
+              // Si la columna no existe o está vacía → preservar los prereqs/correqs ya en BD
+              const tieneColumnaPrereq = "Prerrequisito" in row || "Prerrequisitos" in row || "prerrequisito" in row;
+              const tieneColumnaCorreq = "Correquisito" in row || "Correquisitos" in row || "correquisito" in row;
+              const existenteActual = existentesPorCodigo.get(codigoNormalizado.toLowerCase());
+
+              const prereqsCodigos = (tieneColumnaPrereq && prereqStr)
+                ? parseRequisitos(prereqStr)
+                : (existenteActual?.prerrequisitos_codigos ?? []);
+              const correqsCodigos = (tieneColumnaCorreq && correqStr)
+                ? parseRequisitos(correqStr)
+                : (existenteActual?.correquisitos_codigos ?? []);
+
               const dataPayload = {
                 carrera_id: carreraId,
                 nivel_id: nivelEncontrado.id,
                 organizacion_id: organizacionEncontrada.id,
                 codigo: codigoNormalizado,
                 nombre: nombreExcel,
+                prerrequisitos_codigos: prereqsCodigos,
+                correquisitos_codigos: correqsCodigos,
               }
 
+
               // Backend: las horas se guardan en /asignaturas/:id/horas (tabla asignatura_horas)
+              // Búsqueda tolerante de columnas de horas (con o sin prefijo "Horas", con o sin tildes)
+              const getVal = (...keys: string[]) => {
+                for (const k of keys) {
+                  if (row[k] !== undefined) return parseExcelNumber(row[k])
+                }
+                return 0;
+              }
+
               const horasPayload = {
-                horasDocencia: parseExcelNumber(row["Horas Docencia"]),
-                horasPractica: parseExcelNumber(row["Horas Práctica"]),
-                horasAutonoma: parseExcelNumber(row["Horas Autónoma"]),
-                horasVinculacion: parseExcelNumber(row["Horas Vinculación"]),
-                horasPracticaPreprofesional: parseExcelNumber(row["Horas Práctica Preprofesional"]),
+                horasDocencia: getVal("Horas Docencia", "Docencia", "horas docencia", "docencia", "Horas docencia"),
+                horasPractica: getVal("Horas Práctica", "Horas Practica", "Práctica", "Practica", "horas práctica", "práctica"),
+                horasAutonoma: getVal("Horas Autónoma", "Horas Autonoma", "Autónoma", "Autonoma", "horas autónoma", "autónoma"),
+                horasVinculacion: getVal("Horas Vinculación", "Horas Vinculacion", "Vinculación", "Vinculacion", "horas vinculación", "vinculación"),
+                horasPracticaPreprofesional: getVal("Horas Práctica Preprofesional", "Horas Practica Preprofesional", "Práctica Preprofesional", "Practica Preprofesional", "Preprofesional"),
               }
 
               try {
-                await ensureExistentesNivel(nivelEncontrado.id)
-                const existente = existentesPorCodigo.get(codigoNormalizado)
+                const existente = existentesPorCodigo.get(codigoNormalizado.toLowerCase())
 
                 if (existente) {
                   await apiRequest(`/asignaturas/${existente.id}`, {
