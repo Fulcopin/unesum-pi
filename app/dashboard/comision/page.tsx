@@ -6,8 +6,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { FileCheck, Upload, Sparkles, GitCompare, FileText, BookOpen, School, Bot, Pen, QrCode, Users } from "lucide-react"
 import Link from "next/link"
+import { useModulosOcultos } from "@/lib/use-modulos-ocultos"
 
 export default function ComisionDashboard() {
+  // Opciones que el cronograma tiene fuera de plazo se ocultan del menú
+  const { estaOculto } = useModulosOcultos()
+
   const comisionModules = [
     {
       title: "Mis Documentos para Firmar",
@@ -108,7 +112,7 @@ export default function ComisionDashboard() {
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {comisionModules.map((module) => {
+            {comisionModules.filter((module) => !estaOculto(module.href)).map((module) => {
               const IconComponent = module.icon
               const esDestacado = (module as any).destacado
               return (

@@ -22,8 +22,12 @@ import {
   UserPlus,
 } from "lucide-react"
 import Link from "next/link"
+import { useModulosOcultos } from "@/lib/use-modulos-ocultos"
 
 export default function AdminDashboard() {
+  // Opciones que el cronograma tiene fuera de plazo se ocultan del menú
+  const { estaOculto } = useModulosOcultos()
+
   const adminModules = [
     {
       title: "Mis Documentos para Firmar",
@@ -81,6 +85,13 @@ export default function AdminDashboard() {
       icon: ClipboardList,
       href: "/dashboard/admin/metodologia",
       color: "bg-emerald-500",
+    },
+    {
+      title: "Escenarios de Aprendizaje",
+      description: "Crear el catálogo de escenarios (Áulico, Virtual, Laboratorio…) para el syllabus",
+      icon: LucideAirVent,
+      href: "/dashboard/admin/escenario",
+      color: "bg-teal-500",
     },
     {
       title: "Campo de Formación",
@@ -227,7 +238,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {adminModules.map((module) => {
+            {adminModules.filter((module) => !estaOculto(module.href)).map((module) => {
               const IconComponent = module.icon
               const esDestacado = (module as any).destacado
               return (

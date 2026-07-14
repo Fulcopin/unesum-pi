@@ -7,8 +7,12 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { BookOpen, User, Calendar, FileText, FileSpreadsheet, FileCheck, Bot, Pen, QrCode, Printer, Eye, MessageSquare } from "lucide-react"
 import Link from "next/link"
+import { useModulosOcultos } from "@/lib/use-modulos-ocultos"
 
 export default function DocenteDashboard() {
+  // Opciones que el cronograma tiene fuera de plazo se ocultan del menú
+  const { estaOculto } = useModulosOcultos()
+
   return (
     <ProtectedRoute allowedRoles={["profesor", "docente", "comision"]}>
       <div className="min-h-screen bg-gray-50">
@@ -39,6 +43,7 @@ export default function DocenteDashboard() {
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* Ver e Imprimir mis documentos */}
+              {!estaOculto("/dashboard/docente/mis-documentos") && (
               <Link href="/dashboard/docente/mis-documentos" className="sm:col-span-3">
                 <div className="rounded-xl bg-blue-700 hover:bg-blue-800 text-white p-5 cursor-pointer transition-all shadow-md hover:shadow-lg flex items-center gap-4 group">
                   <div className="bg-white/20 rounded-xl p-3 flex-shrink-0 group-hover:bg-white/30 transition-colors">
@@ -50,8 +55,10 @@ export default function DocenteDashboard() {
                   </div>
                 </div>
               </Link>
+              )}
 
               {/* Mis Revisiones */}
+              {!estaOculto("/dashboard/docente/mis-revisiones") && (
               <Link href="/dashboard/docente/mis-revisiones" className="sm:col-span-3">
                 <div className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white p-4 cursor-pointer transition-all shadow-md hover:shadow-lg flex items-center gap-4 group">
                   <div className="bg-white/20 rounded-xl p-3 flex-shrink-0 group-hover:bg-white/30 transition-colors">
@@ -63,8 +70,10 @@ export default function DocenteDashboard() {
                   </div>
                 </div>
               </Link>
+              )}
 
               {/* Editor Syllabus */}
+              {!estaOculto("/dashboard/docente/editor-syllabus") && (
               <Link href="/dashboard/docente/editor-syllabus">
                 <div className="rounded-xl bg-white border-2 border-blue-200 hover:border-blue-400 hover:bg-blue-50 p-4 cursor-pointer transition-all flex items-center gap-3 group">
                   <div className="bg-blue-100 group-hover:bg-blue-200 rounded-lg p-2 flex-shrink-0 transition-colors">
@@ -76,8 +85,10 @@ export default function DocenteDashboard() {
                   </div>
                 </div>
               </Link>
+              )}
 
               {/* Editor Programa Analítico */}
+              {!estaOculto("/dashboard/docente/editor-programa-analitico") && (
               <Link href="/dashboard/docente/editor-programa-analitico">
                 <div className="rounded-xl bg-white border-2 border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 p-4 cursor-pointer transition-all flex items-center gap-3 group">
                   <div className="bg-indigo-100 group-hover:bg-indigo-200 rounded-lg p-2 flex-shrink-0 transition-colors">
@@ -89,8 +100,10 @@ export default function DocenteDashboard() {
                   </div>
                 </div>
               </Link>
+              )}
 
               {/* Mis Firmas */}
+              {!estaOculto("/dashboard/docente/mis-firmas") && (
               <Link href="/dashboard/docente/mis-firmas">
                 <div className="rounded-xl bg-white border-2 border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50 p-4 cursor-pointer transition-all flex items-center gap-3 group">
                   <div className="bg-emerald-100 group-hover:bg-emerald-200 rounded-lg p-2 flex-shrink-0 transition-colors">
@@ -102,6 +115,7 @@ export default function DocenteDashboard() {
                   </div>
                 </div>
               </Link>
+              )}
             </div>
           </div>
 
@@ -133,7 +147,7 @@ export default function DocenteDashboard() {
               // { title: "Plan de Trabajo Docente", desc: "Planificación de trabajo docente", icon: Calendar, href: "/dashboard/docente/plan_trabajo", color: "bg-orange-500" },
               // { title: "Planificación de Actividades", desc: "Generar reportes de mis actividades docentes", icon: FileText, href: "/dashboard/docente/reportes", color: "bg-red-500" },
               // { title: "Asistente IA", desc: "Consulta información curricular con IA", icon: Bot, href: "/dashboard/docente/asistente-ia", color: "bg-blue-600" },
-            ].map((mod) => {
+            ].filter((mod) => !estaOculto(mod.href)).map((mod) => {
               const Icon = mod.icon
               return (
                 <Card key={mod.href} className="hover:shadow-md transition-shadow">

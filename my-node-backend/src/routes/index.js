@@ -13,6 +13,7 @@ const profesorRoutes = require('./profesor.routes');
 const syllabusRoutes = require('./syllabus.routes');
 const asignaturaRoutes = require('./asignaturaRoutes');
 const metodologiaRoutes = require('./metodologia.routes');
+const escenarioRoutes = require('./escenario.routes');
 const clasificaRoutes = require('./clasificacion.routes');
 const periodoRoutes = require('./periodo.routes');
 const mallaCurricularRoutes = require('./mallaCurricular.routes');
@@ -50,6 +51,7 @@ module.exports = (app) => {
   router.use('/syllabi', syllabusRoutes);
   router.use('/asignaturas', asignaturaRoutes);
   router.use('/metodologias', metodologiaRoutes);
+  router.use('/escenarios', escenarioRoutes);
   router.use('/clasifica', clasificaRoutes);
   router.use('/periodo', periodoRoutes);
   router.use('/periodos', periodoRoutes);

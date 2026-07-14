@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { Plus, Pencil, Trash2, ArrowLeft, Calendar, ChevronLeft, ChevronRight, Eye } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
+import { modulosDeRol, etiquetaModulo } from "@/lib/cronograma-modulos"
 
 interface Evento {
   id: number
@@ -22,7 +23,12 @@ interface Evento {
   color: string
   tipo: string
   para_roles: string
+  /** href de la opción de menú que este evento habilita durante su rango (vacío = ninguna) */
+  modulo?: string
 }
+
+// Radix Select no admite value="", usamos un centinela para "ninguna opción"
+const NINGUN_MODULO = "__ninguno__"
 
 const TIPOS = [
   { value: "reunion", label: "Reunión" },
@@ -84,6 +90,7 @@ const emptyForm = (): Omit<Evento, "id"> => ({
   color: "#2563eb",
   tipo: "general",
   para_roles: "todos",
+  modulo: "",
 })
 
 export default function AdminCronogramaPage() {
@@ -157,6 +164,7 @@ export default function AdminCronogramaPage() {
       color: ev.color,
       tipo: ev.tipo,
       para_roles: ev.para_roles,
+      modulo: ev.modulo || "",
     })
     setEditingId(ev.id)
     setShowForm(true)
@@ -311,13 +319,39 @@ export default function AdminCronogramaPage() {
                     </div>
                     <div>
                       <label className="text-sm font-medium text-gray-700 block mb-1">Para</label>
-                      <Select value={form.para_roles} onValueChange={v => setForm(f => ({ ...f, para_roles: v }))}>
+                      <Select
+                        value={form.para_roles}
+                        onValueChange={v => setForm(f => ({ ...f, para_roles: v, modulo: "" }))}
+                      >
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
+                  </div>
+
+                  {/* Bloqueo de una opción de menú según el rango de fechas */}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">
+                      Habilitar una opción de menú (opcional)
+                    </label>
+                    <Select
+                      value={form.modulo || NINGUN_MODULO}
+                      onValueChange={v => setForm(f => ({ ...f, modulo: v === NINGUN_MODULO ? "" : v }))}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Ninguna — solo evento de calendario" /></SelectTrigger>
+                      <SelectContent className="max-h-72">
+                        <SelectItem value={NINGUN_MODULO}>Ninguna — solo evento de calendario</SelectItem>
+                        {modulosDeRol(form.para_roles).map(m => (
+                          <SelectItem key={m.key} value={m.key}>{m.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      Si eliges una opción, para el rol seleccionado <strong>solo estará visible entre la fecha de inicio y la fecha de fin</strong>.
+                      Fuera de ese rango se oculta del menú.
+                    </p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-700 block mb-1">Color</label>
@@ -449,6 +483,11 @@ export default function AdminCronogramaPage() {
                             <Badge variant="outline" className="text-xs text-gray-500">
                               {ROLES.find(r => r.value === ev.para_roles)?.label || ev.para_roles}
                             </Badge>
+                            {ev.modulo && (
+                              <Badge className="text-xs bg-amber-100 text-amber-800 border border-amber-300">
+                                🔒 Habilita: {etiquetaModulo(ev.modulo)}
+                              </Badge>
+                            )}
                           </div>
                           {ev.descripcion && <p className="text-sm text-gray-500 mb-1 line-clamp-2">{ev.descripcion}</p>}
                           <p className="text-xs text-gray-400">

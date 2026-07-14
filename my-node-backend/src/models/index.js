@@ -19,6 +19,7 @@ const initAsignatura = require('./asignaturas');
 const initDistribucionHoras = require('./distribucion_horas');
 const initUnidadTematica = require('./unidades_tematicas');
 const initMetodologia = require('./metodologias');
+const initEscenario = require('./escenarios');
 const initAsignaturaRequisito = require('./asignatura_requisitos');
 const initperiodo = require('./periodos');
 const initMalla = require('./mallas');
@@ -72,6 +73,7 @@ const Asignatura = initAsignatura(sequelize, Sequelize.DataTypes);
 const DistribucionHoras = initDistribucionHoras(sequelize, Sequelize.DataTypes);
 const UnidadTematica = initUnidadTematica(sequelize, Sequelize.DataTypes);
 const Metodologia = initMetodologia(sequelize, Sequelize.DataTypes);
+const Escenario = initEscenario(sequelize, Sequelize.DataTypes);
 const AsignaturaRequisito = initAsignaturaRequisito(sequelize, Sequelize.DataTypes);
 const Periodo = initperiodo(sequelize, Sequelize.DataTypes);
 const Malla = initMalla(sequelize, Sequelize.DataTypes);
@@ -309,6 +311,7 @@ module.exports = {
   DistribucionHoras,
   UnidadTematica,
   Metodologia,
+  Escenario,
   AsignaturaRequisito,
   ClasificacionAcademica, 
   Periodo,

@@ -86,8 +86,8 @@ export default function DocenteEditorSyllabusPage() {
   const [unidadesResultados, setUnidadesResultados] = useState<any[]>([])
   // Catálogo de metodologías (para el combo de la columna Metodologías)
   const [metodologias, setMetodologias] = useState<any[]>([])
-  // Catálogo de organización curricular (para el combo de la columna Escenario de aprendizaje)
-  const [organizaciones, setOrganizaciones] = useState<any[]>([])
+  // Catálogo de escenarios de aprendizaje (para el combo de la columna Escenario)
+  const [escenarios, setEscenarios] = useState<any[]>([])
   const isAutoSyncingPeriod = useRef(false)
   // Mapa de celdas bloqueadas por la comisión (cellId → true)
   const [lockedCells, setLockedCells] = useState<Record<string, boolean>>({})
@@ -324,15 +324,15 @@ export default function DocenteEditorSyllabusPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Cargar la organización curricular (para el combo de la columna Escenario de aprendizaje)
+  // Cargar el catálogo de escenarios de aprendizaje (para el combo de la columna Escenario)
   useEffect(() => {
     let cancelado = false
     ;(async () => {
       try {
-        const res = await apiRequest(`/organizacion`)
-        if (!cancelado) setOrganizaciones(Array.isArray(res?.data) ? res.data : [])
+        const res = await apiRequest(`/escenarios?estado=activo`)
+        if (!cancelado) setEscenarios(Array.isArray(res?.data) ? res.data : [])
       } catch (e) {
-        if (!cancelado) setOrganizaciones([])
+        if (!cancelado) setEscenarios([])
       }
     })()
     return () => { cancelado = true }
@@ -2403,17 +2403,17 @@ export default function DocenteEditorSyllabusPage() {
                         )}
                       </div>
                     )}
-                    {/* Combo con la organización curricular (solo para la columna "Escenario de aprendizaje") */}
+                    {/* Combo con el catálogo de escenarios (solo para la columna "Escenario de aprendizaje") */}
                     {modalCell.colType === 'escenario' && (
                       <div className="mb-3">
                         <label className="block text-xs font-semibold text-emerald-700 mb-1">
-                          Escenario / Organización curricular
+                          Escenario de aprendizaje
                         </label>
-                        {organizaciones.length > 0 ? (
+                        {escenarios.length > 0 ? (
                           <>
                             <Select
                               value={
-                                organizaciones.find((o: any) => (o.nombre || '').trim() === editContent.trim())
+                                escenarios.find((o: any) => (o.nombre || '').trim() === editContent.trim())
                                   ? editContent.trim()
                                   : undefined
                               }
@@ -2423,21 +2423,21 @@ export default function DocenteEditorSyllabusPage() {
                                 <SelectValue placeholder="Selecciona un escenario..." />
                               </SelectTrigger>
                               <SelectContent>
-                                {organizaciones.map((o: any) => (
+                                {escenarios.map((o: any) => (
                                   <SelectItem key={o.id} value={(o.nombre || '').trim()}>
-                                    {o.codigo ? `${o.codigo} — ` : ''}{o.nombre}
+                                    {o.nombre}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                             <p className="text-[11px] text-gray-500 mt-1">
-                              Elige un escenario de la lista o edita el texto libremente abajo.
+                              Elige un escenario del catálogo o edita el texto libremente abajo.
                             </p>
                           </>
                         ) : (
                           <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                            Aún no hay organización curricular registrada. Un administrador debe crearla en{" "}
-                            <span className="font-semibold">Admin → Organización</span>; luego aparecerá aquí para seleccionarla.
+                            Aún no hay escenarios en el catálogo. Un administrador debe crearlos en{" "}
+                            <span className="font-semibold">Admin → Escenarios de Aprendizaje</span>; luego aparecerán aquí.
                           </div>
                         )}
                       </div>

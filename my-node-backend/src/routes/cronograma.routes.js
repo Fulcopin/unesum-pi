@@ -8,6 +8,11 @@ router.get('/publico', cronogramaController.getAll);
 
 // GET autenticado
 router.get('/', authenticate, cronogramaController.getAll);
+
+// Opciones de menú que deben ocultarse ahora para el rol del usuario
+// (debe ir ANTES de /:id para que no la capture la ruta genérica)
+router.get('/modulos-ocultos', authenticate, cronogramaController.getModulosOcultos);
+
 router.get('/:id', authenticate, cronogramaController.getById);
 
 // Solo administradores pueden crear, editar y eliminar
