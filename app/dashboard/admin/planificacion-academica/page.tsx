@@ -1,6 +1,7 @@
 "use client"
 
 import { ProtectedRoute } from "@/components/auth/protected-route"
+import { ModuloGuard } from "@/components/auth/modulo-guard"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -405,6 +406,7 @@ export default function PlanificacionAcademica() {
 
   return (
     <ProtectedRoute allowedRoles={["administrador"]}>
+      <ModuloGuard>
       <style jsx global>{` @media print { .no-print { display: none !important; } .printable-card { box-shadow: none !important; border: 1px solid #dee2e6 !important; } body { background-color: #fff !important; } } `}</style>
       
       <ModalDialog 
@@ -661,6 +663,7 @@ export default function PlanificacionAcademica() {
           </CardContent>
         </Card>
       </main>
+      </ModuloGuard>
     </ProtectedRoute>
   )
 }

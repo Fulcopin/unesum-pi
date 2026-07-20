@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { ProtectedRoute } from '@/components/auth/protected-route'
+import { ModuloGuard } from '@/components/auth/modulo-guard'
 import { MainHeader } from '@/components/layout/main-header'
 import { 
   FileText, 
@@ -324,6 +325,7 @@ export default function ComisionSyllabusPage() {
 
   return (
     <ProtectedRoute allowedRoles={["comision", "comision_academica"]}>
+      <ModuloGuard>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
         
@@ -462,6 +464,7 @@ export default function ComisionSyllabusPage() {
           )}
         </div>
       </div>
+      </ModuloGuard>
     </ProtectedRoute>
   )
 }

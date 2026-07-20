@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Pencil, Trash2, ArrowLeft, Calendar, ChevronLeft, ChevronRight, Eye } from "lucide-react"
+import { Plus, Pencil, Trash2, ArrowLeft, Calendar, ChevronLeft, ChevronRight, Eye, Lock } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import Link from "next/link"
 import { modulosDeRol, etiquetaModulo } from "@/lib/cronograma-modulos"
+import { GestionMenus } from "@/components/cronograma/gestion-menus"
 
 interface Evento {
   id: number
@@ -105,6 +106,7 @@ export default function AdminCronogramaPage() {
   const [view, setView] = useState<"calendar" | "list">("list")
   const [rangeStart, setRangeStart] = useState<number | null>(null)
   const [rangeEnd, setRangeEnd] = useState<number | null>(null)
+  const [showMenus, setShowMenus] = useState(false)
 
   const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api"
 
@@ -132,9 +134,25 @@ export default function AdminCronogramaPage() {
 
   useEffect(() => { loadEventos() }, [])
 
+  // Error de rango de fechas, o null si el rango es válido / aún incompleto.
+  const errorFechas = (() => {
+    if (!form.fecha_inicio || !form.fecha_fin) return null
+    const inicio = new Date(form.fecha_inicio)
+    const fin = new Date(form.fecha_fin)
+    if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) return "Las fechas no son válidas."
+    if (fin <= inicio) return "La fecha de fin debe ser posterior a la fecha de inicio."
+    return null
+  })()
+
+  const formIncompleto = !form.titulo.trim() || !form.fecha_inicio || !form.fecha_fin
+
   const handleSave = async () => {
-    if (!form.titulo.trim() || !form.fecha_inicio || !form.fecha_fin) {
+    if (formIncompleto) {
       alert("Título, fecha de inicio y fecha de fin son obligatorios.")
+      return
+    }
+    if (errorFechas) {
+      alert(errorFechas)
       return
     }
     setSaving(true)
@@ -261,8 +279,13 @@ export default function AdminCronogramaPage() {
               >
                 <Plus className="h-4 w-4 mr-1" /> Nuevo evento
               </Button>
+              <Button variant="outline" onClick={() => setShowMenus(true)}>
+                <Lock className="h-4 w-4 mr-1" /> Gestionar menús
+              </Button>
             </div>
           </div>
+
+          {showMenus && <GestionMenus onClose={() => setShowMenus(false)} />}
 
           {/* Form modal */}
           {showForm && (
@@ -289,23 +312,31 @@ export default function AdminCronogramaPage() {
                       className="min-h-[70px]"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-1">Fecha inicio *</label>
-                      <Input
-                        type="datetime-local"
-                        value={form.fecha_inicio}
-                        onChange={e => setForm(f => ({ ...f, fecha_inicio: e.target.value }))}
-                      />
+                  <div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 block mb-1">Fecha inicio *</label>
+                        <Input
+                          type="datetime-local"
+                          value={form.fecha_inicio}
+                          onChange={e => setForm(f => ({ ...f, fecha_inicio: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 block mb-1">Fecha fin *</label>
+                        <Input
+                          type="datetime-local"
+                          value={form.fecha_fin}
+                          // El navegador ya impide elegir un fin anterior al inicio
+                          min={form.fecha_inicio || undefined}
+                          onChange={e => setForm(f => ({ ...f, fecha_fin: e.target.value }))}
+                          className={errorFechas ? "border-red-500 focus-visible:ring-red-500" : ""}
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-1">Fecha fin *</label>
-                      <Input
-                        type="datetime-local"
-                        value={form.fecha_fin}
-                        onChange={e => setForm(f => ({ ...f, fecha_fin: e.target.value }))}
-                      />
-                    </div>
+                    {errorFechas && (
+                      <p className="text-xs text-red-600 mt-1.5">{errorFechas}</p>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -369,7 +400,11 @@ export default function AdminCronogramaPage() {
                   </div>
                   <div className="flex justify-end gap-3 pt-2">
                     <Button variant="outline" onClick={() => { setShowForm(false); setEditingId(null) }}>Cancelar</Button>
-                    <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleSave} disabled={saving}>
+                    <Button
+                      className="bg-blue-600 hover:bg-blue-700"
+                      onClick={handleSave}
+                      disabled={saving || !!errorFechas || formIncompleto}
+                    >
                       {saving ? "Guardando..." : editingId ? "Actualizar" : "Crear evento"}
                     </Button>
                   </div>

@@ -30,6 +30,7 @@ import { Loader2, CheckCircle, XCircle, BookOpen, Grid3x3, Eye, Home, Building2,
 import { useAuth } from "@/contexts/auth-context";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { ModuloGuard } from "@/components/auth/modulo-guard";
 
 // --- Interfaces ---
 interface Facultad {
@@ -485,6 +486,7 @@ export default function MallaCurricularPage() {
   };
 
   return (
+    <ModuloGuard>
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50">
       <div className="container mx-auto p-6">
         <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -906,5 +908,6 @@ export default function MallaCurricularPage() {
         )}
       </div>
     </div>
+    </ModuloGuard>
   );
 }

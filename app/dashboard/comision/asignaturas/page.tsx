@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ModuloGuard } from "@/components/auth/modulo-guard";
 
 interface Asignatura {
   id: number;
@@ -468,6 +469,7 @@ export default function AsignaturasComisionPage() {
   const stats = carreraActual ? contarEstadisticas(carreraActual.asignaturas) : null;
 
   return (
+    <ModuloGuard>
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="mb-2">
@@ -1046,5 +1048,6 @@ export default function AsignaturasComisionPage() {
         </div>
       )}
     </div>
+    </ModuloGuard>
   );
 }

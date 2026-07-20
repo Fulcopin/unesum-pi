@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
+import { ModuloGuard } from "@/components/auth/modulo-guard"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -165,6 +166,7 @@ export default function ComisionProgramaAnaliticoPage() {
 
   return (
     <ProtectedRoute allowedRoles={['comision', 'comision_academica']}>
+      <ModuloGuard>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
 
@@ -379,6 +381,7 @@ export default function ComisionProgramaAnaliticoPage() {
           </div>
         </main>
       </div>
+      </ModuloGuard>
     </ProtectedRoute>
   )
 }

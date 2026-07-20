@@ -3,6 +3,7 @@
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
+import { ModuloGuard } from "@/components/auth/modulo-guard"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -2206,6 +2207,7 @@ export default function EditorSyllabusComisionPage() {
 
   return (
     <ProtectedRoute allowedRoles={["administrador", "comision_academica", "comision", "profesor"]}>
+      <ModuloGuard>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
         <main className="max-w-7xl mx-auto px-6 py-8">
@@ -2966,6 +2968,7 @@ export default function EditorSyllabusComisionPage() {
           </div>
         </div>
       )}
+      </ModuloGuard>
     </ProtectedRoute>
   )
 }

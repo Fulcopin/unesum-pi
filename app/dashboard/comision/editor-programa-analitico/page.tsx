@@ -3,6 +3,7 @@
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
+import { ModuloGuard } from "@/components/auth/modulo-guard"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -1041,6 +1042,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
 
   return (
     <ProtectedRoute allowedRoles={["comision_academica", "comision", "administrador"]}>
+      <ModuloGuard>
       <div className="min-h-screen bg-gradient-to-b from-blue-50 via-white to-blue-50"
         style={{
           backgroundImage: 'radial-gradient(circle at 20% 50%, rgba(59, 130, 246, 0.05) 0%, transparent 50%), radial-gradient(circle at 80% 80%, rgba(37, 99, 235, 0.05) 0%, transparent 50%)',
@@ -1488,6 +1490,7 @@ export default function EditorProgramaAnaliticoComisionPage() {
           )}
         </main>
       </div>
+      </ModuloGuard>
     </ProtectedRoute>
   )
 }

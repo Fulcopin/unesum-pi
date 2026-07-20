@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedRoute } from '@/components/auth/protected-route';
+import { ModuloGuard } from '@/components/auth/modulo-guard';
 import { MainHeader } from '@/components/layout/main-header';
 import { useAuth } from '@/contexts/auth-context';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -372,7 +373,9 @@ function MisDocumentosContent() {
 export default function DocenteMisDocumentosPage() {
   return (
     <ProtectedRoute allowedRoles={['docente', 'profesor', 'administrador']}>
+      <ModuloGuard>
       <MisDocumentosContent />
+      </ModuloGuard>
     </ProtectedRoute>
   );
 }

@@ -13,6 +13,11 @@ router.get('/', authenticate, cronogramaController.getAll);
 // (debe ir ANTES de /:id para que no la capture la ruta genérica)
 router.get('/modulos-ocultos', authenticate, cronogramaController.getModulosOcultos);
 
+// Panel de gestión de menús: solo el administrador consulta y cambia estados
+// (ambas van ANTES de /:id y de /:id genéricas)
+router.get('/modulos-estado', authenticate, authorize(['administrador']), cronogramaController.getModulosEstado);
+router.put('/modulos-estado', authenticate, authorize(['administrador']), cronogramaController.setModuloEstado);
+
 router.get('/:id', authenticate, cronogramaController.getById);
 
 // Solo administradores pueden crear, editar y eliminar

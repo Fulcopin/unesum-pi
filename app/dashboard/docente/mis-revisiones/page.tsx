@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { MainHeader } from "@/components/layout/main-header";
 import { ProtectedRoute } from "@/components/auth/protected-route";
+import { ModuloGuard } from "@/components/auth/modulo-guard";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -273,6 +274,7 @@ function RevisionsContent() {
 export default function MisRevisionesPage() {
   return (
     <ProtectedRoute allowedRoles={["profesor", "docente", "comision"]}>
+      <ModuloGuard>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
         <main className="max-w-full px-5 py-6 space-y-4">
@@ -297,6 +299,7 @@ export default function MisRevisionesPage() {
           </Suspense>
         </main>
       </div>
+      </ModuloGuard>
     </ProtectedRoute>
   );
 }

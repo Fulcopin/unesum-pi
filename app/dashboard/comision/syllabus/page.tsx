@@ -1,6 +1,7 @@
 "use client"
 
 import { ProtectedRoute } from '@/components/auth/protected-route'
+import { ModuloGuard } from '@/components/auth/modulo-guard'
 import { MainHeader } from '@/components/layout/main-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -36,6 +37,7 @@ export default function ComisionSyllabusPage() {
 
   return (
     <ProtectedRoute allowedRoles={['comision', 'comision_academica']}>
+      <ModuloGuard>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
 
@@ -203,6 +205,7 @@ export default function ComisionSyllabusPage() {
           </Tabs>
         </main>
       </div>
+      </ModuloGuard>
     </ProtectedRoute>
   )
 }

@@ -13,6 +13,7 @@ import { FirmasPanel } from "@/components/firmas/firmas-panel"
 import Link from "next/link"
 import { esTabEstructura, syncContenidosEstructuraAResultados, syncResultadosAprendizajeDesdeBD } from "@/lib/syllabus-contenidos-sync"
 import { buildFechasPorParalelo, extraerHorarioClases, parseFechasCell, formatFechasCell, nombreDia } from "@/lib/syllabus-fechas"
+import { ModuloGuard } from "@/components/auth/modulo-guard"
 
 
 // --- INTERFACES ---
@@ -1856,6 +1857,7 @@ export default function DocenteEditorSyllabusPage() {
 
 
   return (
+    <ModuloGuard>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
 
@@ -2520,5 +2522,6 @@ export default function DocenteEditorSyllabusPage() {
           </div>
         )}
       </div>
+    </ModuloGuard>
   )
 }

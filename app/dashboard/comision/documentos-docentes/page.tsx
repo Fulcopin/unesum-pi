@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { MainHeader } from "@/components/layout/main-header";
 import { ProtectedRoute } from "@/components/auth/protected-route";
+import { ModuloGuard } from "@/components/auth/modulo-guard";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -294,6 +295,7 @@ export default function DocumentosDocentesPage() {
 
   return (
     <ProtectedRoute allowedRoles={["coordinador", "comision", "comision_academica", "administrador"]}>
+      <ModuloGuard>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
         <main className="max-w-7xl mx-auto px-4 py-8 space-y-6">
@@ -707,6 +709,7 @@ export default function DocumentosDocentesPage() {
           )}
         </main>
       </div>
+      </ModuloGuard>
     </ProtectedRoute>
   );
 }

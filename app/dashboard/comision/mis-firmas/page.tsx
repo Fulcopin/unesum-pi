@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import MisDocumentosFirma from '@/components/firmas/mis-documentos-firma';
+import { ModuloGuard } from '@/components/auth/modulo-guard';
 
 export default function MisFirmasComisionPage() {
   const { token, isLoading } = useAuth();
@@ -21,5 +22,9 @@ export default function MisFirmasComisionPage() {
     );
   }
 
-  return <MisDocumentosFirma token={token} />;
+  return (
+    <ModuloGuard>
+      <MisDocumentosFirma token={token} />
+    </ModuloGuard>
+  );
 }
