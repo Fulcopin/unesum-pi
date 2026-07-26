@@ -669,45 +669,71 @@ async function applyAdminLocksToData(datosSyllabus, periodoStr) {
 
       const lockedCells = tTab.rows.flatMap(r => r.cells || []).filter(c => c.isLocked === true);
 
+      // ¿La estructura de esta pestaña coincide con la plantilla? (mismo nº de filas)
+      const tabAligned = Array.isArray(tab.rows) && tab.rows.length === tTab.rows.length;
+
+      // ESTRATEGIA: emparejar las filas por su ETIQUETA (el texto de la primera
+      // celda), no por su número de fila. Emparejar por índice es lo que producía
+      // el desplazamiento: basta con que la plantilla tenga una fila de más —cosa
+      // que pasa al resubir un Word— para que la fila 0 del documento se compare
+      // contra la fila 0 de la plantilla, que ya es otra cosa, y los bloqueos (y
+      // antes también el texto) caigan corridos una fila.
+      const normEtiqueta = (s) =>
+        (s || '')
+          .toString()
+          .toUpperCase()
+          .normalize('NFD')
+          .replace(/[̀-ͯ]/g, '')
+          .replace(/\s+/g, ' ')
+          .replace(/:+$/, '')
+          .trim();
+
+      const filasPlantillaPorEtiqueta = new Map();
+      for (const tr of tTab.rows) {
+        const clave = normEtiqueta(tr.cells && tr.cells[0] && tr.cells[0].content);
+        if (clave && !filasPlantillaPorEtiqueta.has(clave)) filasPlantillaPorEtiqueta.set(clave, tr);
+      }
+
       const newRows = (tab.rows || []).map((row, rIdx) => {
-        const tRow = tTab.rows[rIdx];
+        const etiqueta = normEtiqueta(row.cells && row.cells[0] && row.cells[0].content);
+        let tRow = etiqueta ? filasPlantillaPorEtiqueta.get(etiqueta) : null;
+        // Filas sin etiqueta (encabezados, cuerpos de tabla) no se pueden emparejar
+        // por texto: ahí sí usamos el índice, pero SOLO si la pestaña tiene
+        // exactamente el mismo número de filas, que es cuando el índice es fiable.
+        if (!tRow && tabAligned) tRow = tTab.rows[rIdx];
+
+        // Dentro de una fila ya emparejada, las columnas solo son comparables si
+        // coincide el número de celdas.
+        const rowAligned = tRow && Array.isArray(tRow.cells) &&
+          Array.isArray(row.cells) && tRow.cells.length === row.cells.length;
+        // BLOQUEAR = LA CELDA NO SE PUEDE ESCRIBIR. Nada más.
+        //
+        // Esta función toca EXCLUSIVAMENTE la bandera `isLocked`. No copia el
+        // texto de la plantilla, ni sus colores, ni ningún otro estilo. Cada vez
+        // que arrastraba algo además del bloqueo, el documento se veía alterado
+        // al bloquear: el texto aterrizaba en la columna equivocada, o la celda
+        // cambiaba de aspecto y de ancho. El contenido y la apariencia son del
+        // documento; la plantilla del admin solo decide qué se puede editar.
         const newCells = (row.cells || []).map((cell, cIdx) => {
           let isLocked = cell.isLocked;
-          let backgroundColor = cell.backgroundColor;
-          let textColor = cell.textColor;
 
-          // 1. Match por posición exacta (más confiable)
-          if (tRow && tRow.cells && tRow.cells[cIdx]) {
-            const tCell = tRow.cells[cIdx];
-            if (tCell.isLocked === true) {
-              isLocked = true;
-              if (tCell.backgroundColor) backgroundColor = tCell.backgroundColor;
-              if (tCell.styles && tCell.styles.backgroundColor) backgroundColor = tCell.styles.backgroundColor;
-              if (tCell.textColor) textColor = tCell.textColor;
-              // REPARACIÓN CRÍTICA: Forzar el contenido de la plantilla si está bloqueado por el admin
-              if (tCell.content === ':' || tCell.content === '::') {
-                cell.content = tCell.content;
-              } else if (cell.docenteEditable !== true && tCell.content !== undefined && tCell.content !== null) {
-                cell.content = tCell.content;
-              }
-            }
+          // 1. Celda de la fila ya emparejada por etiqueta, misma columna
+          if (rowAligned && tRow.cells[cIdx] && tRow.cells[cIdx].isLocked === true) {
+            isLocked = true;
           }
 
-          // 2. Fallback: match por contenido del label
+          // 2. Respaldo: la plantilla bloquea una celda con este mismo texto
           if (isLocked !== true && cell.content && cell.content.trim().length > 0) {
             const norm = cell.content.trim().toUpperCase();
-            const matched = lockedCells.find(tc => tc.content && tc.content.trim().toUpperCase() === norm);
-            if (matched) {
+            if (lockedCells.some(tc => tc.content && tc.content.trim().toUpperCase() === norm)) {
               isLocked = true;
-              if (matched.backgroundColor) backgroundColor = matched.backgroundColor;
-              // NOTA: No forzamos contenido en fallback para evitar sobrescribir campos que casualmente coinciden
             }
           }
 
-          // Respetar docenteEditable explícito de la comisión
+          // La comisión puede liberar explícitamente una celda por encima del admin
           if (cell.docenteEditable === true) isLocked = false;
 
-          return { ...cell, isLocked, backgroundColor, textColor };
+          return { ...cell, isLocked };
         });
         return { ...row, cells: newCells };
       });
@@ -1215,5 +1241,170 @@ exports.listarSyllabusComision = async (req, res) => {
   } catch (error) {
     console.error('❌ Error al listar syllabus comisión:', error);
     return res.status(500).json({ success: false, message: 'Error al listar', error: error.message });
+  }
+};
+
+// ============================================================
+// APLICAR BLOQUEOS DE UN SYLLABUS A OTROS (misma estructura)
+// POST /api/comision-academica/syllabus/:id/aplicar-bloqueos
+// Toma la configuración de bloqueos (isLocked / docenteEditable) del syllabus
+// :id y la replica sobre los demás syllabus de comisión. El match es por
+// POSICIÓN cuando la estructura coincide, con respaldo por CONTENIDO de la
+// etiqueta. NUNCA modifica el contenido de las celdas destino: solo copia las
+// banderas de bloqueo y los colores.
+// ============================================================
+
+// Normaliza texto (mayúsculas, sin tildes) para comparar etiquetas de celda
+const _normLockContent = (s) =>
+  (s || '')
+    .toString()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+// Devuelve una celda "tiene opinión" de bloqueo si el admin o la comisión la
+// configuraron explícitamente (bloqueada o desbloqueada).
+const _cellTieneOpinion = (cell) =>
+  cell && (cell.isLocked === true || cell.docenteEditable === true || cell.docenteEditable === false);
+
+// Construye, por pestaña del syllabus origen, un índice de bloqueos por posición
+// (`row:col`) y por contenido normalizado.
+function _extraerBloqueosFuente(sourceData) {
+  const tabs = Array.isArray(sourceData?.tabs) ? sourceData.tabs : [];
+  return tabs.map((tab) => {
+    const byPosition = {};
+    const byContent = new Map();
+    (tab.rows || []).forEach((row, rIdx) => {
+      (row.cells || []).forEach((cell, cIdx) => {
+        if (!_cellTieneOpinion(cell)) return;
+        const info = {
+          isLocked: !!cell.isLocked,
+          docenteEditable: cell.docenteEditable,
+          backgroundColor: cell.backgroundColor || (cell.styles && cell.styles.backgroundColor),
+          textColor: cell.textColor || (cell.styles && cell.styles.textColor),
+        };
+        byPosition[`${rIdx}:${cIdx}`] = info;
+        const key = _normLockContent(cell.content);
+        if (key && !byContent.has(key)) byContent.set(key, info);
+      });
+    });
+    return { title: tab.title, rowCount: (tab.rows || []).length, byPosition, byContent };
+  });
+}
+
+// Aplica el índice de bloqueos de la fuente sobre los datos de un syllabus destino.
+function _aplicarBloqueosATarget(targetData, fuenteTabs) {
+  let aplicados = 0;
+  if (!Array.isArray(targetData?.tabs)) return { data: targetData, aplicados };
+
+  const nuevoTabs = targetData.tabs.map((tab, tIdx) => {
+    const fuente = fuenteTabs.find((f) => f.title && tab.title && f.title === tab.title) || fuenteTabs[tIdx];
+    if (!fuente) return tab;
+
+    // Solo confiamos en la posición si la pestaña tiene el mismo número de filas.
+    const tabAligned = (tab.rows || []).length === fuente.rowCount;
+
+    const nuevoRows = (tab.rows || []).map((row, rIdx) => {
+      const nuevoCells = (row.cells || []).map((cell, cIdx) => {
+        let info = null;
+        if (tabAligned) info = fuente.byPosition[`${rIdx}:${cIdx}`] || null;
+        if (!info) {
+          const key = _normLockContent(cell.content);
+          if (key) info = fuente.byContent.get(key) || null;
+        }
+        if (!info) return cell;
+        aplicados++;
+        return {
+          ...cell,
+          isLocked: info.isLocked,
+          docenteEditable: info.docenteEditable,
+          backgroundColor: info.backgroundColor || cell.backgroundColor,
+          textColor: info.textColor || cell.textColor,
+        };
+      });
+      return { ...row, cells: nuevoCells };
+    });
+    return { ...tab, rows: nuevoRows };
+  });
+
+  return { data: { ...targetData, tabs: nuevoTabs }, aplicados };
+}
+
+// Reutilizados por bloqueos.controller.js (menú unificado de bloqueos), donde
+// la misma lógica se aplica a los programas analíticos: los dos documentos
+// comparten la estructura tabs → rows → cells.
+exports._extraerBloqueosFuente = _extraerBloqueosFuente;
+exports._aplicarBloqueosATarget = _aplicarBloqueosATarget;
+// Expuesta para poder probarla aislada (probar-bloqueo.js): es la que inyecta
+// los bloqueos del admin al leer y la que históricamente pisaba contenido.
+exports._applyAdminLocksToData = applyAdminLocksToData;
+
+exports.aplicarBloqueosASyllabi = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { scope = 'periodo', targetIds } = req.body || {};
+
+    const source = await db.SyllabusComisionAcademica.findByPk(id);
+    if (!source) {
+      return res.status(404).json({ success: false, message: 'Syllabus origen no encontrado' });
+    }
+
+    let sourceData = source.datos_syllabus;
+    if (typeof sourceData === 'string') { try { sourceData = JSON.parse(sourceData); } catch (e) {} }
+    if (!sourceData || !Array.isArray(sourceData.tabs)) {
+      return res.status(400).json({ success: false, message: 'El syllabus origen no tiene una estructura válida' });
+    }
+
+    const fuenteTabs = _extraerBloqueosFuente(sourceData);
+    const totalBloqueosFuente = fuenteTabs.reduce((n, t) => n + Object.keys(t.byPosition).length, 0);
+    if (totalBloqueosFuente === 0) {
+      return res.status(400).json({ success: false, message: 'El syllabus origen no tiene bloqueos configurados para aplicar' });
+    }
+
+    // Determinar los syllabus destino
+    const where = {};
+    if (Array.isArray(targetIds) && targetIds.length > 0) {
+      where.id = { [Op.in]: targetIds };
+    } else if (scope === 'periodo') {
+      where.periodo = source.periodo;
+    } // scope === 'todos' => sin filtro de periodo
+
+    const posibles = await db.SyllabusComisionAcademica.findAll({ where });
+    const destinos = posibles.filter((s) => String(s.id) !== String(source.id));
+
+    const detalles = [];
+    let totalAplicados = 0;
+
+    for (const destino of destinos) {
+      let targetData = destino.datos_syllabus;
+      if (typeof targetData === 'string') { try { targetData = JSON.parse(targetData); } catch (e) {} }
+      if (!targetData || !Array.isArray(targetData.tabs)) {
+        detalles.push({ id: destino.id, nombre: destino.nombre, asignatura_id: destino.asignatura_id, aplicados: 0, motivo: 'estructura inválida' });
+        continue;
+      }
+      const { data, aplicados } = _aplicarBloqueosATarget(targetData, fuenteTabs);
+      if (aplicados > 0) {
+        await destino.update({ datos_syllabus: JSON.stringify(data) });
+        totalAplicados += aplicados;
+      }
+      detalles.push({ id: destino.id, nombre: destino.nombre, asignatura_id: destino.asignatura_id, aplicados });
+    }
+
+    const afectados = detalles.filter((d) => d.aplicados > 0).length;
+    return res.status(200).json({
+      success: true,
+      message: `Bloqueos aplicados a ${afectados} de ${destinos.length} syllabus del ${scope === 'todos' ? 'sistema' : 'periodo'}.`,
+      data: {
+        origen: { id: source.id, bloqueos: totalBloqueosFuente },
+        totalDestinos: destinos.length,
+        totalCeldasAplicadas: totalAplicados,
+        detalles,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Error al aplicar bloqueos a otros syllabus:', error);
+    return res.status(500).json({ success: false, message: 'Error al aplicar bloqueos', error: error.message });
   }
 };

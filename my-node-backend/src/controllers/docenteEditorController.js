@@ -6,8 +6,36 @@ const { Op } = require('sequelize');
 
 const getCellPositionKey = (tabIndex, rowIndex, cellIndex) => `${tabIndex}:${rowIndex}:${cellIndex}`;
 
+// Traduce una celda de la fuente de bloqueos (plantilla admin o syllabus de
+// comisión) a un estado de 3 valores:
+//   true      = bloqueada  (admin isLocked:true  o  comisión docenteEditable:false)
+//   false     = desbloqueada EXPLÍCITAMENTE por la comisión (docenteEditable:true) → gana sobre el admin
+//   undefined = la fuente no opina → se conserva lo que traiga la celda del docente
+const cellLockDecision = (cell) => {
+  if (cell?.docenteEditable === true) return false;   // comisión desbloqueó (rojo → verde)
+  if (cell?.docenteEditable === false) return true;   // comisión bloqueó (rojo)
+  if (cell?.isLocked === true) return true;            // admin bloqueó (amarillo)
+  return undefined;                                     // sin opinión
+};
+
+// Etiqueta normalizada de una fila = texto de su primera celda. Es la forma
+// estable de reconocer una fila: el índice se desfasa en cuanto la plantilla
+// tiene una fila de más o de menos que el documento del docente.
+const normEtiquetaFila = (row) =>
+  ((row && row.cells && row.cells[0] && row.cells[0].content) || '')
+    .toString()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/:+$/, '')
+    .trim();
+
+const getCellLabelKey = (etiqueta, cellIndex) => `${etiqueta}::${cellIndex}`;
+
 const buildComisionLockState = (datos) => {
   const lockById = {};
+  const lockByLabel = {};
   const lockByPosition = {};
   const tabs = Array.isArray(datos?.tabs)
     ? datos.tabs
@@ -17,43 +45,104 @@ const buildComisionLockState = (datos) => {
 
   tabs.forEach((tab, tabIndex) => {
     (tab.rows || []).forEach((row, rowIndex) => {
+      const etiqueta = normEtiquetaFila(row);
       (row.cells || []).forEach((cell, cellIndex) => {
-        const locked = !!cell?.isLocked;
-        if (cell?.id) lockById[cell.id] = locked;
-        lockByPosition[getCellPositionKey(tabIndex, rowIndex, cellIndex)] = locked;
+        const decision = cellLockDecision(cell);
+        // Solo registramos las celdas donde la fuente SÍ opina (bloquear o desbloquear).
+        if (decision === undefined) return;
+        if (cell?.id) lockById[cell.id] = decision;
+        if (etiqueta) {
+          const clave = getCellLabelKey(etiqueta, cellIndex);
+          // La primera fila con esa etiqueta manda: si hay repetidas, no adivinamos
+          if (!Object.prototype.hasOwnProperty.call(lockByLabel, clave)) {
+            lockByLabel[clave] = decision;
+          }
+        }
+        lockByPosition[getCellPositionKey(tabIndex, rowIndex, cellIndex)] = decision;
       });
     });
   });
 
-  return { lockById, lockByPosition };
+  return { lockById, lockByLabel, lockByPosition };
 };
 
-const applyComisionLocksToDocente = (datos, lockState) => {
-  // Helper: checks if comision explicitly unlocked this cell.
-  // When comision sets isLocked=false AND docenteEditable=true, it means they
-  // intentionally overrode the admin template lock — we must respect that.
-  const comisionExplicitlyUnlocked = (cell) => cell.isLocked === false && cell.docenteEditable === true;
+/**
+ * Aplica los bloqueos al documento.
+ *
+ * `confiarEnDocenteEditableDeLaCelda`: si la bandera `docenteEditable` que trae
+ * la celda es una decisión REAL de la comisión y por tanto gana sobre el
+ * bloqueo del admin.
+ *
+ *   false → `datos` es la copia del DOCENTE recién leída de su tabla. Ahí esa
+ *           bandera es basura: quedó guardada en `true` en todas las celdas y el
+ *           docente se auto-desbloqueaba al guardar. Se ignora y, además, se
+ *           limpia, para que no confunda a una pasada posterior.
+ *   true  → `datos` ya viene normalizado: o es el propio syllabus de la comisión,
+ *           o es la copia del docente después de aplicarle los bloqueos de la
+ *           comisión. En los dos casos `docenteEditable: true` significa
+ *           "la comisión liberó esta celda" y debe sobrevivir al bloqueo del admin.
+ */
+const applyComisionLocksToDocente = (datos, lockState, confiarEnDocenteEditableDeLaCelda = false) => {
+  // Devuelve la decisión de la fuente de bloqueos para esta celda: true/false/undefined.
+  // Orden de preferencia, de más fiable a menos:
+  //   1) id de celda      → identidad exacta
+  //   2) etiqueta de fila → estable aunque la plantilla tenga filas de más/menos
+  //   3) posición         → último recurso; se desfasa si las estructuras difieren
+  const resolveDecision = (cell, tabIndex, rowIndex, cellIndex, etiqueta) => {
+    if (cell?.id && Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)) {
+      return lockState.lockById[cell.id];
+    }
+    if (etiqueta && lockState.lockByLabel) {
+      const labelKey = getCellLabelKey(etiqueta, cellIndex);
+      if (Object.prototype.hasOwnProperty.call(lockState.lockByLabel, labelKey)) {
+        return lockState.lockByLabel[labelKey];
+      }
+    }
+    const positionKey = getCellPositionKey(tabIndex, rowIndex, cellIndex);
+    if (Object.prototype.hasOwnProperty.call(lockState.lockByPosition, positionKey)) {
+      return lockState.lockByPosition[positionKey];
+    }
+    return undefined;
+  };
+
+  const mapCell = (cell, tabIndex, rowIndex, cellIndex, etiqueta) => {
+    const decision = resolveDecision(cell, tabIndex, rowIndex, cellIndex, etiqueta);
+    // El desbloqueo explícito de la comisión gana SIEMPRE sobre el bloqueo del
+    // admin. Es la única forma de soltar una celda que el admin bloqueó.
+    const liberadaEnLaPropiaCelda = confiarEnDocenteEditableDeLaCelda && cell?.docenteEditable === true;
+    if (liberadaEnLaPropiaCelda || decision === false) {
+      return { ...cell, isLocked: false, docenteEditable: true };
+    }
+    // Bloqueo (admin o comisión): la celda queda no editable para el docente.
+    if (decision === true) {
+      return { ...cell, isLocked: true, docenteEditable: false };
+    }
+    // La fuente no opina.
+    if (confiarEnDocenteEditableDeLaCelda) {
+      // El documento ya está normalizado: su propio isLocked es la verdad.
+      return { ...cell, isLocked: !!cell.isLocked };
+    }
+    // Copia cruda del docente: su `isLocked` es un residuo de cuando SÍ estaba
+    // bloqueada. Si la comisión quitó el bloqueo, la fuente deja de opinar y
+    // conservarlo dejaba la celda bloqueada para siempre. Se limpian las dos
+    // banderas para que ninguna pasada posterior las confunda con una decisión.
+    const { docenteEditable, ...resto } = cell;
+    return { ...resto, isLocked: false };
+  };
 
   if (Array.isArray(datos?.tabs)) {
     return {
       ...datos,
       tabs: datos.tabs.map((tab, tabIndex) => ({
         ...tab,
-        rows: (tab.rows || []).map((row, rowIndex) => ({
-          ...row,
-          cells: (row.cells || []).map((cell, cellIndex) => {
-            const positionKey = getCellPositionKey(tabIndex, rowIndex, cellIndex);
-            const templateLocked = Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)
-              ? lockState.lockById[cell.id]
-              : (lockState.lockByPosition[positionKey] ?? false);
-            // If comision explicitly unlocked this cell, respect it over the admin template
-            if (comisionExplicitlyUnlocked(cell)) {
-              return { ...cell, isLocked: false };
-            }
-            // Otherwise: preserve existing locks OR add template lock (additive)
-            return { ...cell, isLocked: !!cell.isLocked || templateLocked };
-          })
-        }))
+        rows: (tab.rows || []).map((row, rowIndex) => {
+          const etiqueta = normEtiquetaFila(row);
+          return {
+            ...row,
+            cells: (row.cells || []).map((cell, cellIndex) =>
+              mapCell(cell, tabIndex, rowIndex, cellIndex, etiqueta))
+          };
+        })
       }))
     };
   }
@@ -61,21 +150,14 @@ const applyComisionLocksToDocente = (datos, lockState) => {
   if (Array.isArray(datos?.rows)) {
     return {
       ...datos,
-      rows: (datos.rows || []).map((row, rowIndex) => ({
-        ...row,
-        cells: (row.cells || []).map((cell, cellIndex) => {
-          const positionKey = getCellPositionKey(0, rowIndex, cellIndex);
-          const templateLocked = Object.prototype.hasOwnProperty.call(lockState.lockById, cell.id)
-            ? lockState.lockById[cell.id]
-            : (lockState.lockByPosition[positionKey] ?? false);
-          // If comision explicitly unlocked this cell, respect it over the admin template
-          if (comisionExplicitlyUnlocked(cell)) {
-            return { ...cell, isLocked: false };
-          }
-          // Otherwise: preserve existing locks OR add template lock (additive)
-          return { ...cell, isLocked: !!cell.isLocked || templateLocked };
-        })
-      }))
+      rows: (datos.rows || []).map((row, rowIndex) => {
+        const etiqueta = normEtiquetaFila(row);
+        return {
+          ...row,
+          cells: (row.cells || []).map((cell, cellIndex) =>
+            mapCell(cell, 0, rowIndex, cellIndex, etiqueta))
+        };
+      })
     };
   }
 
@@ -334,7 +416,8 @@ exports.getSyllabusComision = async (req, res) => {
         const hasLocks = Object.values(lockState.lockById).some(v => v) ||
                          Object.values(lockState.lockByPosition).some(v => v);
         if (hasLocks) {
-          datos = applyComisionLocksToDocente(datos, lockState);
+          // `datos` aquí ES el syllabus de la comisión: su `docenteEditable` sí manda
+          datos = applyComisionLocksToDocente(datos, lockState, true);
           console.log(`✅ Applied ${Object.values(lockState.lockById).filter(Boolean).length} locks from general template ID ${lockTemplate.id} to commission/docente data`);
         }
       }
@@ -453,6 +536,13 @@ exports.getProgramaComision = async (req, res) => {
     if (typeof datos === 'string') {
       try { datos = JSON.parse(datos); } catch (e) { /* keep as is */ }
     }
+
+    // Resolver los 3 estados de bloqueo antes de entregárselo al docente. Sin
+    // esto, una celda que la comisión liberó explícitamente (docenteEditable:true)
+    // pero que el admin había bloqueado (isLocked:true) llegaba bloqueada, y el
+    // docente no podía escribirla. Es el mismo arreglo que ya tiene el syllabus.
+    // `datos` es el programa de la comisión: su `docenteEditable` sí manda
+    datos = applyComisionLocksToDocente(datos, buildComisionLockState(datos), true);
 
     res.json({
       success: true,
@@ -596,7 +686,10 @@ exports.getSyllabusDocente = async (req, res) => {
         const hasLocks = Object.values(lockState.lockById).some(v => v) ||
                          Object.values(lockState.lockByPosition).some(v => v);
         if (hasLocks) {
-          datos = applyComisionLocksToDocente(datos, lockState);
+          // Segunda pasada, con los bloqueos del ADMIN. `datos` ya pasó por los de
+          // la comisión, así que su `docenteEditable: true` es una liberación real
+          // de la comisión y tiene que sobrevivir a este bloqueo del admin.
+          datos = applyComisionLocksToDocente(datos, lockState, true);
         }
       }
     } catch (lockErr) {
@@ -691,6 +784,41 @@ exports.getProgramaDocente = async (req, res) => {
       try { datos = JSON.parse(datos); } catch (e) {}
     }
 
+    // Los bloqueos se inyectan en LECTURA, nunca se guardan con el documento del
+    // docente: si no volviéramos a leerlos del programa de la comisión, el
+    // docente se quedaría con las banderas congeladas del día que guardó y los
+    // bloqueos posteriores de la comisión nunca le llegarían.
+    try {
+      const periodoValues = await resolvePeriodoValues(programa.periodo || periodo);
+      const whereComision = { asignatura_id: programa.asignatura_id || asignatura_id };
+      if (periodoValues.length > 0) whereComision.periodo = { [Op.in]: periodoValues };
+
+      let programaComision = await ProgramasAnaliticos.findOne({
+        where: whereComision,
+        order: [['createdAt', 'DESC']]
+      });
+      // Sin coincidencia de periodo, al menos tomamos el de la asignatura
+      if (!programaComision && whereComision.periodo) {
+        programaComision = await ProgramasAnaliticos.findOne({
+          where: { asignatura_id: whereComision.asignatura_id },
+          order: [['createdAt', 'DESC']]
+        });
+      }
+
+      if (programaComision) {
+        let datosComision = programaComision.datos_tabla;
+        if (typeof datosComision === 'string') {
+          try { datosComision = JSON.parse(datosComision); } catch (e) {}
+        }
+        datos = applyComisionLocksToDocente(datos, buildComisionLockState(datosComision));
+      } else {
+        // Sin programa de comisión, al menos resolvemos los 3 estados de lo que ya trae
+        datos = applyComisionLocksToDocente(datos, buildComisionLockState(datos));
+      }
+    } catch (lockErr) {
+      console.warn('No se pudieron aplicar los bloqueos en getProgramaDocente:', lockErr.message);
+    }
+
     res.json({
       success: true,
       data: {
@@ -703,3 +831,7 @@ exports.getProgramaDocente = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// Expuestas para poder probar los bloqueos aislados, sin levantar el servidor
+exports._buildComisionLockState = buildComisionLockState;
+exports._applyComisionLocksToDocente = applyComisionLocksToDocente;

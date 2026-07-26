@@ -92,6 +92,14 @@ router.put('/syllabus/:id',
   comisionAcademicaController.actualizarSyllabusComision
 );
 
+// 🔒 APLICAR BLOQUEOS DE UN SYLLABUS A OTROS (POST /api/comision-academica/syllabus/:id/aplicar-bloqueos)
+// Body: { scope: 'periodo' | 'todos', targetIds?: number[] }
+router.post('/syllabus/:id/aplicar-bloqueos',
+  authenticate,
+  authorize(['administrador', 'comision_academica', 'comision']),
+  comisionAcademicaController.aplicarBloqueosASyllabi
+);
+
 // 🗑️ ELIMINAR (DELETE /api/comision-academica/syllabus/:id)
 router.delete('/syllabus/:id',
   authenticate,

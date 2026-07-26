@@ -29,6 +29,8 @@ const rolRoutes = require('./rol.routes');
 const firmasRoutes = require('./firmas.routes');
 const cronogramaRoutes = require('./cronograma.routes');
 const comentariosRoutes = require('./comentarios.routes');
+const habilitacionesRoutes = require('./habilitaciones.routes');
+const bloqueosRoutes = require('./bloqueos.routes');
 const router = express.Router();
 
 module.exports = (app) => {
@@ -68,4 +70,6 @@ module.exports = (app) => {
   router.use('/firmas', firmasRoutes);
   router.use('/cronograma', cronogramaRoutes);
   router.use('/comentarios-documento', comentariosRoutes);
+  router.use('/habilitaciones', habilitacionesRoutes);
+  router.use('/bloqueos', bloqueosRoutes);
 };

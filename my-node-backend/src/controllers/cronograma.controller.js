@@ -3,6 +3,7 @@
 
 const { sequelize } = require('../models');
 const { QueryTypes } = require('sequelize');
+const { habilitacionesVigentesDe } = require('./habilitaciones.controller');
 
 // Crear tabla si no existe (primera ejecución)
 const initTable = async () => {
@@ -249,6 +250,30 @@ exports.getModulosOcultos = async (req, res) => {
         visible: estado === 'siempre',
         motivo: estado === 'siempre' ? 'siempre' : 'bloqueado',
       });
+    }
+
+    // Habilitación excepcional: si el coordinador pidió reabrirle un módulo a
+    // este docente y el decano o el director académico lo autorizaron, esa
+    // excepción manda sobre las fechas y sobre el bloqueo manual del admin —
+    // es justamente para eso que existe.
+    if (rolActivo === 'docente') {
+      try {
+        const excepciones = await habilitacionesVigentesDe(req.user?.id);
+        for (const exc of excepciones) {
+          const previo = gobernados.get(exc.modulo);
+          gobernados.set(exc.modulo, {
+            ...(previo || { titulo: null, fecha_inicio: null }),
+            visible: true,
+            motivo: 'habilitacion',
+            fecha_fin: exc.fecha_fin,
+            titulo: `Habilitación autorizada por ${exc.autorizado_por_nombre || 'la autoridad'}`,
+          });
+        }
+      } catch (e) {
+        // Si la consulta falla no dejamos al docente sin menú: seguimos con las
+        // reglas normales del cronograma.
+        console.error('No se pudieron leer las habilitaciones del docente:', e.message);
+      }
     }
 
     const ocultos = [];
