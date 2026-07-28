@@ -5,7 +5,7 @@ import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { BookOpen, CheckSquare, ListChecks, PenLine, QrCode } from "lucide-react"
+import { BookOpen, CheckSquare, ListChecks, PenLine, QrCode, Unlock } from "lucide-react"
 import Link from "next/link"
 
 export default function CoordinadorDashboard() {
@@ -66,6 +66,25 @@ export default function CoordinadorDashboard() {
               </Link>
             </div>
           </div>
+
+          {/* === HABILITAR DOCENTES (requiere visto bueno de decanato o dirección) === */}
+          <Link href="/dashboard/coordinador/habilitar-docentes">
+            <div className="rounded-2xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 to-amber-100 p-6 mb-6 shadow-sm hover:shadow-md transition-all cursor-pointer">
+              <div className="flex items-center gap-3">
+                <div className="bg-amber-600 rounded-xl p-3 flex-shrink-0">
+                  <Unlock className="h-6 w-6 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-xl font-bold text-amber-900">Habilitar Docentes</h2>
+                  <p className="text-sm text-amber-800">
+                    Reabre el syllabus a un docente de tu carrera cuyo plazo ya cerró. Lo autoriza el Decano/a o el
+                    Director/a Académico/a.
+                  </p>
+                </div>
+                <Badge className="ml-auto bg-amber-600 shrink-0">Requiere autorización</Badge>
+              </div>
+            </div>
+          </Link>
 
           {/* === OTRAS HERRAMIENTAS === */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

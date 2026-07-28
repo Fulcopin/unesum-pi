@@ -4,7 +4,7 @@ import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { BarChart3, Users, FileText, Calendar, TrendingUp, Settings, ScrollText, ClipboardSignature, Pen, ShieldCheck } from "lucide-react"
+import { BarChart3, Users, FileText, Calendar, TrendingUp, Settings, ScrollText, ClipboardSignature, Pen, ShieldCheck, Unlock } from "lucide-react"
 import Link from "next/link"
 
 export default function DireccionDashboard() {
@@ -24,6 +24,13 @@ export default function DireccionDashboard() {
       href: "/dashboard/direccion/mis-firmas",
       color: "bg-indigo-700",
       destacado: true,
+    },
+    {
+      title: "Autorizar Habilitaciones de Docentes",
+      description: "Aprueba o rechaza las solicitudes de los coordinadores para reabrirle el syllabus a un docente fuera de plazo",
+      icon: Unlock,
+      href: "/dashboard/direccion/autorizaciones",
+      color: "bg-amber-600",
     },
     {
       title: "Firmar Syllabus",

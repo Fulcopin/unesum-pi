@@ -4,7 +4,7 @@ import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { FileCheck, Upload, Sparkles, GitCompare, FileText, BookOpen, School, Bot, Pen, QrCode, Users } from "lucide-react"
+import { FileCheck, Upload, Sparkles, GitCompare, FileText, BookOpen, School, Bot, Pen, QrCode, Users, Lock } from "lucide-react"
 import Link from "next/link"
 import { useModulosOcultos } from "@/lib/use-modulos-ocultos"
 
@@ -28,6 +28,15 @@ export default function ComisionDashboard() {
       icon: QrCode,
       href: "/dashboard/comision/mi-qr",
       color: "bg-emerald-600",
+      featured: true,
+    },
+
+    {
+      title: "Bloqueo de Celdas",
+      description: "Define qué celdas puede editar el docente en el syllabus y en el programa analítico, y aplica los mismos bloqueos a todos de una vez",
+      icon: Lock,
+      href: "/dashboard/comision/bloqueos",
+      color: "bg-red-600",
       featured: true,
     },
 

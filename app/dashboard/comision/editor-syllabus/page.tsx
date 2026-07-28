@@ -4,6 +4,7 @@ import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { ModuloGuard } from "@/components/auth/modulo-guard"
+import { AvisoCeldaBloqueada } from "@/components/syllabus/aviso-celda-bloqueada"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -209,6 +210,7 @@ export default function EditorSyllabusComisionPage() {
   const [isListLoading, setIsListLoading] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isApplyingLocks, setIsApplyingLocks] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [tempName, setTempName] = useState("")
   const searchParams = useSearchParams()
@@ -216,6 +218,8 @@ export default function EditorSyllabusComisionPage() {
   const [editingCell, setEditingCell] = useState<string | null>(null)
   const [editContent, setEditContent] = useState("")
   const [modalCell, setModalCell] = useState<{id: string, content: string, isEditable: boolean} | null>(null)
+  // Aviso al intentar escribir en una celda bloqueada; se borra solo
+  const [avisoBloqueo, setAvisoBloqueo] = useState<string | null>(null)
   
   const [showMappingModal, setShowMappingModal] = useState(false)
   const [mappingData, setMappingData] = useState<{ etiquetasSinMatch: any[], wordData: Record<string, string>, sugerencias: any } | null>(null)
@@ -1100,6 +1104,57 @@ export default function EditorSyllabusComisionPage() {
     }
   }
 
+  // Aplica los bloqueos de ESTE syllabus a los demás syllabus del periodo (misma
+  // estructura). Guarda primero para persistir la configuración actual, luego
+  // llama al endpoint de escritura masiva.
+  const handleAplicarBloqueosAOtros = async () => {
+    if (!activeSyllabus) return alert("No hay un syllabus activo.")
+    if (!asignaturaIdParam) return alert("No se detectó la asignatura.")
+    if (!selectedPeriod) return alert("Seleccione un periodo antes de aplicar.")
+
+    // Contar bloqueos configurados en el syllabus actual
+    let totalLocks = 0
+    activeSyllabus.tabs.forEach(tab => tab.rows.forEach(row => row.cells.forEach((cell: any) => {
+      if (cell.rowSpan === 0 || cell.colSpan === 0) return
+      if (cell.isLocked === true || cell.docenteEditable === false) totalLocks++
+    })))
+    if (totalLocks === 0) return alert("Este syllabus no tiene celdas bloqueadas. Bloquea al menos una celda antes de aplicar a otros.")
+
+    if (!confirm(
+      `Se aplicarán los ${totalLocks} bloqueo(s) de este syllabus a los DEMÁS syllabus del mismo periodo que tengan la misma estructura.\n\n` +
+      `Esto sobrescribe la configuración de bloqueos de esos syllabus (no toca su contenido). ¿Continuar?`
+    )) return
+
+    setIsApplyingLocks(true)
+    try {
+      // 1. Guardar primero para que el origen tenga los bloqueos actuales persistidos
+      await handleSaveToDB()
+
+      // 2. Obtener el id del syllabus de comisión guardado (origen)
+      const asigId = parseInt(asignaturaIdParam, 10)
+      const checkRes = await apiRequest(`/api/comision-academica/syllabus/buscar?asignatura_id=${asigId}&periodo=${selectedPeriod}`)
+      const sourceId = checkRes?.data?.id
+      if (!sourceId) throw new Error("No se pudo identificar el syllabus guardado como origen.")
+
+      // 3. Aplicar bloqueos a los demás syllabus del periodo
+      const res = await apiRequest(`/api/comision-academica/syllabus/${sourceId}/aplicar-bloqueos`, {
+        method: 'POST',
+        body: JSON.stringify({ scope: 'periodo' })
+      })
+      const d = res.data
+      const afectados = (d?.detalles || []).filter((x: any) => x.aplicados > 0).length
+      alert(
+        `✅ ${res.message}\n\n` +
+        `• Syllabus modificados: ${afectados} de ${d?.totalDestinos ?? 0}\n` +
+        `• Celdas bloqueadas aplicadas: ${d?.totalCeldasAplicadas ?? 0}`
+      )
+    } catch (error: any) {
+      alert(`Error al aplicar bloqueos a otros syllabus: ${error.message}`)
+    } finally {
+      setIsApplyingLocks(false)
+    }
+  }
+
   const updateProgramaAnalitico = (id: string | number, updates: Partial<SyllabusData>) => {
     setSyllabi(p => p.map(s => s.id === id ? { ...s, ...updates, metadata: { ...s.metadata, ...(updates.metadata || {}), updatedAt: new Date().toISOString() } } : s))
   }
@@ -1131,36 +1186,27 @@ export default function EditorSyllabusComisionPage() {
       const newRows = tab.rows.map((row: any, rIdx: number) => {
         const tRow = tTab.rows[rIdx];
         
+        // BLOQUEAR = LA CELDA NO SE PUEDE ESCRIBIR. Solo se toca `isLocked`:
+        // ni texto, ni colores, ni estilos. Traer la apariencia de la plantilla
+        // hacía que el documento cambiara de aspecto al bloquear.
         const newCells = row.cells.map((cell: any, cIdx: number) => {
           // Empezar con el valor actual (preservar bloqueos ya establecidos por admin/comision)
           let shouldLock = cell.isLocked;
-          let bgColor = cell.backgroundColor;
-          let txtColor = cell.textColor;
 
-          if (tRow && tRow.cells[cIdx]) {
-            const tCell = tRow.cells[cIdx];
+          if (tRow && tRow.cells[cIdx]?.isLocked === true) {
             // Solo AGREGAR bloqueos de la plantilla, nunca quitar los existentes
-            if (tCell.isLocked === true) {
-              shouldLock = true;
-              if (tCell.backgroundColor) bgColor = tCell.backgroundColor;
-              if (tCell.styles?.backgroundColor) bgColor = tCell.styles.backgroundColor;
-              if (tCell.textColor) txtColor = tCell.textColor;
-            }
-          } 
-          
-          // Fallback: buscar por contenido si aún no está definido
+            shouldLock = true;
+          }
+
+          // Respaldo: la plantilla bloquea una celda con este mismo texto
           if (shouldLock === undefined && cell.content && cell.content.trim().length > 0) {
             const cellContentNorm = cell.content.trim().toUpperCase();
-            const matchedLocked = lockedTemplateCells.find((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm);
-            if (matchedLocked) {
-               shouldLock = true;
-               if (matchedLocked.backgroundColor) bgColor = matchedLocked.backgroundColor;
-               if (matchedLocked.styles?.backgroundColor) bgColor = matchedLocked.styles.backgroundColor;
-               if (matchedLocked.textColor) txtColor = matchedLocked.textColor;
+            if (lockedTemplateCells.some((tc: any) => tc.content && tc.content.trim().toUpperCase() === cellContentNorm)) {
+              shouldLock = true;
             }
           }
 
-          return { ...cell, isLocked: shouldLock, backgroundColor: bgColor, textColor: txtColor };
+          return { ...cell, isLocked: shouldLock };
         });
         return { ...row, cells: newCells };
       });
@@ -2210,8 +2256,9 @@ export default function EditorSyllabusComisionPage() {
       <ModuloGuard>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
+        <AvisoCeldaBloqueada mensaje={avisoBloqueo} onCerrar={() => setAvisoBloqueo(null)} />
         <main className="max-w-7xl mx-auto px-6 py-8">
-          
+
           {!activeSyllabus ? (
             <>
               <Card className="mb-6 border-t-4 border-t-emerald-600">
@@ -2480,8 +2527,15 @@ export default function EditorSyllabusComisionPage() {
                             <Button size="sm" variant="outline" className="text-red-700 border-red-300 h-7 text-xs" onClick={() => toggleDocenteEditableAll(false)}>
                               <Lock className="h-3 w-3 mr-1" /> Bloquear Todas
                             </Button>
+                            <Button size="sm" className="bg-blue-600 text-white hover:bg-blue-700 h-7 text-xs" onClick={handleAplicarBloqueosAOtros} disabled={isApplyingLocks || isSaving}>
+                              <Lock className="h-3 w-3 mr-1" /> {isApplyingLocks ? 'Aplicando...' : 'Aplicar a otros syllabus'}
+                            </Button>
                           </div>
                         </div>
+                        <p className="text-blue-700 text-xs mt-2 mb-1 flex items-start gap-1">
+                          <span className="shrink-0">💡</span>
+                          <span><b>Aplicar a otros syllabus</b>: guarda este syllabus y copia sus bloqueos a los demás syllabus del mismo periodo con la misma estructura. Los docentes verán esas celdas bloqueadas.</span>
+                        </p>
                         <p className="text-purple-600 text-xs">
                           Haz clic en cada celda para alternar si el docente puede editarla.
                           <span className="inline-flex items-center gap-1 ml-2"><span className="w-3 h-3 rounded bg-green-200 border border-green-400 inline-block"></span> = Editable por docente</span>
@@ -2768,7 +2822,21 @@ export default function EditorSyllabusComisionPage() {
                                           rowSpan={cell.rowSpan || 1} 
                                           colSpan={cell.colSpan || 1}
                                           onClick={(e) => handleCellClick(cell.id, e)}
-                                          onDoubleClick={() => { if (!configModeDocente && cell.isEditable) { setModalCell({ id: cell.id, content: displayContent, isEditable: cell.isEditable && !isReadOnly }); setEditContent(displayContent); } }}
+                                          onDoubleClick={() => {
+                                            if (configModeDocente) return;
+                                            // Una celda bloqueada por el admin no se edita aquí: se avisa
+                                            // en vez de abrir el editor y dejar escribir sobre ella.
+                                            if (isAdminLockedCell(cell)) {
+                                              setAvisoBloqueo('Esta celda está bloqueada por el administrador. Para poder editarla, primero libérala desde "Configurar celdas del docente".');
+                                              return;
+                                            }
+                                            if (!cell.isEditable || isReadOnly) {
+                                              setAvisoBloqueo('Esta celda no es editable.');
+                                              return;
+                                            }
+                                            setModalCell({ id: cell.id, content: displayContent, isEditable: true });
+                                            setEditContent(displayContent);
+                                          }}
                                         >
                                           <div 
                                             className={`w-full h-full flex items-center ${justifyContent} p-2 ${isVertical ? 'min-h-[120px]' : ''}`}

@@ -5,7 +5,7 @@ import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { BookOpen, User, Calendar, FileText, FileSpreadsheet, FileCheck, Bot, Pen, QrCode, Printer, Eye, MessageSquare } from "lucide-react"
+import { BookOpen, User, Calendar, FileText, FileSpreadsheet, FileCheck, Bot, Pen, QrCode, Printer, Eye, MessageSquare, Unlock } from "lucide-react"
 import Link from "next/link"
 import { useModulosOcultos } from "@/lib/use-modulos-ocultos"
 
@@ -118,6 +118,28 @@ export default function DocenteDashboard() {
               )}
             </div>
           </div>
+
+          {/* === PEDIR HABILITACIÓN ===
+              A diferencia del resto, esta opción NUNCA se oculta por cronograma:
+              el docente entra aquí justamente cuando su plazo ya cerró. */}
+          <Link href="/dashboard/docente/solicitar-habilitacion" className="block mb-6">
+            <div className="rounded-2xl border-2 border-amber-300 bg-gradient-to-r from-amber-50 to-orange-50 p-4 hover:shadow-md transition-all cursor-pointer flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-amber-600 rounded-xl p-3 flex-shrink-0">
+                  <Unlock className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-amber-900">¿Se te cerró el plazo? Pide habilitación</h2>
+                  <p className="text-sm text-amber-700">
+                    Solicita a tu coordinador/a que te reabra el syllabus. Lo autoriza el Decano/a o el Director/a Académico/a.
+                  </p>
+                </div>
+              </div>
+              <Button className="bg-amber-600 hover:bg-amber-700 flex-shrink-0">
+                Pedir habilitación →
+              </Button>
+            </div>
+          </Link>
 
           {/* === CRONOGRAMA === */}
           <Link href="/dashboard/cronograma" className="block mb-6">

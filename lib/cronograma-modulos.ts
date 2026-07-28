@@ -18,6 +18,7 @@ export const MODULOS_POR_ROL: Record<string, ModuloMenu[]> = {
     { key: "/dashboard/docente/mi-qr", label: "Mi QR Personal" },
   ],
   comision: [
+    { key: "/dashboard/comision/bloqueos", label: "Bloqueo de Celdas" },
     { key: "/dashboard/comision/editor-syllabus", label: "Editor de Syllabus" },
     { key: "/dashboard/comision/editor-programa-analitico", label: "Editor de Programa Analítico" },
     { key: "/dashboard/comision/asignaturas", label: "Gestión de Asignaturas" },
@@ -30,6 +31,7 @@ export const MODULOS_POR_ROL: Record<string, ModuloMenu[]> = {
     { key: "/dashboard/comision/mi-qr", label: "Mi QR Personal" },
   ],
   administrador: [
+    { key: "/dashboard/admin/bloqueos", label: "Bloqueo de Celdas" },
     { key: "/dashboard/admin/editor-syllabus", label: "Editor de Syllabus" },
     { key: "/dashboard/admin/programa-analitico", label: "Programa Analítico" },
     { key: "/dashboard/admin/metodologia", label: "Metodologías" },

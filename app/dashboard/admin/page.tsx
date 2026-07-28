@@ -20,6 +20,7 @@ import {
   Pen,
   QrCode,
   UserPlus,
+  Lock,
 } from "lucide-react"
 import Link from "next/link"
 import { useModulosOcultos } from "@/lib/use-modulos-ocultos"
@@ -159,6 +160,13 @@ export default function AdminDashboard() {
       icon: FileText,
       href: "/dashboard/admin/editor-syllabus",
       color: "bg-cyan-500",
+    },
+    {
+      title: "Bloqueo de Celdas",
+      description: "Bloquea celdas del syllabus y del programa analítico, y aplica el mismo bloqueo a todos de una vez",
+      icon: Lock,
+      href: "/dashboard/admin/bloqueos",
+      color: "bg-red-600",
     },
     /*{
       title: "Configuración",

@@ -4,7 +4,7 @@ import { ProtectedRoute } from "@/components/auth/protected-route"
 import { MainHeader } from "@/components/layout/main-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Users, BookOpen, Activity, BarChart3, Calendar, FileText, ScrollText, ClipboardSignature, PenLine, QrCode, Pen } from "lucide-react"
+import { Users, BookOpen, Activity, BarChart3, Calendar, FileText, ScrollText, ClipboardSignature, PenLine, QrCode, Pen, Unlock } from "lucide-react"
 import Link from "next/link"
 
 export default function DecanosDashboard() {
@@ -16,6 +16,13 @@ export default function DecanosDashboard() {
       href: "/dashboard/decano/mis-firmas",
       color: "bg-indigo-700",
       destacado: true,
+    },
+    {
+      title: "Autorizar Habilitaciones de Docentes",
+      description: "Aprueba o rechaza las solicitudes de los coordinadores para reabrirle el syllabus a un docente fuera de plazo",
+      icon: Unlock,
+      href: "/dashboard/decano/autorizaciones",
+      color: "bg-amber-600",
     },
     {
       title: "Firmar documentos (masivo)",

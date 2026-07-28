@@ -14,6 +14,7 @@ import Link from "next/link"
 import { esTabEstructura, syncContenidosEstructuraAResultados, syncResultadosAprendizajeDesdeBD } from "@/lib/syllabus-contenidos-sync"
 import { buildFechasPorParalelo, extraerHorarioClases, parseFechasCell, formatFechasCell, nombreDia } from "@/lib/syllabus-fechas"
 import { ModuloGuard } from "@/components/auth/modulo-guard"
+import { AvisoCeldaBloqueada } from "@/components/syllabus/aviso-celda-bloqueada"
 
 
 // --- INTERFACES ---
@@ -74,6 +75,8 @@ export default function DocenteEditorSyllabusPage() {
   const [editingCell, setEditingCell] = useState<string | null>(null)
   const [editContent, setEditContent] = useState("")
   const [modalCell, setModalCell] = useState<{id: string, content: string, isEditable: boolean, colType?: string} | null>(null)
+  // Aviso al intentar escribir en una celda bloqueada; se borra solo
+  const [avisoBloqueo, setAvisoBloqueo] = useState<string | null>(null)
   const [periodos, setPeriodos] = useState<any[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState<string>("")
   const [profesorInfo, setProfesorInfo] = useState<any>(null)
@@ -387,7 +390,11 @@ export default function DocenteEditorSyllabusPage() {
     tabs.forEach((tab: any, tabIndex: number) => {
       ;(tab.rows || []).forEach((row: any, rowIndex: number) => {
         ;(row.cells || []).forEach((cell: any, cellIndex: number) => {
-          const locked = !!cell.isLocked
+          // Un bloqueo puede venir del admin (isLocked:true) o de la comisión (docenteEditable:false).
+          // Un desbloqueo explícito de la comisión (docenteEditable:true) gana y deja la celda libre.
+          const locked = cell.docenteEditable === true
+            ? false
+            : (cell.docenteEditable === false || !!cell.isLocked)
           if (cell.id) lockById[cell.id] = locked
           lockByPosition[getCellPositionKey(tabIndex, rowIndex, cellIndex)] = locked
         })
@@ -395,6 +402,25 @@ export default function DocenteEditorSyllabusPage() {
     })
 
     return { lockById, lockByPosition }
+  }
+
+  // ¿La fila del docente y la de la comisión son REALMENTE la misma fila?
+  // Que exista una fila de comisión en ese índice no basta: en cuanto las
+  // estructuras se desfasan (una resubida de Word, una fila de más) el texto de
+  // otra fila se copia por posición y aterriza en la columna equivocada —
+  // típicamente en la columna estrecha del ":", que se ve como una tira de
+  // letras verticales. Exigimos mismo nº de celdas y la misma etiqueta de fila.
+  const normEtiqueta = (v: any) => (v ?? '').toString().trim().toUpperCase()
+  /** Etiqueta de una fila = texto de su primera celda, normalizado. */
+  const normEtiquetaFila = (r: any) => normEtiqueta(r?.cells?.[0]?.content)
+  const filaCorresponde = (row: any, comisionRow: any) => {
+    if (!comisionRow || !Array.isArray(comisionRow.cells) || !Array.isArray(row?.cells)) return false
+    if (comisionRow.cells.length !== row.cells.length) return false
+    const etiquetaDocente = normEtiqueta(row.cells[0]?.content)
+    const etiquetaComision = normEtiqueta(comisionRow.cells[0]?.content)
+    // Sin etiqueta en alguno de los dos no hay forma de confirmar que coinciden
+    if (!etiquetaDocente || !etiquetaComision) return false
+    return etiquetaDocente === etiquetaComision
   }
 
   const applyComisionLocks = (
@@ -426,7 +452,11 @@ export default function DocenteEditorSyllabusPage() {
                   
                   let content = cell.content;
                   if (!editable) {
-                    let comisionContent = comisionRow?.cells?.[cellIndex]?.content;
+                    // Solo tomamos el texto por posición si la fila corresponde;
+                    // si no, se conserva lo que ya tiene el docente.
+                    let comisionContent = filaCorresponde(row, comisionRow)
+                      ? comisionRow?.cells?.[cellIndex]?.content
+                      : undefined;
 
                     // FIX: Recuperar horas reales desde comisión o calcular suma de componentes
                     const rowLabelText = (row.cells[0]?.content || '').trim().toUpperCase();
@@ -439,9 +469,14 @@ export default function DocenteEditorSyllabusPage() {
                                                   rowLabelText.includes('AUTONOM') ||
                                                   rowLabelText.includes('VINCULACI');
                     const isTotalHorasRow = isTotalAsignaturaRow || isHorasComponenteRow;
+                    // La celda del ":" NUNCA recibe valores: es un separador. Sin esta
+                    // guarda el valor de la fila se escribía también en la columna
+                    // estrecha y el syllabus se veía con el dato duplicado y aplastado.
+                    const esSeparador = ['', ':', '::'].includes((cell.content || '').trim())
+                      && cellIndex < (row.cells.length - 1)
 
                     // Caso especial: Total horas de la asignatura = suma de Total horas por componente
-                    if (cellIndex > 0 && isTotalAsignaturaRow) {
+                    if (cellIndex > 0 && !esSeparador && isTotalAsignaturaRow) {
                       let sumFromComponentes = 0;
                       
                       // Primero buscar en el MISMO tab (tab.rows) — donde siempre está la fila componente
@@ -502,75 +537,42 @@ export default function DocenteEditorSyllabusPage() {
                         content = sumFromComponentes.toString();
                         return { ...cell, content, isLocked: locked };
                       }
-                    } else if (cellIndex > 0 && isTotalHorasRow) {
-                      // 1. Buscar en formato de tabs
-                      if (comisionDatos.tabs) {
-                        for (const t of comisionDatos.tabs) {
-                          for (const cr of t.rows || []) {
-                            const cIsTotalHorasRow = cr.cells.some((c:any) => {
-                              const text = (c.content || '').trim().toUpperCase();
-                              return text.includes('HORAS DE LA ASIGNATURA') || 
-                                     text.includes('HORAS ASIGNATURA') ||
-                                     text.includes('DOCENCIA') ||
-                                     text.includes('PRÁCTIC') ||
-                                     text.includes('PRACTIC') ||
-                                     text.includes('AUTÓNOM') ||
-                                     text.includes('AUTONOM') ||
-                                     text.includes('VINCULACI');
-                            });
-                            
-                            if (cIsTotalHorasRow) {
-                              const cVal = cr.cells.find((c:any, idx:number) => {
-                                if (idx === 0) return false;
-                                const text = (c.content || '').trim().toUpperCase();
-                                return text !== '' && text !== '0' && text !== ':' && 
-                                       !text.includes('HORAS') && 
-                                       !text.includes('DOCENCIA') && 
-                                       !text.includes('PRÁCTIC') && 
-                                       !text.includes('PRACTIC') && 
-                                       !text.includes('AUTÓNOM') && 
-                                       !text.includes('AUTONOM') && 
-                                       !text.includes('VINCULACI');
-                              });
-                              if (cVal) comisionContent = cVal.content;
-                            }
-                          }
+                    } else if (cellIndex > 0 && !esSeparador && isTotalHorasRow) {
+                      // Traer de la comisión el valor de ESTA fila de horas.
+                      //
+                      // Antes se barrían TODAS las pestañas y filas buscando cualquiera
+                      // que mencionara DOCENCIA/PRÁCTIC/AUTÓNOM/VINCULACI, sin comparar
+                      // la etiqueta y sin cortar el bucle: ganaba la última coincidencia
+                      // del documento entero. Resultado: las cinco filas de "Horas de…"
+                      // terminaban con el MISMO texto, copiado desde una fila de otra
+                      // pestaña que solo compartía una palabra clave.
+                      //
+                      // Ahora se exige que sea la misma fila: misma etiqueta normalizada.
+                      const valorDeFilaComision = (cr: any): string | undefined => {
+                        if (!Array.isArray(cr?.cells)) return undefined
+                        if (normEtiquetaFila(cr) !== normEtiquetaFila(row)) return undefined
+                        // El valor es la última celda con contenido que no sea el separador
+                        for (let i = cr.cells.length - 1; i >= 1; i--) {
+                          const texto = (cr.cells[i]?.content || '').trim()
+                          if (texto && texto !== ':' && texto !== '::') return cr.cells[i].content
                         }
-                      } 
-                      // 2. Buscar en formato de rows simples
-                      else if (comisionDatos.rows) {
-                        for (const cr of comisionDatos.rows) {
-                          const cIsTotalHorasRow = cr.cells.some((c:any) => {
-                            const text = (c.content || '').trim().toUpperCase();
-                            return text.includes('HORAS DE LA ASIGNATURA') || 
-                                   text.includes('HORAS ASIGNATURA') ||
-                                   text.includes('DOCENCIA') ||
-                                   text.includes('PRÁCTIC') ||
-                                   text.includes('PRACTIC') ||
-                                   text.includes('AUTÓNOM') ||
-                                   text.includes('AUTONOM') ||
-                                   text.includes('VINCULACI');
-                          });
-                          
-                          if (cIsTotalHorasRow) {
-                            const cVal = cr.cells.find((c:any, idx:number) => {
-                              if (idx === 0) return false;
-                              const text = (c.content || '').trim().toUpperCase();
-                              return text !== '' && text !== '0' && text !== ':' && 
-                                     !text.includes('HORAS') && 
-                                     !text.includes('DOCENCIA') && 
-                                     !text.includes('PRÁCTIC') && 
-                                     !text.includes('PRACTIC') && 
-                                     !text.includes('AUTÓNOM') && 
-                                     !text.includes('AUTONOM') && 
-                                     !text.includes('VINCULACI');
-                            });
-                            if (cVal) comisionContent = cVal.content;
-                          }
-                        }
+                        return undefined
                       }
-                      // 3. Buscar en formato contenido (Documentos Word extraídos vía Mammoth)
-                      else if (comisionDatos.contenido) {
+
+                      const filasComision: any[] = []
+                      if (comisionDatos?.tabs) {
+                        comisionDatos.tabs.forEach((t: any) => (t.rows || []).forEach((r: any) => filasComision.push(r)))
+                      } else if (comisionDatos?.rows) {
+                        comisionDatos.rows.forEach((r: any) => filasComision.push(r))
+                      }
+
+                      for (const cr of filasComision) {
+                        const v = valorDeFilaComision(cr)
+                        if (v !== undefined) { comisionContent = v; break }  // la primera coincidencia real basta
+                      }
+
+                      // Respaldo: formato contenido (Documentos Word extraídos vía Mammoth)
+                      if (comisionContent === undefined && comisionDatos?.contenido) {
                         for (const key of Object.keys(comisionDatos.contenido)) {
                           const kNorm = key.trim().toUpperCase();
                           const rText = row.cells[0]?.content?.trim()?.toUpperCase() || '';
@@ -619,7 +621,11 @@ export default function DocenteEditorSyllabusPage() {
 
               let content = cell.content;
               if (!editable) {
-                let comisionContent = comisionRow?.cells?.[cellIndex]?.content;
+                // Solo tomamos el texto por posición si la fila corresponde;
+                // si no, se conserva lo que ya tiene el docente.
+                let comisionContent = filaCorresponde(row, comisionRow)
+                  ? comisionRow?.cells?.[cellIndex]?.content
+                  : undefined;
 
                 // FIX: Recuperar horas reales o calcular suma de componentes
                 const rowLabelText2 = (row.cells[0]?.content || '').trim().toUpperCase();
@@ -632,9 +638,12 @@ export default function DocenteEditorSyllabusPage() {
                                               rowLabelText2.includes('AUTONOM') ||
                                               rowLabelText2.includes('VINCULACI');
                 const isTotalHorasRow = isTotalAsignaturaRow2 || isHorasComponenteRow2;
+                // La celda del ":" nunca recibe valores (ver la rama de pestañas)
+                const esSeparador2 = ['', ':', '::'].includes((cell.content || '').trim())
+                  && cellIndex < (row.cells.length - 1)
 
                 // Caso especial: Total horas de la asignatura = suma de Total horas por componente
-                if (cellIndex > 0 && isTotalAsignaturaRow2) {
+                if (cellIndex > 0 && !esSeparador2 && isTotalAsignaturaRow2) {
                   let sumFromComponentes = 0;
                   for (const dr of (datos.rows || [])) {
                     const lbl = (dr.cells?.[0]?.content || '').trim().toUpperCase();
@@ -666,75 +675,34 @@ export default function DocenteEditorSyllabusPage() {
                     }
                   }
                   if (sumFromComponentes > 0) comisionContent = sumFromComponentes.toString();
-                } else if (cellIndex > 0 && isTotalHorasRow) {
-                  // 1. Buscar en formato de rows simples
-                  if (comisionDatos.rows) {
-                    for (const cr of comisionDatos.rows) {
-                      const cIsTotalHorasRow = cr.cells.some((c:any) => {
-                        const text = (c.content || '').trim().toUpperCase();
-                        return text.includes('HORAS DE LA ASIGNATURA') || 
-                               text.includes('HORAS ASIGNATURA') ||
-                               text.includes('DOCENCIA') ||
-                               text.includes('PRÁCTIC') ||
-                               text.includes('PRACTIC') ||
-                               text.includes('AUTÓNOM') ||
-                               text.includes('AUTONOM') ||
-                               text.includes('VINCULACI');
-                      });
+                } else if (cellIndex > 0 && !esSeparador2 && isTotalHorasRow) {
+                  // Mismo criterio que en la rama de pestañas: el valor se toma de
+                  // la fila de la comisión con la MISMA etiqueta, no de cualquiera
+                  // que comparta una palabra clave. Ver el comentario de arriba.
+                  const valorDeFilaComision2 = (cr: any): string | undefined => {
+                    if (!Array.isArray(cr?.cells)) return undefined
+                    if (normEtiquetaFila(cr) !== normEtiquetaFila(row)) return undefined
+                    for (let i = cr.cells.length - 1; i >= 1; i--) {
+                      const texto = (cr.cells[i]?.content || '').trim()
+                      if (texto && texto !== ':' && texto !== '::') return cr.cells[i].content
+                    }
+                    return undefined
+                  }
 
-                      if (cIsTotalHorasRow) {
-                        const cVal = cr.cells.find((c:any, idx:number) => {
-                          if (idx === 0) return false;
-                          const text = (c.content || '').trim().toUpperCase();
-                          return text !== '' && text !== '0' && text !== ':' && 
-                                 !text.includes('HORAS') && 
-                                 !text.includes('DOCENCIA') && 
-                                 !text.includes('PRÁCTIC') && 
-                                 !text.includes('PRACTIC') && 
-                                 !text.includes('AUTÓNOM') && 
-                                 !text.includes('AUTONOM') && 
-                                 !text.includes('VINCULACI');
-                        });
-                        if (cVal) comisionContent = cVal.content;
-                      }
-                    }
+                  const filasComision2: any[] = []
+                  if (comisionDatos?.rows) {
+                    comisionDatos.rows.forEach((r: any) => filasComision2.push(r))
+                  } else if (comisionDatos?.tabs) {
+                    comisionDatos.tabs.forEach((t: any) => (t.rows || []).forEach((r: any) => filasComision2.push(r)))
                   }
-                  // 2. Buscar en formato de tabs (raro aquí, pero por si acaso)
-                  else if (comisionDatos.tabs) {
-                    for (const t of comisionDatos.tabs) {
-                      for (const cr of t.rows || []) {
-                        const cIsTotalHorasRow = cr.cells.some((c:any) => {
-                          const text = (c.content || '').trim().toUpperCase();
-                          return text.includes('HORAS DE LA ASIGNATURA') || 
-                                 text.includes('HORAS ASIGNATURA') ||
-                                 text.includes('DOCENCIA') ||
-                                 text.includes('PRÁCTIC') ||
-                                 text.includes('PRACTIC') ||
-                                 text.includes('AUTÓNOM') ||
-                                 text.includes('AUTONOM') ||
-                                 text.includes('VINCULACI');
-                        });
-                        
-                        if (cIsTotalHorasRow) {
-                          const cVal = cr.cells.find((c:any, idx:number) => {
-                            if (idx === 0) return false;
-                            const text = (c.content || '').trim().toUpperCase();
-                            return text !== '' && text !== '0' && text !== ':' && 
-                                   !text.includes('HORAS') && 
-                                   !text.includes('DOCENCIA') && 
-                                   !text.includes('PRÁCTIC') && 
-                                   !text.includes('PRACTIC') && 
-                                   !text.includes('AUTÓNOM') && 
-                                   !text.includes('AUTONOM') && 
-                                   !text.includes('VINCULACI');
-                          });
-                          if (cVal) comisionContent = cVal.content;
-                        }
-                      }
-                    }
+
+                  for (const cr of filasComision2) {
+                    const v = valorDeFilaComision2(cr)
+                    if (v !== undefined) { comisionContent = v; break }
                   }
-                  // 3. Buscar en formato contenido (Documentos Word extraídos vía Mammoth)
-                  else if (comisionDatos.contenido) {
+
+                  // Respaldo: formato contenido (Documentos Word extraídos vía Mammoth)
+                  if (comisionContent === undefined && comisionDatos?.contenido) {
                     for (const key of Object.keys(comisionDatos.contenido)) {
                       const kNorm = key.trim().toUpperCase();
                       const rText = row.cells[0]?.content?.trim()?.toUpperCase() || '';
@@ -1860,6 +1828,7 @@ export default function DocenteEditorSyllabusPage() {
     <ModuloGuard>
       <div className="min-h-screen bg-gray-50">
         <MainHeader />
+        <AvisoCeldaBloqueada mensaje={avisoBloqueo} onCerrar={() => setAvisoBloqueo(null)} />
 
         <main className="max-w-7xl mx-auto px-6 py-6">
           {/* Header */}
@@ -2226,10 +2195,24 @@ export default function DocenteEditorSyllabusPage() {
                                       rowSpan={cell.rowSpan}
                                       colSpan={cell.colSpan}
                                       onDoubleClick={() => {
-                                        if (editable) {
-                                          setModalCell({ id: cell.id, content: displayContent, isEditable: true, colType })
-                                          setEditContent(displayContent)
+                                        // Celda bloqueada: no se abre el editor y se avisa por qué.
+                                        //
+                                        // Se comprueba `isLocked` directamente y no solo `editable`,
+                                        // porque `isDocenteEditable` puede devolver true por heurística
+                                        // de etiquetas antes de llegar a mirar el bloqueo. La única
+                                        // excepción es la liberación explícita de la comisión, que sí
+                                        // manda por encima del bloqueo del admin.
+                                        const liberadaPorComision = (cell as any).docenteEditable === true
+                                        if (!liberadaPorComision && (isAdminLocked || !editable)) {
+                                          setAvisoBloqueo(
+                                            isAdminLocked
+                                              ? 'Esta celda está bloqueada por el administrador. No puedes editarla.'
+                                              : 'Esta celda está bloqueada por la comisión académica. No puedes editarla.'
+                                          )
+                                          return
                                         }
+                                        setModalCell({ id: cell.id, content: displayContent, isEditable: true, colType })
+                                        setEditContent(displayContent)
                                       }}
                                     >
                                       <div
@@ -2269,9 +2252,15 @@ export default function DocenteEditorSyllabusPage() {
                                           </div>
                                         )}
                                       </div>
-                                      {!editable && (
-                                        <div className="absolute top-0 right-0 p-0.5">
-                                          <Lock className={`h-2.5 w-2.5 ${isAdminLocked ? 'text-amber-400' : 'text-gray-300'}`} />
+                                      {/* Candado ROJO bien visible en las celdas bloqueadas: antes era
+                                          un candado gris de 10px que no se distinguía y parecía que la
+                                          celda estaba disponible. */}
+                                      {(cell as any).docenteEditable !== true && (isAdminLocked || !editable) && (
+                                        <div
+                                          className="absolute top-0 right-0 p-0.5"
+                                          title="Celda bloqueada: no se puede editar"
+                                        >
+                                          <Lock className="h-3.5 w-3.5 text-red-600" strokeWidth={2.5} />
                                         </div>
                                       )}
                                     </td>

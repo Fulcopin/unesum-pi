@@ -176,10 +176,14 @@ export default function EditorProgramaAnaliticoComisionPage() {
             if (tCell.backgroundColor) bgColor = tCell.backgroundColor;
             if (tCell.styles?.backgroundColor) bgColor = tCell.styles.backgroundColor;
             if (tCell.textColor) txtColor = tCell.textColor;
-            // REPARACIÓN CRÍTICA: Forzar el contenido de la plantilla si está bloqueado por el admin
-            if (tCell.isLocked === true && tCell.content) cell.content = tCell.content;
           }
-          
+
+          // AQUÍ NO SE COPIA CONTENIDO. Antes se hacía `cell.content = tCell.content`
+          // cuando la plantilla tenía la celda bloqueada, mutando el estado del
+          // editor: al guardar, el texto de la plantilla quedaba escrito encima del
+          // contenido real. Y como los índices de la plantilla no siempre se
+          // corresponden con los del documento, aterrizaba en la columna equivocada.
+
           // 2. Si no hubo match por índice, intentar match por contenido (muy útil para headers o etiquetas)
           if (shouldLock !== true && cell.content && cell.content.trim().length > 0) {
             const cellContentNorm = cell.content.trim().toUpperCase();
